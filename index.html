@@ -237,9 +237,9 @@
         return { radius: 7, color: '#0a66c2', weight: 2, fillOpacity: 0.9 };  // repeater = blueish
       } else if (rec.type === 'sample') {
         if (rec.heard !== null) {
-          return { radius: 5, color: '#07ac070', weight: 1, fillOpacity: 0.9 };  // sample, heard = greenish
+          return { radius: 3000, color: '#07ac07', weight: 1, fillOpacity: 0.75 };  // sample, heard = greenish
         } else {
-          return { radius: 5, color: '#e96767', weight: 1, fillOpacity: 0.9 };  // sample, unheard = reddish
+          return { radius: 3000, color: '#e96767', weight: 1, fillOpacity: 0.75 };  // sample, unheard = reddish
         }
       } else {
         return { radius: 5, color: '#666', weight: 1, fillOpacity: 0.8 };    // unknown = gray
@@ -247,9 +247,9 @@
     }
 
     function markerFor(rec) {
-      const isRepeater = rec.type === 'repeater';
+      const isSample = rec.type === 'sample';
       const style = styleFor(rec);
-      const m = L.circleMarker([rec.lat, rec.lng], style);
+      const m = isSample ? L.circle([rec.lat, rec.lng], style) : L.circleMarker([rec.lat, rec.lng], style);
       const details = [
         `<strong>${escapeHtml(rec.name ?? rec.id)}</strong>`,
         `Lat: ${rec.lat.toFixed(6)}, Lng: ${rec.lng.toFixed(6)}`,
