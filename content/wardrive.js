@@ -9,8 +9,7 @@ import {
 // --- DOM helpers ---
 const $ = id => document.getElementById(id);
 const statusEl = $("status");
-const deviceNameEl = $("deviceName");
-const channelInfoEl = $("channelInfo");
+const deviceInfoEl = $("deviceInfo");
 const ignoredRepeaterId = $("ignoredRepeaterId");
 
 const connectBtn = $("connectBtn");
@@ -320,8 +319,7 @@ async function createWardriveChannel() {
   );
 
   if (!create) {
-    channelInfoEl.textContent = `No "${wardriveChannelName}" channel; ping disabled.`;
-    throw new Error("Wardrive channel not created");
+    throw new Error("Wardrive channel not found");
   }
 
   // Find a free channel index.
@@ -365,7 +363,7 @@ async function ensureWardriveChannel() {
     channel = await createWardriveChannel();
   }
 
-  channelInfoEl.textContent = `Using ${channel.name} on slot ${channel.channelIdx}`;
+  deviceInfoEl.textContent += ` CH:${channel.channelIdx}`;
   state.wardriveChannel = channel;
   return channel;
 }
@@ -582,9 +580,9 @@ async function onConnected() {
 
     const selfInfo = await state.connection.getSelfInfo();
     state.selfInfo = selfInfo;
-    deviceNameEl.textContent = selfInfo?.name
-      ? `Device: ${selfInfo.name}`
-      : "Device connected";
+    deviceInfoEl.textContent = selfInfo?.name
+      ? `${selfInfo.name}`
+      : "[No device]";
 
     setStatus(
       `Connected to ${selfInfo?.name ?? "MeshCore"}`,
@@ -610,9 +608,7 @@ async function onConnected() {
 function onDisconnected() {
   stopAutoPing();
 
-  deviceNameEl.textContent = "";
-  channelInfoEl.textContent = "";
-
+  deviceInfoEl.textContent = "";
   state.connection = null;
   state.wardriveChannel = null;
 

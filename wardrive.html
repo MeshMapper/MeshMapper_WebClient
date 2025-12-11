@@ -28,15 +28,10 @@
         <div>
           <h1 class="flex items-center gap-2 text-2xl font-semibold"><img class="h-8 w-8" src="content/wardrive.png" />
             MeshCore Wardrive</h1>
-          <p class="text-sm text-slate-400">
-            Sends location to <span class="font-mono">#wardrive</span> to build the <a class="underline" target="_blank"
-              href="https://mesh-map.pages.dev">coverage map</a>.
-          </p>
         </div>
         <div class="text-right text-sm">
-          <div>Status: <span id="status" class="font-semibold text-red-300">Disconnected</span></div>
-          <div id="deviceName" class="text-slate-400 text-xs"></div>
-          <div id="channelInfo" class="text-slate-400 text-xs"></div>
+          <div><span id="status" class="font-semibold text-red-300">Disconnected</span></div>
+          <div id="deviceInfo" class="text-slate-400 text-xs"></div>
         </div>
       </header>
 
@@ -87,6 +82,10 @@
 
       <!-- Info -->
       <section>
+        <div class="text-xs italic text-slate-400">
+          Sends location to <span class="font-mono">#wardrive</span> to build the <a class="underline" target="_blank"
+            href="https://mesh-map.pages.dev">coverage map</a>.
+        </div>
         <div class="text-xs italic text-slate-400">
           <span>Requires Bluetooth &amp; Location permissions.</span>
         </div>
