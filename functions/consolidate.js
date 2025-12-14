@@ -3,6 +3,9 @@ import * as util from '../content/shared.js';
 
 // TODO: App-token for 'auth'?
 
+// Samples are consolidated after they are this age.
+const DEF_CONSOLIDATE_AGE = 0.5;
+
 // Only the N-newest samples are kept so that
 // recent samples can eventually flip a coverage tile.
 const MAX_SAMPLES_PER_COVERAGE = 15;
@@ -102,7 +105,9 @@ export async function onRequest(context) {
   const archiveStore = context.env.ARCHIVE;
 
   const url = new URL(context.request.url);
-  const maxAge = url.searchParams.get('maxAge') ?? 1; // Days
+  let maxAge = url.searchParams.get('maxAge') ?? DEF_CONSOLIDATE_AGE; // Days
+  if (maxAge <= 0)
+    maxAge = DEF_CONSOLIDATE_AGE;
 
   const result = {
     coverage_entites_to_update: 0,
