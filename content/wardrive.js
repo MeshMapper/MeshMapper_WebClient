@@ -156,7 +156,7 @@ async function sendPing(manual = false) {
 
     // Exact format: "@[MapperBot]<GPS COORD>"
     // Using "LAT LON" with a space; change to comma if needed.
-    const coordsStr = `${lat.toFixed(5)},${lon.toFixed(5)}`;
+    const coordsStr = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
     const payload = `${PING_PREFIX} ${coordsStr}`;
 
     const ch = await ensureChannel();
