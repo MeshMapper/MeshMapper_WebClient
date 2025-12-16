@@ -144,16 +144,17 @@ async function ensureChannel() {
 
 // ---- Helpers: interval & payload ----
 function getSelectedIntervalMs() {
-  const s = intervalSelect?.value ? Number(intervalSelect.value) : DEFAULT_INTERVAL_S;
-  const clamped = [15, 30, 60].includes(s) ? s : DEFAULT_INTERVAL_S;
+  const checked = document.querySelector('input[name="interval"]:checked');
+  const s = checked ? Number(checked.value) : 30;
+  const clamped = [15, 30, 60].includes(s) ? s : 30;
   return clamped * 1000;
 }
 
 function buildPayload(lat, lon) {
-  const coordsStr = `${lat.toFixed(5)} ${lon.toFixed(5)}`; // "LAT LON"
-  const power = powerSelect?.value ?? "";
-  // Append power only if specified; wrap in square brackets at the very end.
-  const suffix = power ? ` [${power}]` : "";
+  const coordsStr = `${lat.toFixed(5)} ${lon.toFixed(5)}`;
+  const checkedPower = document.querySelector('input[name="power"]:checked');
+  const power = checkedPower ? checkedPower.value : "";
+   const suffix = power ? ` [${power}]` : "";
   return `${PING_PREFIX}<${coordsStr}>${suffix}`;
 }
 
