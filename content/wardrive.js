@@ -155,7 +155,7 @@ function buildPayload(lat, lon) {
   const checkedPower = document.querySelector('input[name="power"]:checked');
   const power = checkedPower ? checkedPower.value : "";
    const suffix = power ? ` [${power}]` : "";
-  return `${PING_PREFIX}<${coordsStr}>${suffix}`;
+  return `${PING_PREFIX} ${coordsStr} ${suffix}`;
 }
 
 // ---- Ping ----
