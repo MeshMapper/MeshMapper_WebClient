@@ -71,25 +71,20 @@
 
        <!-- Auto Ping Interval selector -->
        <div class="text-sm flex items-center gap-2 mt-2">
-         <label for="intervalSelect" class="text-slate-300">Auto interval:</label>
-         <select id="intervalSelect"
-                 class="bg-slate-900/70 border border-slate-600 rounded-lg px-2 py-1.5 text-sm">
-           <option value="15">15s</option>
-           <option value="30" selected>30s</option>
-           <option value="60">60s</option>
-         </select>
+         <span class="text-slate-300">Auto interval:</span>
+         <label class="ml-2"><input type="radio" name="interval" value="15"> 15s</label>
+         <label class="ml-2"><input type="radio" name="interval" value="30" checked> 30s</label>
+         <label class="ml-2"><input type="radio" name="interval" value="60"> 60s</label>
        </div>
-       
+
        <!-- Radio Power selector -->
        <div class="text-sm flex items-center gap-2 mt-2">
-         <label for="powerSelect" class="text-slate-300">Radio power:</label>
-         <select id="powerSelect"
-                 class="bg-slate-900/70 border border-slate-600 rounded-lg px-2 py-1.5 text-sm">
-           <option value="">Unspecified</option>
-           <option value="0.3w">0.3w</option>
-           <option value="0.6w">0.6w</option>
-           <option value="1.0w">1.0w</option>
-          </select>
+         <span class="text-slate-300">Radio power:</span>
+         <label class="ml-2"><input type="radio" name="power" value="" checked> Unspecified</label>
+         <label class="ml-2"><input type="radio" name="power" value="0.3w"> 0.3w</label>
+         <label class="ml-2"><input type="radio" name="power" value="0.6w"> 0.6w</label>
+         <label class="ml-2"><input type="radio" name="power" value="1.0w"> 1.0w</label>
+       </div>
 
        <!-- Text under buttons -->
        <div class="text-xs italic text-slate-400 mt-2">
