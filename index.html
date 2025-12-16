@@ -1,142 +1,96 @@
+
 <!doctype html>
 <html lang="en">
-
 <head>
   <meta charset="utf-8" />
-  <title>MeshCore Wardrive</title>
+  <title>MeshCore Wardrive (Ottawa)</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="MeshCore Wardrive - Crowd-sourced mesh coverage tool">
-  <meta name="keywords" content="MeshCore,coverage,wardrive,cascadia,pugetmesh">
-  <meta name="author" content="Kyle Reed">
+  <meta name="description" content="Minimal MeshCore Wardrive — BLE companion ping to #wardriving every 30s">
   <link rel="manifest" href="content/wardrive.json">
   <link rel="icon" href="content/wardrive.png">
   <link rel="stylesheet" href="content/tailwind.css">
-
-  <!-- Leaflet -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-
-  <style>
-    .leaflet-interactive.marker-shadow {
-      filter: url(#marker-shadow);
-    }
-  </style>
 </head>
-
 <body class="bg-slate-900 text-slate-100">
   <main class="min-h-screen flex items-start justify-center p-4">
-    <div class="w-full max-w-3xl space-y-4">
+    <div class="w-full max-w-xl space-y-4">
 
-      <header class="flex items-center justify-between">
-        <div>
-          <h1 class="flex items-center gap-2 text-xl font-semibold"><img class="h-8 w-8" src="content/wardrive.png" />
-            MeshCore Wardrive</h1>
+      <!-- Header and Attribution -->
+      <header class="space-y-1">
+        <h1 class="text-2xl font-semibold flex items-center gap-2">
+          <img src="content/wardrive.png" alt="Wardrive Logo" class="h-8 w-8 inline-block mr-2" />
+          MeshCore Wardrive (Ottawa)
+        </h1>
+        <div class="text-xs italic text-slate-400">
+          <span>
+            This project is a fork of
+            <a class="underline" target="_blank" href="https://github.com/kallanreed/mesh-map">kallanreed/mesh-map</a>.
+            <strong>MrAlders0n</strong> is not the original creator; this version has been
+            modified to work with the Ottawa-built
+            <a class="underline" target="_blank" href="https://meshmapper.net">meshmapper.net</a>.
+          </span>
         </div>
-        <div class="text-right text-sm">
-          <div><span id="status" class="font-semibold text-red-300">Disconnected</span></div>
-          <div id="deviceInfo" class="text-slate-400 text-xs"></div>
+        <div class="text-xs italic text-slate-400">
+          <span>Only for <a class="underline" target="_blank" href="https://ottawamesh.ca">YOW region</a>.</span>
+          <span>See <a class="underline" target="_blank" href="/howto">howto</a> for more info.</span>
         </div>
       </header>
 
-      <!-- Buttons -->
-      <section>
-        <div class="flex items-center gap-2">
+      <!-- Info Blocks -->
+      <div class="text-xs italic text-slate-400">
+        Sends location to <span class="font-mono">#wardriving</span> to build the
+        <a class="underline" target="_blank" href="/">coverage map</a>.
+      </div>
+      <div class="text-xs italic text-slate-400">
+        <span>Requires Bluetooth &amp; Location permissions.</span>
+      </div>
+      <div class="text-xs italic text-slate-400">
+        <span>Must remain in foreground with screen on and unlocked.</span>
+      </div>
+      <div class="text-xs italic text-slate-400">
+        <span>
+          Does not work in Safari. Use
+          <a class="underline" target="_blank"
+            href="https://apps.apple.com/us/app/bluefy-web-ble-browser/id1492822055">Bluefy on iOS</a>.
+        </span>
+      </div>
+
+      <!-- Status and Controls -->
+      <section class="bg-slate-800/80 border border-slate-700 rounded-xl p-4 space-y-3">
+        <div class="grid grid-cols-2 gap-2 text-sm">
+          <div>Status: <span id="status" class="font-semibold text-red-300">Disconnected</span></div>
+          <div>Device: <span id="deviceInfo" class="text-slate-300">—</span></div>
+        </div>
+        <div class="grid grid-cols-2 gap-2 text-sm">
+          <div>Channel: <span id="channelInfo" class="text-slate-300">#wardriving</span></div>
+          <div>Interval: <span class="text-slate-300">30s</span></div>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
           <button id="connectBtn"
             class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium disabled:opacity-40">
-            Connect
+            Connect via BLE
           </button>
-
-          <div id="pingButtons" class="ml-auto flex items-center gap-2">
-            <button id="sendPingBtn"
-              disabled
-              class="px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-sm font-medium disabled:opacity-40">
-              Send Ping
-            </button>
-            <button id="autoToggleBtn"
-              disabled
-              class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-medium disabled:opacity-40">
-              Start Auto Ping
-            </button>
-          </div>
+          <button id="disconnectBtn" disabled
+            class="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-sm font-medium disabled:opacity-40">
+            Disconnect
+          </button>
+        </div>
+        <div class="text-xs italic text-slate-400">
+          Requires Bluetooth & Location permissions. Keep this tab in the foreground.
         </div>
       </section>
 
-      <!-- The Map -->
-      <div id="map" class="rounded-lg h-140 shadow-sm"></div>
-
-      <!-- Ignore Repeater -->
-      <section class="bg-slate-800/80 border border-slate-700 rounded-lg p-2 space-y-2 shadow-sm">
-        <div class="space-y-1">
-          <div class="text-xs italic text-slate-400">
-            If you're using a mobile repeater, ignore its id.
-          </div>
-          <div class="flex flex-wrap items-center gap-1">
-            <button id="ignoredRepeaterBtn"
-              class="px-2 mr-2 rounded-md bg-zinc-600 hover:bg-zinc-500 text-sm font-sm disabled:opacity-40">
-              Set
-            </button>
-            <label class="text-xs text-slate-300">Ignored Repeater Id</label>
-            <div id="ignoredRepeaterId" class="text-xs text-slate-400">
-              None
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Info -->
-      <section>
-        <div class="text-xs italic text-slate-400">
-          Sends location to <span class="font-mono">#wardriving</span> to build the <a class="underline" target="_blank"
-            href="/">coverage map</a>.
-        </div>
-        <div class="text-xs italic text-slate-400">
-          <span>Requires Bluetooth &amp; Location permissions.</span>
-        </div>
-        <div class="text-xs italic text-slate-400">
-          <span>Must remain in foreground with screen on and unlocked.</span>
-        </div>
-        <div class="text-xs italic text-slate-400">
-          <span>Does not work in Safari. Use <a class="underline" target="_blank"
-              href="https://apps.apple.com/us/app/bluefy-web-ble-browser/id1492822055">Bluefy on iOS</a>.</span>
-        </div>
-        <div class="text-xs italic text-slate-400">
-          <span>Only for <a class="underline" target="_blank" href="https://ottawamesh.ca">YOW
-              region</a>.</span> <span>See <a class="underline" target="_blank" href="/howto">howto</a> for more info.
-        </div>
-
-        <div class="text-xs italic text-slate-400">
-          <span>
-            Forked from 
-            <a class="underline" target="_blank" href="https://github.com/kallanreed/mesh-map/">mesh-map</a>. 
-            Original creator: <a class="underline" target="_blank" href="https://github.com/kallanreed">kallanreed</a>. 
-            This version was modified by MrAlders0n to work with the 
-            <a class="underline" target="_blank" href="https://meshmapper.net">meshmapper.net</a> site for the Ottawa region.
-          </span>
-          <span>
-            Only for <a class="underline" target="_blank" href="https://ottawamesh.ca">YOW region</a>. 
-          </span>
-        </div>
+      <!-- Last ping info -->
+      <section class="bg-slate-800/80 border border-slate-700 rounded-xl p-4 space-y-2">
+        <div class="text-sm">Last Ping</div>
+        <div id="lastPing" class="text-xs text-slate-400">None</div>
       </section>
 
     </div>
   </main>
 
-  <script type="module" src="content/wardrive.js"></script>
   <script type="module">
-    import { onLoad } from '/content/wardrive.js';
+    import { onLoad } from './content/wardrive.js';
     onLoad();
   </script>
-
-  <!-- iOS Safari SVG shadow hack -->
-  <svg width="0" height="0" style="position:absolute">
-    <defs>
-      <filter id="marker-shadow" x="-50%" y="-50%" width="200%" height="200%">
-        <feDropShadow dx="1" dy="3" stdDeviation="1"
-          flood-color="black" flood-opacity="0.3"/>
-      </filter>
-    </defs>
-  </svg>
 </body>
 </html>
