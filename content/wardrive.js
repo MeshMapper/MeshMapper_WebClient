@@ -151,7 +151,7 @@ function getSelectedIntervalMs() {
 }
 
 function buildPayload(lat, lon) {
-  const coordsStr = `${lat.toFixed(5)} ${lon.toFixed(5)}`;
+  const coordsStr = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
   const checkedPower = document.querySelector('input[name="power"]:checked');
   const power = checkedPower ? checkedPower.value : "";
    const suffix = power ? ` [${power}]` : "";
