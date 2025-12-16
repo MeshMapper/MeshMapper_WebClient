@@ -293,3 +293,4 @@ export async function onLoad() {
 
   // Prompt location permission early (optional)
   try { await getCurrentPosition(); } catch { /* will prompt at first send */ }
+}
