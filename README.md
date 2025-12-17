@@ -1,7 +1,7 @@
 # MeshCore GOME WarDriver
 
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/MrAlders0n/MeshCore-GOME-WarDriver/releases/tag/v1.0.0)
-[![License](https://img.shields.io/badge/license-Unlicense-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-orange.svg)](#platform-support)
 
 A browser-based Progressive Web App for wardriving with MeshCore devices.  Connect via Bluetooth, send GPS pings, and build coverage maps for the Ottawa (YOW) mesh network.
@@ -121,12 +121,6 @@ Pings are sent to the wardriving MeshCore channel to build community coverage ma
 
 ---
 
-## 📖 Documentation
-
-- **[License](LICENSE)** - Public Domain (Unlicense)
-
----
-
 ## 🙏 Credits
 
 This project is a fork and adaptation: 
@@ -149,9 +143,7 @@ Found a bug?  Have a feature request?
 
 ## 📄 License
 
-This software is released into the **public domain** under the [Unlicense](LICENSE).
-
-You are free to copy, modify, publish, use, compile, sell, or distribute this software, either in source code form or as a compiled binary, for any purpose, commercial or non-commercial, and by any means.
+This project is licensed under the [MIT License](LICENSE) - see the LICENSE file for details.
 
 ---
 
