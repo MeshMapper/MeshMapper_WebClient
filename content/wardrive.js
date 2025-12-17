@@ -5,7 +5,7 @@
 // - Manual "Send Ping" and Auto mode (interval selectable: 15/30/60s)
 // - Acquire wake lock during auto mode to keep screen awake
 
-import { WebBleConnection } from "/content/mc/index.js"; // your BLE client
+import { WebBleConnection, Packet, Constants, BufferUtils } from "/content/mc/index.js"; // your BLE client
 
 // ---- Config ----
 const CHANNEL_NAME     = "#wardriving";        // change to "#wardrive" if needed
@@ -40,6 +40,7 @@ const gpsInfoEl = document.getElementById("gpsInfo");
 const gpsAccEl = document.getElementById("gpsAcc");
 const sessionPingsEl = document.getElementById("sessionPings"); // optional
 const coverageFrameEl = document.getElementById("coverageFrame");
+const repeatersListEl = document.getElementById("repeatersList"); // repeater tracking
 setConnectButton(false);
 
 // NEW: selectors
@@ -57,7 +58,10 @@ const state = {
   lastFix: null, // { lat, lon, accM, tsMs }
   bluefyLockEnabled: false,
   gpsState: "idle", // "idle", "acquiring", "acquired", "error"
-  gpsAgeUpdateTimer: null // Timer for updating GPS age display
+  gpsAgeUpdateTimer: null, // Timer for updating GPS age display
+  sentMessageTimestamps: new Set(), // Track sent message timestamps to identify echoes
+  repeaterEchoes: new Map(), // Map of message timestamp -> array of repeater echoes
+  lastPingTimestamp: null // Track the timestamp of the last sent ping
 };
 
 // ---- UI helpers ----
@@ -354,6 +358,85 @@ function buildPayload(lat, lon) {
   return `${PING_PREFIX} ${coordsStr} ${suffix}`;
 }
 
+// ---- Repeater Tracking ----
+function formatRepeaterPath(path) {
+  if (!path || path.length === 0) return "direct";
+  // Convert path bytes to hex string for display
+  return Array.from(path).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function updateRepeatersDisplay() {
+  if (!repeatersListEl) return;
+  
+  const echoes = state.repeaterEchoes.get(state.lastPingTimestamp);
+  if (!echoes || echoes.length === 0) {
+    repeatersListEl.innerHTML = '<li class="text-slate-500">No repeater echoes detected yet...</li>';
+    return;
+  }
+  
+  // Clear and rebuild the list
+  repeatersListEl.innerHTML = '';
+  
+  // Sort by SNR (best first)
+  const sortedEchoes = [...echoes].sort((a, b) => b.snr - a.snr);
+  
+  sortedEchoes.forEach((echo, index) => {
+    const li = document.createElement('li');
+    const pathStr = formatRepeaterPath(echo.path);
+    const snrStr = echo.snr.toFixed(2);
+    const rssiStr = echo.rssi.toString();
+    
+    li.innerHTML = `
+      <span class="font-mono text-slate-300">[${pathStr}]</span>
+      <span class="text-emerald-400">SNR: ${snrStr}</span>
+      <span class="text-sky-400">RSSI: ${rssiStr}</span>
+    `;
+    li.className = 'flex gap-3 items-center';
+    repeatersListEl.appendChild(li);
+  });
+}
+
+function onLogRxDataReceived(data) {
+  // Parse the packet
+  const packet = Packet.fromBytes(data.raw);
+  
+  // We're interested in group text messages (our ping messages)
+  if (packet.payload_type !== Packet.PAYLOAD_TYPE_GRP_TXT) {
+    return;
+  }
+  
+  // Check if this is an echo of our last sent ping
+  // We check if the path exists and has content (indicating it was repeated)
+  if (!state.lastPingTimestamp || !packet.path || packet.path.length === 0) {
+    return;
+  }
+  
+  // Store the echo information
+  if (!state.repeaterEchoes.has(state.lastPingTimestamp)) {
+    state.repeaterEchoes.set(state.lastPingTimestamp, []);
+  }
+  
+  const echoes = state.repeaterEchoes.get(state.lastPingTimestamp);
+  
+  // Avoid duplicate echoes (same path)
+  const pathHex = formatRepeaterPath(packet.path);
+  const isDuplicate = echoes.some(e => formatRepeaterPath(e.path) === pathHex);
+  
+  if (!isDuplicate) {
+    echoes.push({
+      snr: data.lastSnr,
+      rssi: data.lastRssi,
+      path: packet.path,
+      timestamp: Date.now()
+    });
+    
+    console.log(`Repeater echo detected: path=[${pathHex}] SNR=${data.lastSnr.toFixed(2)} RSSI=${data.lastRssi}`);
+    
+    // Update the UI
+    updateRepeatersDisplay();
+  }
+}
+
 // ---- MeshMapper API ----
 async function postToMeshMapperAPI(lat, lon) {
   try {
@@ -434,6 +517,21 @@ async function sendPing(manual = false) {
     const payload = buildPayload(lat, lon);
 
     const ch = await ensureChannel();
+    
+    // Track this ping for repeater echo detection
+    const pingTimestamp = Date.now();
+    state.lastPingTimestamp = pingTimestamp;
+    state.repeaterEchoes.set(pingTimestamp, []);
+    
+    // Clear old entries (keep only last 10 pings)
+    if (state.repeaterEchoes.size > 10) {
+      const oldestKey = state.repeaterEchoes.keys().next().value;
+      state.repeaterEchoes.delete(oldestKey);
+    }
+    
+    // Reset the repeaters display
+    updateRepeatersDisplay();
+    
     await state.connection.sendChannelTextMessage(ch.channelIdx, payload);
 
     // Post to MeshMapper API (fire-and-forget pattern: non-blocking, errors are logged inside the function)
@@ -516,6 +614,10 @@ async function connect() {
       const selfInfo = await conn.getSelfInfo();
       deviceInfoEl.textContent = selfInfo?.name || "[No device]";
       updateAutoButton();
+      
+      // Set up repeater tracking listener
+      conn.on(Constants.PushCodes.LogRxData, onLogRxDataReceived);
+      
       try { await conn.syncDeviceTime?.(); } catch { /* optional */ }
       try {
         await ensureChannel();
