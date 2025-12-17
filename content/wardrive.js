@@ -378,7 +378,7 @@ async function postToMeshMapperAPI(lat, lon) {
       lon: lon,
       who: whoIdentifier,
       power: powerValue,
-      test: 1
+      test: 0
     };
 
     console.log("Posting to MeshMapper API:", { lat, lon, who: whoIdentifier, power: powerValue });
