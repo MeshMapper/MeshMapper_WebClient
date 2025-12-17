@@ -62,7 +62,8 @@ const state = {
   cooldownEndTime: null, // Timestamp when cooldown period ends
   cooldownUpdateTimer: null, // Timer to re-enable controls after cooldown
   autoCountdownTimer: null, // Timer for auto-ping countdown display
-  nextAutoPingTime: null // Timestamp when next auto ping will occur
+  nextAutoPingTime: null, // Timestamp when next auto ping will occur
+  pingInProgress: false // Flag to indicate if a ping is currently being sent
 };
 
 // ---- UI helpers ----
@@ -109,7 +110,8 @@ function updateAutoButton() {
   }
 }
 function updateAutoCountdownStatus() {
-  if (!state.running || !state.nextAutoPingTime) return;
+  // Don't update status if we're not in auto mode, or if a ping is actively being sent
+  if (!state.running || !state.nextAutoPingTime || state.pingInProgress) return;
   
   const remainingMs = Math.max(0, state.nextAutoPingTime - Date.now());
   const remainingSec = Math.ceil(remainingMs / 1000);
@@ -458,6 +460,9 @@ async function sendPing(manual = false) {
       return;
     }
 
+    // Mark ping as in progress to prevent countdown from overwriting status
+    state.pingInProgress = true;
+
     let lat, lon, accuracy;
 
     // Use the selected interval to determine if GPS fix is fresh enough
@@ -523,7 +528,8 @@ async function sendPing(manual = false) {
           scheduleCoverageRefresh(lat, lon);
         }
         
-        // Set status to idle or countdown after map update
+        // Clear ping in progress flag and set status to idle or countdown after map update
+        state.pingInProgress = false;
         if (state.connection) {
           if (state.running && state.nextAutoPingTime) {
             updateAutoCountdownStatus();
@@ -550,6 +556,7 @@ async function sendPing(manual = false) {
     }
   } catch (e) {
     console.error("Ping failed:", e);
+    state.pingInProgress = false;
     setStatus(e.message || "Ping failed", "text-red-300");
   }
 }
