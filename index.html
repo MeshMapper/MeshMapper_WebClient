@@ -45,34 +45,31 @@
       <section class="bg-slate-800/80 border border-slate-700 rounded-xl p-4 space-y-4">
 
       <!-- Top info block -->
-      <div class="space-y-1 text-sm">
+      <table class="w-full text-sm">
+        <tbody class="text-slate-200">
+          <tr>
+            <td class="pr-3 text-slate-400 whitespace-nowrap align-top">Status:</td>
+            <td id="status" class="font-semibold text-red-300">Disconnected</td>
+          </tr>
+          <tr>
+            <td class="pr-3 text-slate-400 whitespace-nowrap align-top">Device:</td>
+            <td id="deviceInfo">N/A</td>
+          </tr>
+          <tr>
+            <td class="pr-3 text-slate-400 whitespace-nowrap align-top">Channel:</td>
+            <td id="channelInfo">#wardriving</td>
+          </tr>
+          <tr>
+            <td class="pr-3 text-slate-400 whitespace-nowrap align-top">GPS:</td>
+            <td id="gpsInfo">Waiting for fix</td>
+          </tr>
+          <tr>
+            <td class="pr-3 text-slate-400 whitespace-nowrap align-top">Accuracy:</td>
+            <td id="gpsAcc">N/A</td>
+          </tr>
+        </tbody>
+      </table>
 
-        <div class="grid grid-cols-2 gap-x-2">
-          <div class="text-slate-400 whitespace-nowrap">Status:</div>
-          <div id="status" class="font-semibold text-red-300">Disconnected</div>
-        </div>
-
-        <div class="grid grid-cols-2 gap-x-2">
-          <div class="text-slate-400 whitespace-nowrap">Device:</div>
-          <div id="deviceInfo" class="text-slate-200">N/A</div>
-        </div>
-
-        <div class="grid grid-cols-2 gap-x-2">
-          <div class="text-slate-400 whitespace-nowrap">Channel:</div>
-          <div id="channelInfo" class="text-slate-200">#wardriving</div>
-        </div>
-
-        <div class="grid grid-cols-2 gap-x-2">
-          <div class="text-slate-400 whitespace-nowrap">GPS:</div>
-          <div id="gpsInfo" class="text-slate-200">Waiting for fix</div>
-        </div>
-
-        <div class="grid grid-cols-2 gap-x-2">
-          <div class="text-slate-400 whitespace-nowrap">Accuracy:</div>
-          <div id="gpsAcc" class="text-slate-200">N/A</div>
-        </div>
-
-      </div>
 
         <!-- Buttons -->
         <div class="grid grid-cols-2 gap-2">
