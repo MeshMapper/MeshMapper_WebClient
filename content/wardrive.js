@@ -11,6 +11,7 @@ import { WebBleConnection } from "/content/mc/index.js"; // your BLE client
 const CHANNEL_NAME     = "#wardriving";        // change to "#wardrive" if needed
 const DEFAULT_INTERVAL_S = 30;                 // fallback if selector unavailable
 const PING_PREFIX      = "@[MapperBot]";
+const GPS_FRESHNESS_BUFFER_MS = 5000;          // Buffer time for GPS freshness checks
 const WARDROVE_KEY     = new Uint8Array([
   0x40, 0x76, 0xC3, 0x15, 0xC1, 0xEF, 0x38, 0x5F,
   0xA9, 0x3F, 0x06, 0x60, 0x27, 0x32, 0x0F, 0xE5
@@ -325,10 +326,12 @@ function getSelectedIntervalMs() {
 }
 
 // Calculate GPS maximumAge based on selected interval
+// Returns how old cached GPS data can be before requesting a fresh position.
+// Subtracts GPS_FRESHNESS_BUFFER_MS to ensure new data before the interval expires.
+// Math.max ensures we never return negative or too-small values.
 function getGpsMaximumAge(minAge = 1000) {
   const intervalMs = getSelectedIntervalMs();
-  // Use interval minus 5s buffer, but at least minAge
-  return Math.max(minAge, intervalMs - 5000);
+  return Math.max(minAge, intervalMs - GPS_FRESHNESS_BUFFER_MS);
 }
 
 function buildPayload(lat, lon) {
@@ -346,7 +349,7 @@ async function sendPing(manual = false) {
 
     // Use the selected interval to determine if GPS fix is fresh enough
     const intervalMs = getSelectedIntervalMs();
-    const maxAge = intervalMs + 5000; // Allow 5s buffer beyond interval
+    const maxAge = intervalMs + GPS_FRESHNESS_BUFFER_MS; // Allow buffer beyond interval
 
     if (state.lastFix && (Date.now() - state.lastFix.tsMs) < maxAge) {
       lat = state.lastFix.lat;
