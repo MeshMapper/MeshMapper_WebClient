@@ -11,6 +11,8 @@ import { WebBleConnection } from "/content/mc/index.js"; // your BLE client
 const CHANNEL_NAME     = "#wardriving";        // change to "#wardrive" if needed
 const DEFAULT_INTERVAL_S = 30;                 // fallback if selector unavailable
 const PING_PREFIX      = "@[MapperBot]";
+const GPS_FRESHNESS_BUFFER_MS = 5000;          // Buffer time for GPS freshness checks
+const GPS_ACCURACY_THRESHOLD_M = 100;          // Maximum acceptable GPS accuracy in meters
 const WARDROVE_KEY     = new Uint8Array([
   0x40, 0x76, 0xC3, 0x15, 0xC1, 0xEF, 0x38, 0x5F,
   0xA9, 0x3F, 0x06, 0x60, 0x27, 0x32, 0x0F, 0xE5
@@ -45,7 +47,8 @@ const state = {
   geoWatchId: null,
   lastFix: null, // { lat, lon, accM, tsMs }
   bluefyLockEnabled: false,
-  gpsState: "idle" // "idle", "acquiring", "acquired", "error"
+  gpsState: "idle", // "idle", "acquiring", "acquired", "error"
+  gpsAgeUpdateTimer: null // Timer for updating GPS age display
 };
 
 // ---- UI helpers ----
@@ -169,7 +172,11 @@ async function getCurrentPosition() {
     navigator.geolocation.getCurrentPosition(
       (pos) => resolve(pos),
       (err) => reject(err),
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 }
+      { 
+        enableHighAccuracy: true, 
+        maximumAge: getGpsMaximumAge(1000), // Fresh data for one-off requests
+        timeout: 30000 
+      }
     );
   });
 }
@@ -198,12 +205,29 @@ function updateGpsUi() {
   gpsInfoEl.textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)} (${ageSec}s ago)`;
   gpsAccEl.textContent = accM ? `±${Math.round(accM)} m` : "N/A";
 }
+
+// Start continuous GPS age display updates
+function startGpsAgeUpdater() {
+  if (state.gpsAgeUpdateTimer) return;
+  state.gpsAgeUpdateTimer = setInterval(() => {
+    updateGpsUi();
+  }, 1000); // Update every second
+}
+
+// Stop GPS age display updates
+function stopGpsAgeUpdater() {
+  if (state.gpsAgeUpdateTimer) {
+    clearInterval(state.gpsAgeUpdateTimer);
+    state.gpsAgeUpdateTimer = null;
+  }
+}
 function startGeoWatch() {
   if (state.geoWatchId) return;
   if (!("geolocation" in navigator)) return;
 
   state.gpsState = "acquiring";
   updateGpsUi();
+  startGpsAgeUpdater(); // Start the age counter
 
   state.geoWatchId = navigator.geolocation.watchPosition(
     (pos) => {
@@ -222,13 +246,18 @@ function startGeoWatch() {
       // Keep UI honest if it fails
       updateGpsUi();
     },
-    { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 }
+    { 
+      enableHighAccuracy: true, 
+      maximumAge: getGpsMaximumAge(5000), // Continuous watch, minimum 5s
+      timeout: 30000 
+    }
   );
 }
 function stopGeoWatch() {
   if (!state.geoWatchId) return;
   navigator.geolocation.clearWatch(state.geoWatchId);
   state.geoWatchId = null;
+  stopGpsAgeUpdater(); // Stop the age counter
 }
 async function primeGpsOnce() {
   // Start continuous watch so the UI keeps updating
@@ -250,11 +279,13 @@ async function primeGpsOnce() {
     state.gpsState = "acquired";
     updateGpsUi();
 
-    // NEW: refresh the coverage map after first fix
-    scheduleCoverageRefresh(
-      state.lastFix.lat,
-      state.lastFix.lon
-    );
+    // Only refresh the coverage map if we have an accurate fix
+    if (state.lastFix.accM && state.lastFix.accM < GPS_ACCURACY_THRESHOLD_M) {
+      scheduleCoverageRefresh(
+        state.lastFix.lat,
+        state.lastFix.lon
+      );
+    }
 
   } catch (e) {
     console.warn("primeGpsOnce failed:", e);
@@ -293,6 +324,15 @@ function getSelectedIntervalMs() {
   return clamped * 1000;
 }
 
+// Calculate GPS maximumAge based on selected interval
+// Returns how old cached GPS data can be before requesting a fresh position.
+// Subtracts GPS_FRESHNESS_BUFFER_MS to ensure new data before the interval expires.
+// Math.max ensures we never return negative or too-small values.
+function getGpsMaximumAge(minAge = 1000) {
+  const intervalMs = getSelectedIntervalMs();
+  return Math.max(minAge, intervalMs - GPS_FRESHNESS_BUFFER_MS);
+}
+
 function buildPayload(lat, lon) {
   const coordsStr = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
   const checkedPower = document.querySelector('input[name="power"]:checked');
@@ -304,19 +344,26 @@ function buildPayload(lat, lon) {
 // ---- Ping ----
 async function sendPing(manual = false) {
   try {
-    let lat, lon;
+    let lat, lon, accuracy;
 
-    if (state.lastFix && (Date.now() - state.lastFix.tsMs) < 30000) {
+    // Use the selected interval to determine if GPS fix is fresh enough
+    const intervalMs = getSelectedIntervalMs();
+    const maxAge = intervalMs + GPS_FRESHNESS_BUFFER_MS; // Allow buffer beyond interval
+
+    if (state.lastFix && (Date.now() - state.lastFix.tsMs) < maxAge) {
       lat = state.lastFix.lat;
       lon = state.lastFix.lon;
+      accuracy = state.lastFix.accM;
     } else {
+      // Get fresh GPS coordinates
       const pos = await getCurrentPosition();
       lat = pos.coords.latitude;
       lon = pos.coords.longitude;
+      accuracy = pos.coords.accuracy;
       state.lastFix = {
         lat,
         lon,
-        accM: pos.coords.accuracy,
+        accM: accuracy,
         tsMs: Date.now(),
       };
       updateGpsUi();
@@ -327,7 +374,10 @@ async function sendPing(manual = false) {
     const ch = await ensureChannel();
     await state.connection.sendChannelTextMessage(ch.channelIdx, payload);
 
-    scheduleCoverageRefresh(lat, lon);
+    // Only refresh coverage iframe if GPS accuracy is good
+    if (accuracy && accuracy < GPS_ACCURACY_THRESHOLD_M) {
+      scheduleCoverageRefresh(lat, lon);
+    }
 
     const nowStr = new Date().toLocaleString();
     setStatus(manual ? "Ping sent" : "Auto ping sent", "text-emerald-300");
@@ -415,6 +465,7 @@ async function connect() {
       enableControls(false);
       updateAutoButton();
       stopGeoWatch();
+      stopGpsAgeUpdater(); // Ensure age updater stops
       state.lastFix = null;
       state.gpsState = "idle";
       updateGpsUi();
