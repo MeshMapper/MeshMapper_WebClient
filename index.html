@@ -93,47 +93,52 @@
           </button>
         </div>
 
-        <!-- Interval selector -->
-        <div class="space-y-2">
-          <div class="text-xs font-semibold text-slate-300">Auto interval</div>
-          <div class="grid grid-cols-3 gap-2 text-sm">
-            <label class="flex items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-900/40 px-2 py-2">
-              <input type="radio" name="interval" value="15" class="accent-sky-400">
-              <span>15s</span>
-            </label>
-            <label class="flex items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-900/40 px-2 py-2">
-              <input type="radio" name="interval" value="30" checked class="accent-sky-400">
-              <span>30s</span>
-            </label>
-            <label class="flex items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-900/40 px-2 py-2">
-              <input type="radio" name="interval" value="60" class="accent-sky-400">
-              <span>60s</span>
-            </label>
-          </div>
+        <!-- Auto Ping Interval selector -->
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+          <span class="text-slate-300">Auto interval:</span>
+
+          <label class="flex items-center gap-1">
+            <input type="radio" name="interval" value="15">
+            <span>15s</span>
+          </label>
+
+          <label class="flex items-center gap-1">
+            <input type="radio" name="interval" value="30" checked>
+            <span>30s</span>
+          </label>
+
+          <label class="flex items-center gap-1">
+            <input type="radio" name="interval" value="60">
+            <span>60s</span>
+          </label>
         </div>
 
-        <!-- Power selector -->
-        <div class="space-y-2">
-          <div class="text-xs font-semibold text-slate-300">Radio power</div>
-          <div class="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
-            <label class="flex items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-900/40 px-2 py-2">
-              <input type="radio" name="power" value="" checked class="accent-sky-400">
-              <span>N/A</span>
-            </label>
-            <label class="flex items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-900/40 px-2 py-2">
-              <input type="radio" name="power" value="0.3w" class="accent-sky-400">
-              <span>0.3w</span>
-            </label>
-            <label class="flex items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-900/40 px-2 py-2">
-              <input type="radio" name="power" value="0.6w" class="accent-sky-400">
-              <span>0.6w</span>
-            </label>
-            <label class="flex items-center justify-center gap-2 rounded-lg border border-slate-700 bg-slate-900/40 px-2 py-2">
-              <input type="radio" name="power" value="1.0w" class="accent-sky-400">
-              <span>1.0w</span>
-            </label>
-          </div>
+
+        <!-- Radio Power selector -->
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+          <span class="text-slate-300">Radio power:</span>
+
+          <label class="flex items-center gap-1">
+            <input type="radio" name="power" value="" checked>
+            <span>N/A</span>
+          </label>
+
+          <label class="flex items-center gap-1">
+            <input type="radio" name="power" value="0.3w">
+            <span>0.3w</span>
+          </label>
+
+          <label class="flex items-center gap-1">
+            <input type="radio" name="power" value="0.6w">
+            <span>0.6w</span>
+          </label>
+
+          <label class="flex items-center gap-1">
+            <input type="radio" name="power" value="1.0w">
+            <span>1.0w</span>
+          </label>
         </div>
+
 
         <!-- One-line note -->
         <div class="text-xs text-slate-400">
