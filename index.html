@@ -47,35 +47,29 @@
       <!-- Top info block -->
       <div class="space-y-2 text-sm">
 
-        <!-- Row 1 -->
-        <div class="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
-          <div>
-            <span class="text-slate-400">Status</span>
-            <div id="status" class="font-semibold text-red-300">Disconnected</div>
-          </div>
-
-          <div>
-            <span class="text-slate-400">Device</span>
-            <div id="deviceInfo" class="text-slate-200">N/A</div>
-          </div>
-
-          <div>
-            <span class="text-slate-400">Channel</span>
-            <div id="channelInfo" class="text-slate-200">#wardriving</div>
-          </div>
+        <div class="grid grid-cols-[auto,1fr] gap-x-2">
+          <div class="text-slate-400">Status:</div>
+          <div id="status" class="font-semibold text-red-300">Disconnected</div>
         </div>
 
-        <!-- Row 2 -->
-        <div class="grid grid-cols-2 gap-x-4 gap-y-1">
-          <div>
-            <span class="text-slate-400">GPS</span>
-            <div id="gpsInfo" class="text-slate-200">Waiting for fix</div>
-          </div>
+        <div class="grid grid-cols-[auto,1fr] gap-x-2">
+          <div class="text-slate-400">Device:</div>
+          <div id="deviceInfo" class="text-slate-200">N/A</div>
+        </div>
 
-          <div>
-            <span class="text-slate-400">Accuracy</span>
-            <div id="gpsAcc" class="text-slate-200">N/A</div>
-          </div>
+        <div class="grid grid-cols-[auto,1fr] gap-x-2">
+          <div class="text-slate-400">Channel:</div>
+          <div id="channelInfo" class="text-slate-200">#wardriving</div>
+        </div>
+
+        <div class="grid grid-cols-[auto,1fr] gap-x-2">
+          <div class="text-slate-400">GPS:</div>
+          <div id="gpsInfo" class="text-slate-200">Waiting for fix</div>
+        </div>
+
+        <div class="grid grid-cols-[auto,1fr] gap-x-2">
+          <div class="text-slate-400">Accuracy:</div>
+          <div id="gpsAcc" class="text-slate-200">N/A</div>
         </div>
 
       </div>
@@ -99,7 +93,7 @@
         </div>
 
         <!-- Auto Ping Interval selector -->
-        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
           <span class="text-slate-300">Auto interval:</span>
 
           <label class="flex items-center gap-1">
@@ -120,7 +114,7 @@
 
 
         <!-- Radio Power selector -->
-        <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
           <span class="text-slate-300">Radio power:</span>
 
           <label class="flex items-center gap-1">
