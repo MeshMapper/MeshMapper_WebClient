@@ -25,6 +25,8 @@ const connectBtn     = $("connectBtn");
 const sendPingBtn    = $("sendPingBtn");
 const autoToggleBtn  = $("autoToggleBtn");
 const lastPingEl     = $("lastPing");
+const gpsInfoEl = document.getElementById("gpsInfo");
+const gpsAccEl = document.getElementById("gpsAcc");
 const sessionPingsEl = document.getElementById("sessionPings"); // optional
 
 // NEW: selectors
@@ -38,6 +40,8 @@ const state = {
   autoTimerId: null,
   running: false,
   wakeLock: null,
+  geoWatchId: null,
+  lastFix: null, // { lat, lon, accM, tsMs }
   bluefyLockEnabled: false
 };
 
@@ -123,6 +127,49 @@ async function getCurrentPosition() {
     );
   });
 }
+function updateGpsUi() {
+  if (!gpsInfoEl || !gpsAccEl) return;
+
+  if (!state.lastFix) {
+    gpsInfoEl.textContent = "Waiting for fix";
+    gpsAccEl.textContent = "N/A";
+    return;
+  }
+
+  const { lat, lon, accM, tsMs } = state.lastFix;
+  const ageSec = Math.max(0, Math.round((Date.now() - tsMs) / 1000));
+
+  gpsInfoEl.textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)} (${ageSec}s ago)`;
+  gpsAccEl.textContent = accM ? `±${Math.round(accM)} m` : "N/A";
+}
+function startGeoWatch() {
+  if (state.geoWatchId) return;
+  if (!("geolocation" in navigator)) return;
+
+  state.geoWatchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      state.lastFix = {
+        lat: pos.coords.latitude,
+        lon: pos.coords.longitude,
+        accM: pos.coords.accuracy,
+        tsMs: Date.now(),
+      };
+      updateGpsUi();
+    },
+    (err) => {
+      console.warn("watchPosition error:", err);
+      // Keep UI honest if it fails
+      updateGpsUi();
+    },
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+  );
+}
+function stopGeoWatch() {
+  if (!state.geoWatchId) return;
+  navigator.geolocation.clearWatch(state.geoWatchId);
+  state.geoWatchId = null;
+}
+
 
 // ---- Channel helpers ----
 async function ensureChannel() {
@@ -161,9 +208,23 @@ function buildPayload(lat, lon) {
 // ---- Ping ----
 async function sendPing(manual = false) {
   try {
-    const pos = await getCurrentPosition();
-    const lat = pos.coords.latitude;
-    const lon = pos.coords.longitude;
+    let lat, lon;
+
+    if (state.lastFix && (Date.now() - state.lastFix.tsMs) < 30000) {
+      lat = state.lastFix.lat;
+      lon = state.lastFix.lon;
+    } else {
+      const pos = await getCurrentPosition();
+      lat = pos.coords.latitude;
+      lon = pos.coords.longitude;
+      state.lastFix = {
+        lat,
+        lon,
+        accM: pos.coords.accuracy,
+        tsMs: Date.now(),
+      };
+      updateGpsUi();
+    }
 
     const payload = buildPayload(lat, lon);
 
@@ -195,6 +256,7 @@ function stopAutoPing() {
     clearInterval(state.autoTimerId);
     state.autoTimerId = null;
   }
+  stopGeoWatch();
   state.running = false;
   updateAutoButton();
   releaseWakeLock();
@@ -204,6 +266,7 @@ function startAutoPing() {
     alert("Connect to a MeshCore device first.");
     return;
   }
+  startGeoWatch();
   stopAutoPing();
   state.running = true;
   updateAutoButton();
@@ -251,6 +314,9 @@ async function connect() {
       stopAutoPing();
       enableControls(false);
       updateAutoButton();
+      stopGeoWatch();
+      state.lastFix = null;
+      updateGpsUi();
     });
 
   } catch (e) {
