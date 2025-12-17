@@ -364,10 +364,12 @@ async function postToMeshMapperAPI(lat, lon) {
 
     // Get current power setting
     const power = getCurrentPowerSetting();
+    const powerValue = power || "N/A";
 
     // Use device name if available, otherwise use default
-    const whoIdentifier = deviceInfoEl?.textContent && deviceInfoEl.textContent !== "—" 
-      ? deviceInfoEl.textContent 
+    const deviceText = deviceInfoEl?.textContent;
+    const whoIdentifier = deviceText && deviceText !== "—" 
+      ? deviceText 
       : MESHMAPPER_DEFAULT_WHO;
 
     // Build API payload
@@ -376,11 +378,11 @@ async function postToMeshMapperAPI(lat, lon) {
       lat: lat,
       lon: lon,
       who: whoIdentifier,
-      power: power || "N/A",
+      power: powerValue,
       test: 1
     };
 
-    console.log("Posting to MeshMapper API:", { lat, lon, who: whoIdentifier, power: power || "N/A" });
+    console.log("Posting to MeshMapper API:", { lat, lon, who: whoIdentifier, power: powerValue });
 
     // POST to MeshMapper API
     const response = await fetch(MESHMAPPER_API_URL, {
