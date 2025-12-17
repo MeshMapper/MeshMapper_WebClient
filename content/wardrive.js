@@ -475,8 +475,14 @@ async function sendPing(manual = false) {
 
     // In auto mode, always use the most recent GPS coordinates from the watch
     // In manual mode, get fresh GPS if needed
-    if (!manual && state.running && state.lastFix) {
-      // Auto mode: use most recent coordinates from the watch
+    if (!manual && state.running) {
+      // Auto mode: use GPS watch data
+      if (!state.lastFix) {
+        // If no GPS fix yet in auto mode, skip this ping and wait for watch to acquire location
+        console.warn("Auto ping skipped: waiting for GPS fix");
+        setStatus("Waiting for GPS fix...", "text-amber-300");
+        return;
+      }
       lat = state.lastFix.lat;
       lon = state.lastFix.lon;
       accuracy = state.lastFix.accM;
