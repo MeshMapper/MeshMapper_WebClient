@@ -194,18 +194,18 @@ async function ensureChannel() {
   if (!state.connection) throw new Error("Not connected");
   if (state.channel) return state.channel;
 
-  let ch = await state.connection.findChannelByName(CHANNEL_NAME);
+  const ch = await state.connection.findChannelByName(CHANNEL_NAME);
   if (!ch) {
-    const channels = await state.connection.getChannels();
-    const freeIdx = channels.findIndex(c => !c.name || c.name === "");
-    if (freeIdx < 0) throw new Error("No free channel slots available");
-    await state.connection.setChannel(freeIdx, CHANNEL_NAME, WARDROVE_KEY);
-    ch = { channelIdx: freeIdx, name: CHANNEL_NAME };
+    throw new Error(
+      `Channel ${CHANNEL_NAME} not found. Join it on your companion first (Join a Hashtag Channel), then reconnect.`
+    );
   }
+
   state.channel = ch;
   channelInfoEl.textContent = `${CHANNEL_NAME} (CH:${ch.channelIdx})`;
   return ch;
 }
+
 
 // ---- Helpers: interval & payload ----
 function getSelectedIntervalMs() {
