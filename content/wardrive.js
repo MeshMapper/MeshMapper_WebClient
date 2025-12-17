@@ -223,12 +223,14 @@ async function ensureChannel() {
 
   const ch = await state.connection.findChannelByName(CHANNEL_NAME);
   if (!ch) {
+    enableControls(false);
     throw new Error(
       `Channel ${CHANNEL_NAME} not found. Join it on your companion first.`
     );
   }
 
   state.channel = ch;
+  enableControls(true);
   channelInfoEl.textContent = `${CHANNEL_NAME} (CH:${ch.channelIdx})`;
   return ch;
 }
@@ -348,7 +350,6 @@ async function connect() {
       connectBtn.disabled = false;
       const selfInfo = await conn.getSelfInfo();
       deviceInfoEl.textContent = selfInfo?.name || "[No device]";
-      enableControls(true);
       updateAutoButton();
       try { await conn.syncDeviceTime?.(); } catch { /* optional */ }
       await ensureChannel();
