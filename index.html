@@ -159,9 +159,9 @@
       <!-- Repeater Echoes section -->
       <section class="bg-slate-800/80 border border-slate-700 rounded-xl p-4 space-y-2" aria-labelledby="repeatersHeading">
         <div class="flex items-center justify-between">
-          <h2 id="repeatersHeading" class="text-sm font-medium">Repeaters Heard (Last Ping)</h2>
+          <h2 id="repeatersHeading" class="text-sm font-medium">Repeaters Heard (Last Ping) <span id="repeatersCount" class="text-xs text-slate-400 font-normal"></span></h2>
         </div>
-        <p class="text-xs text-slate-400">Shows which repeaters received and repeated your last ping</p>
+        <p class="text-xs text-slate-400">Shows which repeaters received and repeated your last ping. Path shows the route in hex (each byte is a node ID).</p>
         <ul id="repeatersList"
             class="text-xs text-slate-400 font-mono leading-5 max-h-48 overflow-y-auto border border-slate-700/70 rounded-lg p-2 bg-slate-900/50 list-none mt-2">
           <li class="text-slate-500">No repeater echoes detected yet...</li>

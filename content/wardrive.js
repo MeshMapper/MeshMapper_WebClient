@@ -388,52 +388,76 @@ function updateRepeatersDisplay() {
     
     li.innerHTML = `
       <span class="font-mono text-slate-300">[${pathStr}]</span>
-      <span class="text-emerald-400">SNR: ${snrStr}</span>
-      <span class="text-sky-400">RSSI: ${rssiStr}</span>
+      <span class="text-emerald-400">SNR: ${snrStr} dB</span>
+      <span class="text-sky-400">RSSI: ${rssiStr} dBm</span>
     `;
     li.className = 'flex gap-3 items-center';
     repeatersListEl.appendChild(li);
   });
+  
+  // Display count
+  const countEl = document.getElementById('repeatersCount');
+  if (countEl) {
+    countEl.textContent = `${sortedEchoes.length} repeater${sortedEchoes.length !== 1 ? 's' : ''}`;
+  }
 }
 
 function onLogRxDataReceived(data) {
-  // Parse the packet
-  const packet = Packet.fromBytes(data.raw);
-  
-  // We're interested in group text messages (our ping messages)
-  if (packet.payload_type !== Packet.PAYLOAD_TYPE_GRP_TXT) {
-    return;
-  }
-  
-  // Check if this is an echo of our last sent ping
-  // We check if the path exists and has content (indicating it was repeated)
-  if (!state.lastPingTimestamp || !packet.path || packet.path.length === 0) {
-    return;
-  }
-  
-  // Store the echo information
-  if (!state.repeaterEchoes.has(state.lastPingTimestamp)) {
-    state.repeaterEchoes.set(state.lastPingTimestamp, []);
-  }
-  
-  const echoes = state.repeaterEchoes.get(state.lastPingTimestamp);
-  
-  // Avoid duplicate echoes (same path)
-  const pathHex = formatRepeaterPath(packet.path);
-  const isDuplicate = echoes.some(e => formatRepeaterPath(e.path) === pathHex);
-  
-  if (!isDuplicate) {
-    echoes.push({
-      snr: data.lastSnr,
-      rssi: data.lastRssi,
-      path: packet.path,
-      timestamp: Date.now()
-    });
+  try {
+    // Parse the packet
+    const packet = Packet.fromBytes(data.raw);
     
-    console.log(`Repeater echo detected: path=[${pathHex}] SNR=${data.lastSnr.toFixed(2)} RSSI=${data.lastRssi}`);
+    // We're interested in group text messages (our ping messages on wardriving channel)
+    if (packet.payload_type !== Packet.PAYLOAD_TYPE_GRP_TXT) {
+      return;
+    }
     
-    // Update the UI
-    updateRepeatersDisplay();
+    // Only track echoes if we have a recent ping timestamp
+    if (!state.lastPingTimestamp) {
+      return;
+    }
+    
+    // Check if this message was sent recently (within last 30 seconds)
+    const age = Date.now() - state.lastPingTimestamp;
+    if (age > 30000) {
+      // Too old, ignore
+      return;
+    }
+    
+    // For flood packets (most wardriving messages), the path shows the route
+    // Direct path or empty path means direct communication (no repeater)
+    if (!packet.path || packet.path.length === 0) {
+      // This is a direct message, not a repeat
+      console.log('LogRxData: Direct message (no repeater path)');
+      return;
+    }
+    
+    // This is a repeated message - store the echo information
+    if (!state.repeaterEchoes.has(state.lastPingTimestamp)) {
+      state.repeaterEchoes.set(state.lastPingTimestamp, []);
+    }
+    
+    const echoes = state.repeaterEchoes.get(state.lastPingTimestamp);
+    
+    // Avoid duplicate echoes (same path)
+    const pathHex = formatRepeaterPath(packet.path);
+    const isDuplicate = echoes.some(e => formatRepeaterPath(e.path) === pathHex);
+    
+    if (!isDuplicate) {
+      echoes.push({
+        snr: data.lastSnr,
+        rssi: data.lastRssi,
+        path: packet.path,
+        timestamp: Date.now()
+      });
+      
+      console.log(`✓ Repeater echo: path=[${pathHex}] SNR=${data.lastSnr.toFixed(2)} dB, RSSI=${data.lastRssi} dBm`);
+      
+      // Update the UI
+      updateRepeatersDisplay();
+    }
+  } catch (error) {
+    console.error('Error processing LogRxData:', error);
   }
 }
 
@@ -642,6 +666,15 @@ async function connect() {
       state.lastFix = null;
       state.gpsState = "idle";
       updateGpsUi();
+      
+      // Clear repeater tracking state
+      state.lastPingTimestamp = null;
+      state.repeaterEchoes.clear();
+      if (repeatersListEl) {
+        repeatersListEl.innerHTML = '<li class="text-slate-500">No repeater echoes detected yet...</li>';
+      }
+      const countEl = document.getElementById('repeatersCount');
+      if (countEl) countEl.textContent = '';
     });
 
   } catch (e) {
