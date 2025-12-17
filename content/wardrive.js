@@ -16,6 +16,12 @@ const WARDROVE_KEY     = new Uint8Array([
   0xA9, 0x3F, 0x06, 0x60, 0x27, 0x32, 0x0F, 0xE5
 ]);
 
+// Set Connect and Disconnect button text & style
+const CONNECT_BTN_CLASS =
+  "px-4 py-2 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50";
+const DISCONNECT_BTN_CLASS =
+  "px-4 py-2 rounded-md bg-red-600 text-white hover:bg-red-700 disabled:opacity-50";
+
 // ---- DOM refs (from index.html; unchanged except the two new selectors) ----
 const $ = (id) => document.getElementById(id);
 const statusEl       = $("status");
@@ -30,13 +36,6 @@ const gpsAccEl = document.getElementById("gpsAcc");
 const sessionPingsEl = document.getElementById("sessionPings"); // optional
 const coverageFrameEl = document.getElementById("coverageFrame");
 setConnectButton(false);
-
-// Set Connect and Disconnect button text & style
-const CONNECT_BTN_CLASS =
-  "px-4 py-2 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50";
-const DISCONNECT_BTN_CLASS =
-  "px-4 py-2 rounded-md bg-red-600 text-white hover:bg-red-700 disabled:opacity-50";
-
 
 // NEW: selectors
 const intervalSelect = $("intervalSelect"); // 15 / 30 / 60 seconds
