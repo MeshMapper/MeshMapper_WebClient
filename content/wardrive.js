@@ -482,11 +482,19 @@ async function sendPing(manual = false) {
     }, STATUS_UPDATE_DELAY_MS);
 
     state.meshMapperTimer = setTimeout(async () => {
-      await postToMeshMapperAPI(lat, lon);
+      // Capture accuracy in closure to ensure it's available in nested callback
+      const capturedAccuracy = accuracy;
+      
+      try {
+        await postToMeshMapperAPI(lat, lon);
+      } catch (error) {
+        console.error("MeshMapper API post failed:", error);
+        // Continue with map refresh and status update even if API fails
+      }
       
       // Update map after API post to ensure backend updated
       setTimeout(() => {
-        if (accuracy && accuracy < GPS_ACCURACY_THRESHOLD_M) {
+        if (capturedAccuracy && capturedAccuracy < GPS_ACCURACY_THRESHOLD_M) {
           scheduleCoverageRefresh(lat, lon);
         }
         
