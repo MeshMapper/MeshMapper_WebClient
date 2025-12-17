@@ -197,7 +197,7 @@ async function ensureChannel() {
   const ch = await state.connection.findChannelByName(CHANNEL_NAME);
   if (!ch) {
     throw new Error(
-      `Channel ${CHANNEL_NAME} not found. Join it on your companion first (Join a Hashtag Channel), then reconnect.`
+      `Channel ${CHANNEL_NAME} not found. Join it on your companion first.`
     );
   }
 
@@ -266,7 +266,7 @@ async function sendPing(manual = false) {
     }
   } catch (e) {
     console.error("Ping failed:", e);
-    setStatus("Ping failed", "text-red-300");
+    setStatus(e.message || "Ping failed", "text-red-300");
   }
 }
 
