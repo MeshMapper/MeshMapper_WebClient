@@ -167,16 +167,13 @@ async function getCurrentPosition() {
       reject(new Error("Geolocation not supported"));
       return;
     }
-    // Use selected interval to determine maximum age
-    const intervalMs = getSelectedIntervalMs();
-    const maximumAge = Math.max(1000, intervalMs - 5000); // Fresh data, minimum 1s
     
     navigator.geolocation.getCurrentPosition(
       (pos) => resolve(pos),
       (err) => reject(err),
       { 
         enableHighAccuracy: true, 
-        maximumAge: maximumAge, 
+        maximumAge: getGpsMaximumAge(1000), // Fresh data for one-off requests
         timeout: 30000 
       }
     );
@@ -232,10 +229,6 @@ function startGeoWatch() {
   updateGpsUi();
   startGpsAgeUpdater(); // Start the age counter
 
-  // Get the selected interval to determine how fresh GPS data should be
-  const intervalMs = getSelectedIntervalMs();
-  const maximumAge = Math.max(5000, intervalMs - 5000); // Use interval minus 5s buffer, minimum 5s
-
   state.geoWatchId = navigator.geolocation.watchPosition(
     (pos) => {
       state.lastFix = {
@@ -255,7 +248,7 @@ function startGeoWatch() {
     },
     { 
       enableHighAccuracy: true, 
-      maximumAge: maximumAge, // Respect the selected interval
+      maximumAge: getGpsMaximumAge(5000), // Continuous watch, minimum 5s
       timeout: 30000 
     }
   );
@@ -329,6 +322,13 @@ function getSelectedIntervalMs() {
   const s = checked ? Number(checked.value) : 30;
   const clamped = [15, 30, 60].includes(s) ? s : 30;
   return clamped * 1000;
+}
+
+// Calculate GPS maximumAge based on selected interval
+function getGpsMaximumAge(minAge = 1000) {
+  const intervalMs = getSelectedIntervalMs();
+  // Use interval minus 5s buffer, but at least minAge
+  return Math.max(minAge, intervalMs - 5000);
 }
 
 function buildPayload(lat, lon) {
