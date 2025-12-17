@@ -109,7 +109,9 @@ Pings are sent to the wardriving MeshCore channel to build community coverage ma
 
 This app automatically posts ping data to the YOW MeshMapper API to help compare if messages were received on the mesh. The API key is securely stored in GitHub Secrets.
 
-**For setup instructions**, see [SETUP.md](SETUP.md)
+**Quick Setup**: See [QUICKSTART.md](QUICKSTART.md) (just add a GitHub Secret - no code editing needed!)
+
+**Detailed Setup**: See [SETUP.md](SETUP.md)
 
 ---
 
