@@ -110,7 +110,7 @@ function buildCoverageEmbedUrl(lat, lon) {
   return `${base}&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
 }
 let coverageRefreshTimer = null;
-function scheduleCoverageRefresh(lat, lon) {
+function scheduleCoverageRefresh(lat, lon, delayMs = 0) {
   if (!coverageFrameEl) return;
 
   if (coverageRefreshTimer) clearTimeout(coverageRefreshTimer);
@@ -119,7 +119,7 @@ function scheduleCoverageRefresh(lat, lon) {
     const url = buildCoverageEmbedUrl(lat, lon);
     console.log("Coverage iframe URL:", url);
     coverageFrameEl.src = url;
-  }, 5000);
+  }, delayMs);
 }
 function setConnectButton(connected) {
   if (!connectBtn) return;
@@ -464,23 +464,39 @@ async function sendPing(manual = false) {
     // Start cooldown period after successful ping
     startCooldown();
 
+    const nowStr = new Date().toLocaleString();
+    setStatus(manual ? "Ping sent" : "Auto ping sent", "text-emerald-300");
+
     // Schedule MeshMapper API call with 7-second delay (non-blocking)
     // Clear any existing timer first
     if (state.meshMapperTimer) {
       clearTimeout(state.meshMapperTimer);
     }
-    state.meshMapperTimer = setTimeout(() => {
-      postToMeshMapperAPI(lat, lon);
+    
+    // Update status to show we're waiting to post to API
+    setTimeout(() => {
+      if (state.connection) {
+        setStatus("Waiting to post to API", "text-sky-300");
+      }
+    }, 100); // Small delay to ensure "Ping sent" is visible first
+
+    state.meshMapperTimer = setTimeout(async () => {
+      await postToMeshMapperAPI(lat, lon);
+      
+      // Update map 1 second after API post to ensure backend updated
+      setTimeout(() => {
+        if (accuracy && accuracy < GPS_ACCURACY_THRESHOLD_M) {
+          scheduleCoverageRefresh(lat, lon);
+        }
+        
+        // Set status to idle after map update
+        if (state.connection) {
+          setStatus("Idle", "text-slate-300");
+        }
+      }, 1000);
+      
       state.meshMapperTimer = null;
     }, MESHMAPPER_DELAY_MS);
-
-    // Only refresh coverage iframe if GPS accuracy is good
-    if (accuracy && accuracy < GPS_ACCURACY_THRESHOLD_M) {
-      scheduleCoverageRefresh(lat, lon);
-    }
-
-    const nowStr = new Date().toLocaleString();
-    setStatus(manual ? "Ping sent" : "Auto ping sent", "text-emerald-300");
     if (lastPingEl) lastPingEl.textContent = `${nowStr} — ${payload}`;
 
     // Session log
