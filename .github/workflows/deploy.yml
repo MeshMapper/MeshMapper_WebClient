@@ -26,12 +26,15 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Create config.js with API key from secrets
+        env:
+          API_KEY: ${{ secrets.MESHMAPPER_API_KEY }}
         run: |
-          cat > content/config.js << EOF
+          cat > content/config.js << 'EOF'
           // MeshMapper API Configuration
           // This file is auto-generated during deployment from GitHub Secrets
-          window.MESHMAPPER_API_KEY = "${{ secrets.MESHMAPPER_API_KEY }}";
+          window.MESHMAPPER_API_KEY = "API_KEY_PLACEHOLDER";
           EOF
+          sed -i "s/API_KEY_PLACEHOLDER/$API_KEY/g" content/config.js
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
