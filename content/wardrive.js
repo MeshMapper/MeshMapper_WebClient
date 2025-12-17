@@ -28,6 +28,7 @@ const lastPingEl     = $("lastPing");
 const gpsInfoEl = document.getElementById("gpsInfo");
 const gpsAccEl = document.getElementById("gpsAcc");
 const sessionPingsEl = document.getElementById("sessionPings"); // optional
+const coverageFrameEl = document.getElementById("coverageFrame");
 
 // NEW: selectors
 const intervalSelect = $("intervalSelect"); // 15 / 30 / 60 seconds
@@ -66,6 +67,21 @@ function updateAutoButton() {
     autoToggleBtn.classList.add("bg-indigo-600","hover:bg-indigo-500");
     autoToggleBtn.classList.remove("bg-amber-600","hover:bg-amber-500");
   }
+}
+function buildCoverageEmbedUrl(lat, lon) {
+  const base =
+    "https://yow.meshmapper.net/embed.php?cov_grid=1&fail_grid=1&pings=0&repeaters=1&rep_coverage=0&grid_lines=0&meters=5000";
+  return `${base}&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
+}
+let coverageRefreshTimer = null;
+function scheduleCoverageRefresh(lat, lon) {
+  if (!coverageFrameEl) return;
+
+  if (coverageRefreshTimer) clearTimeout(coverageRefreshTimer);
+
+  coverageRefreshTimer = setTimeout(() => {
+    coverageFrameEl.src = buildCoverageEmbedUrl(lat, lon);
+  }, 5000);
 }
 
 // ---- Wake Lock helpers ----
@@ -230,6 +246,8 @@ async function sendPing(manual = false) {
 
     const ch = await ensureChannel();
     await state.connection.sendChannelTextMessage(ch.channelIdx, payload);
+
+    scheduleCoverageRefresh(lat, lon);
 
     const nowStr = new Date().toLocaleString();
     setStatus(manual ? "Ping sent" : "Auto ping sent", "text-emerald-300");
