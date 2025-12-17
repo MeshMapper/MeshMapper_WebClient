@@ -18,6 +18,15 @@ const WARDROVE_KEY     = new Uint8Array([
   0xA9, 0x3F, 0x06, 0x60, 0x27, 0x32, 0x0F, 0xE5
 ]);
 
+// MeshMapper API Configuration
+const MESHMAPPER_API_URL = "https://yow.meshmapper.net/wardriving-api.php";
+// DO NOT EDIT: This placeholder is used to detect if the API key is configured
+const MESHMAPPER_API_KEY_PLACEHOLDER = "YOUR_API_KEY_HERE";
+// The API key is automatically injected from GitHub Secrets during deployment via config.js
+// You do NOT need to edit this file - just set MESHMAPPER_API_KEY in GitHub Secrets
+const MESHMAPPER_API_KEY = window.MESHMAPPER_API_KEY || MESHMAPPER_API_KEY_PLACEHOLDER;
+const MESHMAPPER_DEFAULT_WHO = "GOME-WarDriver"; // Default identifier
+
 // ---- DOM refs (from index.html; unchanged except the two new selectors) ----
 const $ = (id) => document.getElementById(id);
 const statusEl       = $("status");
@@ -333,12 +342,65 @@ function getGpsMaximumAge(minAge = 1000) {
   return Math.max(minAge, intervalMs - GPS_FRESHNESS_BUFFER_MS);
 }
 
+function getCurrentPowerSetting() {
+  const checkedPower = document.querySelector('input[name="power"]:checked');
+  return checkedPower ? checkedPower.value : "";
+}
+
 function buildPayload(lat, lon) {
   const coordsStr = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
-  const checkedPower = document.querySelector('input[name="power"]:checked');
-  const power = checkedPower ? checkedPower.value : "";
-   const suffix = power ? ` [${power}]` : "";
+  const power = getCurrentPowerSetting();
+  const suffix = power ? ` [${power}]` : "";
   return `${PING_PREFIX} ${coordsStr} ${suffix}`;
+}
+
+// ---- MeshMapper API ----
+async function postToMeshMapperAPI(lat, lon) {
+  try {
+    // Skip if API key is placeholder (not configured)
+    if (!MESHMAPPER_API_KEY || MESHMAPPER_API_KEY === MESHMAPPER_API_KEY_PLACEHOLDER) {
+      console.log("MeshMapper API key not configured, skipping API post");
+      return;
+    }
+
+    // Get current power setting
+    const power = getCurrentPowerSetting();
+    const powerValue = power || "N/A";
+
+    // Use device name if available, otherwise use default
+    const deviceText = deviceInfoEl?.textContent;
+    const whoIdentifier = (deviceText && deviceText !== "—") ? deviceText : MESHMAPPER_DEFAULT_WHO;
+
+    // Build API payload
+    const payload = {
+      key: MESHMAPPER_API_KEY,
+      lat: lat,
+      lon: lon,
+      who: whoIdentifier,
+      power: powerValue,
+      test: 1
+    };
+
+    console.log("Posting to MeshMapper API:", { lat, lon, who: whoIdentifier, power: powerValue });
+
+    // POST to MeshMapper API
+    const response = await fetch(MESHMAPPER_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      console.warn(`MeshMapper API returned status ${response.status}`);
+    } else {
+      console.log("Successfully posted to MeshMapper API");
+    }
+  } catch (error) {
+    // Log error but don't fail the ping
+    console.error("Failed to post to MeshMapper API:", error);
+  }
 }
 
 // ---- Ping ----
@@ -373,6 +435,10 @@ async function sendPing(manual = false) {
 
     const ch = await ensureChannel();
     await state.connection.sendChannelTextMessage(ch.channelIdx, payload);
+
+    // Post to MeshMapper API (fire-and-forget pattern: non-blocking, errors are logged inside the function)
+    // Not awaited intentionally to avoid delaying the ping flow
+    postToMeshMapperAPI(lat, lon);
 
     // Only refresh coverage iframe if GPS accuracy is good
     if (accuracy && accuracy < GPS_ACCURACY_THRESHOLD_M) {
