@@ -32,9 +32,8 @@ jobs:
           cat > content/config.js << 'EOF'
           // MeshMapper API Configuration
           // This file is auto-generated during deployment from GitHub Secrets
-          window.MESHMAPPER_API_KEY = "API_KEY_PLACEHOLDER";
           EOF
-          sed -i "s/API_KEY_PLACEHOLDER/$API_KEY/g" content/config.js
+          node -e "console.log('window.MESHMAPPER_API_KEY = ' + JSON.stringify(process.env.API_KEY) + ';')" >> content/config.js
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

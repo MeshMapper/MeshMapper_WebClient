@@ -380,7 +380,7 @@ async function postToMeshMapperAPI(lat, lon) {
       test: 1
     };
 
-    console.log("Posting to MeshMapper API:", payload);
+    console.log("Posting to MeshMapper API:", { lat, lon, who: whoIdentifier, power: power || "N/A" });
 
     // POST to MeshMapper API
     const response = await fetch(MESHMAPPER_API_URL, {
@@ -435,7 +435,8 @@ async function sendPing(manual = false) {
     const ch = await ensureChannel();
     await state.connection.sendChannelTextMessage(ch.channelIdx, payload);
 
-    // Post to MeshMapper API (non-blocking, errors are logged inside the function)
+    // Post to MeshMapper API (fire-and-forget pattern: non-blocking, errors are logged inside the function)
+    // Not awaited intentionally to avoid delaying the ping flow
     postToMeshMapperAPI(lat, lon);
 
     // Only refresh coverage iframe if GPS accuracy is good
