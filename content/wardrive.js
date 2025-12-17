@@ -541,7 +541,7 @@ function startAutoPing() {
   }
   
   startGeoWatch();
-  stopAutoPing();
+  stopAutoPing(true); // Ignore cooldown check since we already checked above
   state.running = true;
   updateAutoButton();
 
