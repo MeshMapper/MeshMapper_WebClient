@@ -169,7 +169,7 @@ const autoCountdownTimer = createCountdownTimer(
     // If there's a skip reason, show it with the countdown in warning color
     if (state.skipReason) {
       return { 
-        message: `Ping skipped, ${state.skipReason}. Waiting for next auto ping (${remainingSec}s)`,
+        message: `Skipped (${state.skipReason}), next ping (${remainingSec}s)`,
         color: STATUS_COLORS.warning
       };
     }
