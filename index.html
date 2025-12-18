@@ -197,11 +197,21 @@
   </main>
  
   <!-- Load config before main script -->
-  <script src="content/config.js"></script>
-  <script type="module" src="content/wardrive.js"></script>
+  <script>
+    // Cache-busting timestamp to ensure JS files are always fresh
+    const cacheBuster = Date.now();
+    
+    // Dynamically load config.js with cache-busting
+    const configScript = document.createElement('script');
+    configScript.src = `content/config.js?v=${cacheBuster}`;
+    document.head.appendChild(configScript);
+  </script>
   <script type="module">
-    import { onLoad } from '/content/wardrive.js';
-    onLoad();
+    // Add cache-busting parameter to module imports
+    const cacheBuster = Date.now();
+    import(`/content/wardrive.js?v=${cacheBuster}`).then(module => {
+      module.onLoad();
+    });
   </script>
 </body>
 </html>
