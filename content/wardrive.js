@@ -592,6 +592,12 @@ function stopRepeaterTracking() {
   }
   
   // Update the session log entry with repeater data
+  console.log(`[Debug] Updating session log with repeater data:`, {
+    hasRepeaterData: !!state.repeaterData,
+    hasSessionLi: !!state.repeaterData?.sessionLi,
+    repeaterCount: state.repeaterData?.repeaters.size || 0
+  });
+  
   if (state.repeaterData && state.repeaterData.sessionLi) {
     const repeaters = state.repeaterData.repeaters;
     if (repeaters.size > 0) {
@@ -604,11 +610,16 @@ function stopRepeaterTracking() {
       
       // Append to the existing text in the session log
       const currentText = state.repeaterData.sessionLi.textContent;
-      state.repeaterData.sessionLi.textContent = `${currentText}  [${repeaterList}]`;
+      const updatedText = `${currentText}  [${repeaterList}]`;
+      state.repeaterData.sessionLi.textContent = updatedText;
       console.log(`[Repeater Tracker] Stopped listening. Total ${repeaters.size} unique repeater(s) detected: [${repeaterList}]`);
+      console.log(`[Debug] Session log updated with repeater data:`, updatedText);
     } else {
       console.log(`[Repeater Tracker] Stopped listening. No channel echoes detected in ${REPEATER_LISTEN_MS}ms window`);
+      console.log(`[Debug] No repeaters to add to session log`);
     }
+  } else {
+    console.warn(`[Debug] Cannot update session log: repeaterData or sessionLi is null`);
   }
   
   // Clear repeater data
