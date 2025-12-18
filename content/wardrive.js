@@ -27,6 +27,7 @@ const OTTAWA_CENTER_LAT = 45.4215;             // Ottawa Parliament Hill latitud
 const OTTAWA_CENTER_LON = -75.6972;            // Ottawa Parliament Hill longitude
 const GEOFENCE_RADIUS_KM = 150;                // Ottawa geofence radius in kilometers
 const MIN_PING_DISTANCE_M = 25;                // Minimum movement required between pings in meters
+const DEBUG_GPS_LOGGING = true;                // Enable detailed GPS filtering console logs
 
 // MeshMapper API Configuration
 const MESHMAPPER_API_URL = "https://yow.meshmapper.net/wardriving-api.php";
@@ -632,14 +633,18 @@ async function sendPing(manual = false) {
     const withinGeofence = isWithinGeofence(lat, lon);
     const distanceFromOttawaKm = calculateDistance(lat, lon, OTTAWA_CENTER_LAT, OTTAWA_CENTER_LON);
     
-    console.log(`[Geofence Check] Current position: ${lat.toFixed(5)}, ${lon.toFixed(5)}`);
-    console.log(`[Geofence Check] Distance from Ottawa Parliament Hill: ${distanceFromOttawaKm.toFixed(2)} km`);
-    console.log(`[Geofence Check] Geofence radius: ${GEOFENCE_RADIUS_KM} km`);
-    console.log(`[Geofence Check] Within geofence: ${withinGeofence}`);
+    if (DEBUG_GPS_LOGGING) {
+      console.log(`[Geofence Check] Current position: ${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+      console.log(`[Geofence Check] Distance from Ottawa Parliament Hill: ${distanceFromOttawaKm.toFixed(2)} km`);
+      console.log(`[Geofence Check] Geofence radius: ${GEOFENCE_RADIUS_KM} km`);
+      console.log(`[Geofence Check] Within geofence: ${withinGeofence}`);
+    }
     
     if (!withinGeofence) {
-      const skipMsg = "Ping skipped, outside of geo fenced region";
-      console.warn(`[Geofence Check] ${skipMsg}`);
+      const skipMsg = "Ping skipped, outside of geofenced region";
+      if (DEBUG_GPS_LOGGING) {
+        console.warn(`[Geofence Check] ${skipMsg}`);
+      }
       
       if (manual) {
         // Manual ping: persist skip message
@@ -656,12 +661,16 @@ async function sendPing(manual = false) {
     // ---- VALIDATION 2: Check distance from last ping ----
     const distanceFromLastPingM = getDistanceFromLastPing(lat, lon);
     if (distanceFromLastPingM !== null) {
-      console.log(`[Distance Check] Distance from last ping: ${distanceFromLastPingM.toFixed(2)} m`);
-      console.log(`[Distance Check] Minimum required distance: ${MIN_PING_DISTANCE_M} m`);
+      if (DEBUG_GPS_LOGGING) {
+        console.log(`[Distance Check] Distance from last ping: ${distanceFromLastPingM.toFixed(2)} m`);
+        console.log(`[Distance Check] Minimum required distance: ${MIN_PING_DISTANCE_M} m`);
+      }
       
       if (shouldSkipPingDueToDistance(lat, lon)) {
         const skipMsg = `Ping skipped, too close to last ping (${distanceFromLastPingM.toFixed(1)}m away)`;
-        console.warn(`[Distance Check] ${skipMsg}`);
+        if (DEBUG_GPS_LOGGING) {
+          console.warn(`[Distance Check] ${skipMsg}`);
+        }
         
         if (manual) {
           // Manual ping: persist skip message
@@ -675,11 +684,15 @@ async function sendPing(manual = false) {
         return;
       }
     } else {
-      console.log(`[Distance Check] No previous ping location, skipping distance check`);
+      if (DEBUG_GPS_LOGGING) {
+        console.log(`[Distance Check] No previous ping location, skipping distance check`);
+      }
     }
 
     // All validations passed - proceed with ping
-    console.log(`[Ping] All validations passed, sending ping`);
+    if (DEBUG_GPS_LOGGING) {
+      console.log(`[Ping] All validations passed, sending ping`);
+    }
     
     const payload = buildPayload(lat, lon);
 
@@ -688,7 +701,9 @@ async function sendPing(manual = false) {
 
     // Save successful ping location
     state.lastPingLocation = { lat, lon };
-    console.log(`[Ping] Successful ping location saved: ${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+    if (DEBUG_GPS_LOGGING) {
+      console.log(`[Ping] Successful ping location saved: ${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+    }
     
     // Clear any previous skip reason since this ping succeeded
     state.lastSkipReason = null;
