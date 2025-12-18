@@ -210,8 +210,15 @@ function pauseAutoCountdown() {
   // Calculate remaining time before pausing
   if (state.nextAutoPingTime) {
     const remainingMs = state.nextAutoPingTime - Date.now();
-    state.pausedAutoTimerRemainingMs = Math.max(0, remainingMs);
-    debugLog(`Pausing auto countdown with ${state.pausedAutoTimerRemainingMs}ms remaining`);
+    // Only pause if there's meaningful time remaining (more than 1 second)
+    // If timer already expired or about to expire, don't store it
+    if (remainingMs > 1000) {
+      state.pausedAutoTimerRemainingMs = remainingMs;
+      debugLog(`Pausing auto countdown with ${state.pausedAutoTimerRemainingMs}ms remaining`);
+    } else {
+      debugLog(`Auto countdown already expired or about to expire (${remainingMs}ms), not pausing`);
+      state.pausedAutoTimerRemainingMs = null;
+    }
   }
   // Stop the auto ping timer (but keep autoTimerId so we know auto mode is active)
   autoCountdownTimer.stop();
@@ -220,7 +227,7 @@ function pauseAutoCountdown() {
 
 function resumeAutoCountdown() {
   // Resume auto countdown from paused time
-  if (state.pausedAutoTimerRemainingMs !== null && state.pausedAutoTimerRemainingMs > 0) {
+  if (state.pausedAutoTimerRemainingMs !== null) {
     debugLog(`Resuming auto countdown with ${state.pausedAutoTimerRemainingMs}ms remaining`);
     startAutoCountdown(state.pausedAutoTimerRemainingMs);
     state.pausedAutoTimerRemainingMs = null;
