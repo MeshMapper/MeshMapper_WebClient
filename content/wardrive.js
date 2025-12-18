@@ -212,15 +212,13 @@ function enableControls(connected) {
 }
 function updateAutoButton() {
   debugLog('updateAutoButton: running:', state.running);
-  if (state.running) {
-    autoToggleBtn.textContent = "Stop Auto Ping";
-    autoToggleBtn.classList.remove("bg-indigo-600","hover:bg-indigo-500");
-    autoToggleBtn.classList.add("bg-amber-600","hover:bg-amber-500");
-  } else {
-    autoToggleBtn.textContent = "Start Auto Ping";
-    autoToggleBtn.classList.add("bg-indigo-600","hover:bg-indigo-500");
-    autoToggleBtn.classList.remove("bg-amber-600","hover:bg-amber-500");
-  }
+  const [text, addClasses, removeClasses] = state.running
+    ? ["Stop Auto Ping", ["bg-amber-600", "hover:bg-amber-500"], ["bg-indigo-600", "hover:bg-indigo-500"]]
+    : ["Start Auto Ping", ["bg-indigo-600", "hover:bg-indigo-500"], ["bg-amber-600", "hover:bg-amber-500"]];
+  
+  autoToggleBtn.textContent = text;
+  autoToggleBtn.classList.remove(...removeClasses);
+  autoToggleBtn.classList.add(...addClasses);
 }
 function buildCoverageEmbedUrl(lat, lon) {
   debugLog('buildCoverageEmbedUrl: lat:', lat, 'lon:', lon);
@@ -246,27 +244,14 @@ function scheduleCoverageRefresh(lat, lon, delayMs = 0) {
 function setConnectButton(connected) {
   debugLog('setConnectButton: connected:', connected);
   if (!connectBtn) return;
-  if (connected) {
-    connectBtn.textContent = "Disconnect";
-    connectBtn.classList.remove(
-      "bg-emerald-600",
-      "hover:bg-emerald-500"
-    );
-    connectBtn.classList.add(
-      "bg-red-600",
-      "hover:bg-red-500"
-    );
-  } else {
-    connectBtn.textContent = "Connect";
-    connectBtn.classList.remove(
-      "bg-red-600",
-      "hover:bg-red-500"
-    );
-    connectBtn.classList.add(
-      "bg-emerald-600",
-      "hover:bg-emerald-500"
-    );
-  }
+  
+  const [text, addClasses, removeClasses] = connected
+    ? ["Disconnect", ["bg-red-600", "hover:bg-red-500"], ["bg-emerald-600", "hover:bg-emerald-500"]]
+    : ["Connect", ["bg-emerald-600", "hover:bg-emerald-500"], ["bg-red-600", "hover:bg-red-500"]];
+  
+  connectBtn.textContent = text;
+  connectBtn.classList.remove(...removeClasses);
+  connectBtn.classList.add(...addClasses);
 }
 
 
@@ -320,6 +305,16 @@ async function releaseWakeLock() {
 }
 
 // ---- Geolocation ----
+// Helper to create GPS fix object from position
+function createGpsFix(pos) {
+  return {
+    lat: pos.coords.latitude,
+    lon: pos.coords.longitude,
+    accM: pos.coords.accuracy,
+    tsMs: Date.now()
+  };
+}
+
 async function getCurrentPosition() {
   debugLog('getCurrentPosition: requesting fresh GPS position');
   return new Promise((resolve, reject) => {
@@ -416,12 +411,7 @@ function startGeoWatch() {
   state.geoWatchId = navigator.geolocation.watchPosition(
     (pos) => {
       debugLog('startGeoWatch: received GPS update', pos.coords.latitude, pos.coords.longitude, 'accuracy:', pos.coords.accuracy);
-      state.lastFix = {
-        lat: pos.coords.latitude,
-        lon: pos.coords.longitude,
-        accM: pos.coords.accuracy,
-        tsMs: Date.now(),
-      };
+      state.lastFix = createGpsFix(pos);
       state.gpsState = "acquired";
       updateGpsUi();
     },
@@ -461,14 +451,7 @@ async function primeGpsOnce() {
 
   try {
     const pos = await getCurrentPosition();
-
-    state.lastFix = {
-      lat: pos.coords.latitude,
-      lon: pos.coords.longitude,
-      accM: pos.coords.accuracy,
-      tsMs: Date.now(),
-    };
-
+    state.lastFix = createGpsFix(pos);
     state.gpsState = "acquired";
     updateGpsUi();
 
@@ -659,15 +642,10 @@ async function sendPing(manual = false) {
         // Get fresh GPS coordinates for manual ping
         debugLog('sendPing: getting fresh GPS position for manual ping');
         const pos = await getCurrentPosition();
+        state.lastFix = createGpsFix(pos);
         lat = pos.coords.latitude;
         lon = pos.coords.longitude;
         accuracy = pos.coords.accuracy;
-        state.lastFix = {
-          lat,
-          lon,
-          accM: accuracy,
-          tsMs: Date.now(),
-        };
         updateGpsUi();
         debugLog('sendPing: fresh GPS acquired', lat, lon, 'accuracy:', accuracy);
       }
