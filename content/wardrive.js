@@ -461,6 +461,9 @@ function buildPayload(lat, lon) {
 }
 
 // ---- Repeater Tracking ----
+// Tracks channel echoes (repeater responses) after sending a ping
+// Debug output is logged to browser console with [Repeater Tracker] prefix
+// Open DevTools console to see real-time echo detection and diagnose connectivity issues
 function startRepeaterTracking(sessionLi) {
   // Clean up any existing tracking
   stopRepeaterTracking();

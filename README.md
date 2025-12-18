@@ -135,6 +135,36 @@ This app automatically posts ping data to the YOW MeshMapper API to help compare
 
 ---
 
+## 🐛 Debugging
+
+### Channel Echo Tracking
+
+The app tracks channel echoes (repeater responses) for each ping sent. To monitor this in real-time:
+
+1. Open your browser's **Developer Console** (F12 or Cmd+Option+I)
+2. Look for `[Repeater Tracker]` messages which show:
+   - When echo listening starts (7-second window)
+   - Each LogRxData event received from the device
+   - When channel echoes are detected with Repeater ID and SNR
+   - Summary when listening stops (with total repeaters or "none detected")
+
+**Example console output:**
+```
+[Repeater Tracker] Started listening for channel echoes (7000ms window)
+[Repeater Tracker] LogRxData event received: {hasRaw: true, rawLength: 42, lastSnr: -5.25}
+[Repeater Tracker] Packet parsed: {payloadType: 2, pathLength: 1, hasPath: true}
+[Repeater Tracker] Group text message detected with path
+[Repeater Tracker] ✓ Channel echo detected: Repeater ID=25, SNR=-5dB
+[Repeater Tracker] Stopped listening. Total 1 unique repeater(s) detected: [25(-5)]
+```
+
+If you see "No channel echoes detected", it may indicate:
+- Pings aren't reaching any repeaters
+- The device is out of mesh range
+- The wardriving channel isn't properly configured
+
+---
+
 ## 🙏 Credits
 
 This project is a fork and adaptation:
