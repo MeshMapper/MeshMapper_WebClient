@@ -92,103 +92,147 @@ const state = {
 };
 
 // ---- UI helpers ----
-function setStatus(text, color = "text-slate-300") {
+// Status colors for different states
+const STATUS_COLORS = {
+  idle: "text-slate-300",
+  success: "text-emerald-300",
+  warning: "text-amber-300",
+  error: "text-red-300",
+  info: "text-sky-300"
+};
+
+function setStatus(text, color = STATUS_COLORS.idle) {
   statusEl.textContent = text;
   statusEl.className = `font-semibold ${color}`;
 }
-function updateAutoCountdownStatus() {
-  if (!state.running || !state.nextAutoPingTime) {
-    return;
-  }
-  
-  const remainingMs = state.nextAutoPingTime - Date.now();
-  if (remainingMs <= 0) {
-    setStatus("Sending auto ping...", "text-sky-300");
-    return;
-  }
-  
-  const remainingSec = Math.ceil(remainingMs / 1000);
-  setStatus(`Waiting for next auto ping (${remainingSec}s)`, "text-slate-300");
+
+// Countdown timer management - generalized for reuse
+function createCountdownTimer(getEndTime, getStatusMessage) {
+  return {
+    timerId: null,
+    endTime: null,
+    
+    start(durationMs) {
+      this.stop();
+      this.endTime = Date.now() + durationMs;
+      this.update();
+      this.timerId = setInterval(() => this.update(), 1000);
+    },
+    
+    update() {
+      if (!this.endTime) return;
+      
+      const remainingMs = this.endTime - Date.now();
+      if (remainingMs <= 0) {
+        const message = getStatusMessage(0);
+        if (message) setStatus(message, STATUS_COLORS.info);
+        return;
+      }
+      
+      const remainingSec = Math.ceil(remainingMs / 1000);
+      const message = getStatusMessage(remainingSec);
+      if (message) setStatus(message, STATUS_COLORS.idle);
+    },
+    
+    stop() {
+      if (this.timerId) {
+        clearInterval(this.timerId);
+        this.timerId = null;
+      }
+      this.endTime = null;
+    }
+  };
 }
+
+// Auto ping countdown timer
+const autoCountdownTimer = createCountdownTimer(
+  () => state.nextAutoPingTime,
+  (remainingSec) => {
+    if (!state.running) return null;
+    return remainingSec === 0 
+      ? "Sending auto ping..." 
+      : `Waiting for next auto ping (${remainingSec}s)`;
+  }
+);
+
+// API post countdown timer
+const apiCountdownTimer = createCountdownTimer(
+  () => state.apiPostTime,
+  (remainingSec) => {
+    return remainingSec === 0 
+      ? "Posting to API..." 
+      : `Wait to post API (${remainingSec}s)`;
+  }
+);
+
+// Legacy compatibility wrappers
 function startAutoCountdown(intervalMs) {
-  // Stop any existing countdown
-  stopAutoCountdown();
-  
-  // Set the next ping time
   state.nextAutoPingTime = Date.now() + intervalMs;
-  
-  // Update immediately
-  updateAutoCountdownStatus();
-  
-  // Update every second
-  state.autoCountdownTimer = setInterval(() => {
-    updateAutoCountdownStatus();
-  }, 1000);
+  autoCountdownTimer.start(intervalMs);
 }
+
 function stopAutoCountdown() {
-  if (state.autoCountdownTimer) {
-    clearInterval(state.autoCountdownTimer);
-    state.autoCountdownTimer = null;
-  }
   state.nextAutoPingTime = null;
+  autoCountdownTimer.stop();
 }
-function updateApiCountdownStatus() {
-  if (!state.apiPostTime) {
-    return;
-  }
-  
-  const remainingMs = state.apiPostTime - Date.now();
-  if (remainingMs <= 0) {
-    setStatus("Posting to API...", "text-sky-300");
-    return;
-  }
-  
-  const remainingSec = Math.ceil(remainingMs / 1000);
-  setStatus(`Wait to post API (${remainingSec}s)`, "text-sky-300");
-}
+
 function startApiCountdown(delayMs) {
-  // Stop any existing countdown
-  stopApiCountdown();
-  
-  // Set the API post time
   state.apiPostTime = Date.now() + delayMs;
-  
-  // Update immediately
-  updateApiCountdownStatus();
-  
-  // Update every second
-  state.apiCountdownTimer = setInterval(() => {
-    updateApiCountdownStatus();
-  }, 1000);
+  apiCountdownTimer.start(delayMs);
 }
+
 function stopApiCountdown() {
-  if (state.apiCountdownTimer) {
-    clearInterval(state.apiCountdownTimer);
-    state.apiCountdownTimer = null;
-  }
   state.apiPostTime = null;
+  apiCountdownTimer.stop();
 }
+// Cooldown management
 function isInCooldown() {
   return state.cooldownEndTime && Date.now() < state.cooldownEndTime;
 }
+
+function getRemainingCooldownSeconds() {
+  if (!isInCooldown()) return 0;
+  return Math.ceil((state.cooldownEndTime - Date.now()) / 1000);
+}
+
 function startCooldown() {
   state.cooldownEndTime = Date.now() + COOLDOWN_MS;
   updateControlsForCooldown();
   
-  // Clear any existing cooldown update and schedule a new one
   if (state.cooldownUpdateTimer) {
     clearTimeout(state.cooldownUpdateTimer);
   }
+  
   state.cooldownUpdateTimer = setTimeout(() => {
     state.cooldownEndTime = null;
     updateControlsForCooldown();
   }, COOLDOWN_MS);
 }
+
 function updateControlsForCooldown() {
   const connected = !!state.connection;
   const inCooldown = isInCooldown();
   sendPingBtn.disabled = !connected || inCooldown;
   autoToggleBtn.disabled = !connected || inCooldown;
+}
+
+// Timer cleanup
+function cleanupAllTimers() {
+  debugLog("Cleaning up all timers");
+  
+  if (state.meshMapperTimer) {
+    clearTimeout(state.meshMapperTimer);
+    state.meshMapperTimer = null;
+  }
+  
+  if (state.cooldownUpdateTimer) {
+    clearTimeout(state.cooldownUpdateTimer);
+    state.cooldownUpdateTimer = null;
+  }
+  
+  stopAutoCountdown();
+  stopApiCountdown();
+  state.cooldownEndTime = null;
 }
 function enableControls(connected) {
   connectBtn.disabled     = false;
@@ -505,35 +549,36 @@ function buildPayload(lat, lon) {
 }
 
 // ---- MeshMapper API ----
+/**
+ * Get the current device identifier for API calls
+ * @returns {string} Device name or default identifier
+ */
+function getDeviceIdentifier() {
+  const deviceText = deviceInfoEl?.textContent;
+  return (deviceText && deviceText !== "—") ? deviceText : MESHMAPPER_DEFAULT_WHO;
+}
+
+/**
+ * Post wardrive ping data to MeshMapper API
+ * @param {number} lat - Latitude
+ * @param {number} lon - Longitude
+ */
 async function postToMeshMapperAPI(lat, lon) {
   try {
-
-    // Get current power setting
-    const power = getCurrentPowerSetting();
-    const powerValue = power || "N/A";
-
-    // Use device name if available, otherwise use default
-    const deviceText = deviceInfoEl?.textContent;
-    const whoIdentifier = (deviceText && deviceText !== "—") ? deviceText : MESHMAPPER_DEFAULT_WHO;
-
-    // Build API payload
     const payload = {
       key: MESHMAPPER_API_KEY,
-      lat: lat,
-      lon: lon,
-      who: whoIdentifier,
-      power: powerValue,
+      lat,
+      lon,
+      who: getDeviceIdentifier(),
+      power: getCurrentPowerSetting() || "N/A",
       test: 0
     };
 
-    debugLog(`Posting to MeshMapper API: lat=${lat.toFixed(5)}, lon=${lon.toFixed(5)}, who=${whoIdentifier}, power=${powerValue}`);
+    debugLog(`Posting to MeshMapper API: lat=${lat.toFixed(5)}, lon=${lon.toFixed(5)}, who=${payload.who}, power=${payload.power}`);
 
-    // POST to MeshMapper API
     const response = await fetch(MESHMAPPER_API_URL, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
 
@@ -548,68 +593,164 @@ async function postToMeshMapperAPI(lat, lon) {
   }
 }
 
+/**
+ * Schedule MeshMapper API post and coverage map refresh after a ping
+ * @param {number} lat - Latitude
+ * @param {number} lon - Longitude
+ * @param {number} accuracy - GPS accuracy in meters
+ */
+function scheduleApiPostAndMapRefresh(lat, lon, accuracy) {
+  // Clear any existing timer
+  if (state.meshMapperTimer) {
+    debugLog("Clearing existing MeshMapper timer");
+    clearTimeout(state.meshMapperTimer);
+  }
+
+  debugLog(`Scheduling MeshMapper API post in ${MESHMAPPER_DELAY_MS}ms`);
+  
+  state.meshMapperTimer = setTimeout(async () => {
+    stopApiCountdown();
+    setStatus("Posting to API...", STATUS_COLORS.info);
+    
+    try {
+      await postToMeshMapperAPI(lat, lon);
+    } catch (error) {
+      debugError("MeshMapper API post failed:", error);
+    }
+    
+    // Update map after API post
+    setTimeout(() => {
+      const shouldRefreshMap = accuracy && accuracy < GPS_ACCURACY_THRESHOLD_M;
+      
+      if (shouldRefreshMap) {
+        debugLog(`Refreshing coverage map (accuracy ${accuracy}m within threshold)`);
+        scheduleCoverageRefresh(lat, lon);
+      } else {
+        debugLog(`Skipping map refresh (accuracy ${accuracy}m exceeds threshold)`);
+      }
+      
+      // Update status based on current mode
+      if (state.connection) {
+        if (state.running) {
+          debugLog("Scheduling next auto ping");
+          scheduleNextAutoPing();
+        } else {
+          debugLog("Setting status to idle");
+          setStatus("Idle", STATUS_COLORS.idle);
+        }
+      }
+    }, MAP_REFRESH_DELAY_MS);
+    
+    state.meshMapperTimer = null;
+  }, MESHMAPPER_DELAY_MS);
+}
+
 // ---- Ping ----
+/**
+ * Get GPS coordinates for ping operation
+ * @param {boolean} isAutoMode - Whether this is an auto ping
+ * @returns {Promise<{lat: number, lon: number, accuracy: number}|null>} GPS coordinates or null if unavailable
+ */
+async function getGpsCoordinatesForPing(isAutoMode) {
+  if (isAutoMode) {
+    // Auto mode: use GPS watch data only
+    if (!state.lastFix) {
+      debugWarn("Auto ping skipped: no GPS fix available yet");
+      setStatus("Waiting for GPS fix...", STATUS_COLORS.warning);
+      return null;
+    }
+    debugLog(`Using GPS watch data: lat=${state.lastFix.lat.toFixed(5)}, lon=${state.lastFix.lon.toFixed(5)}`);
+    return {
+      lat: state.lastFix.lat,
+      lon: state.lastFix.lon,
+      accuracy: state.lastFix.accM
+    };
+  }
+  
+  // Manual mode: check if cached data is recent enough
+  const intervalMs = getSelectedIntervalMs();
+  const maxAge = intervalMs + GPS_FRESHNESS_BUFFER_MS;
+  const isCachedDataFresh = state.lastFix && (Date.now() - state.lastFix.tsMs) < maxAge;
+  
+  if (isCachedDataFresh) {
+    debugLog(`Using cached GPS data (age: ${Date.now() - state.lastFix.tsMs}ms)`);
+    return {
+      lat: state.lastFix.lat,
+      lon: state.lastFix.lon,
+      accuracy: state.lastFix.accM
+    };
+  }
+  
+  // Get fresh GPS coordinates for manual ping
+  debugLog("Requesting fresh GPS position for manual ping");
+  const pos = await getCurrentPosition();
+  const coords = {
+    lat: pos.coords.latitude,
+    lon: pos.coords.longitude,
+    accuracy: pos.coords.accuracy
+  };
+  debugLog(`Fresh GPS acquired: lat=${coords.lat.toFixed(5)}, lon=${coords.lon.toFixed(5)}, accuracy=${coords.accuracy}m`);
+  
+  state.lastFix = {
+    lat: coords.lat,
+    lon: coords.lon,
+    accM: coords.accuracy,
+    tsMs: Date.now()
+  };
+  updateGpsUi();
+  
+  return coords;
+}
+
+/**
+ * Log ping information to the UI
+ * @param {string} payload - The ping message
+ * @param {number} lat - Latitude
+ * @param {number} lon - Longitude
+ */
+function logPingToUI(payload, lat, lon) {
+  const nowStr = new Date().toLocaleString();
+  
+  if (lastPingEl) {
+    lastPingEl.textContent = `${nowStr} — ${payload}`;
+  }
+
+  if (sessionPingsEl) {
+    const line = `${nowStr}  ${lat.toFixed(5)} ${lon.toFixed(5)}`;
+    const li = document.createElement('li');
+    li.textContent = line;
+    sessionPingsEl.appendChild(li);
+    // Auto-scroll to bottom
+    sessionPingsEl.scrollTop = sessionPingsEl.scrollHeight;
+  }
+}
+
+/**
+ * Send a wardrive ping with current GPS coordinates
+ * @param {boolean} manual - Whether this is a manual ping (true) or auto ping (false)
+ */
 async function sendPing(manual = false) {
   debugLog(`sendPing called (manual=${manual})`);
   try {
     // Check cooldown only for manual pings
     if (manual && isInCooldown()) {
-      const remainingMs = state.cooldownEndTime - Date.now();
-      const remainingSec = Math.ceil(remainingMs / 1000);
+      const remainingSec = getRemainingCooldownSeconds();
       debugLog(`Manual ping blocked by cooldown (${remainingSec}s remaining)`);
-      setStatus(`Please wait ${remainingSec}s before sending another ping`, "text-amber-300");
+      setStatus(`Please wait ${remainingSec}s before sending another ping`, STATUS_COLORS.warning);
       return;
     }
 
     // Stop the countdown timer when sending an auto ping to avoid status conflicts
     if (!manual && state.running) {
       stopAutoCountdown();
-      setStatus("Sending auto ping...", "text-sky-300");
+      setStatus("Sending auto ping...", STATUS_COLORS.info);
     }
 
-    let lat, lon, accuracy;
-
-    // In auto mode, always use the most recent GPS coordinates from the watch
-    // In manual mode, get fresh GPS if needed
-    if (!manual && state.running) {
-      // Auto mode: use GPS watch data
-      if (!state.lastFix) {
-        // If no GPS fix yet in auto mode, skip this ping and wait for watch to acquire location
-        debugWarn("Auto ping skipped: no GPS fix available yet");
-        setStatus("Waiting for GPS fix...", "text-amber-300");
-        return;
-      }
-      debugLog(`Using GPS watch data for auto ping: lat=${state.lastFix.lat.toFixed(5)}, lon=${state.lastFix.lon.toFixed(5)}`);
-      lat = state.lastFix.lat;
-      lon = state.lastFix.lon;
-      accuracy = state.lastFix.accM;
-    } else {
-      // Manual mode: check if we have recent enough GPS data
-      const intervalMs = getSelectedIntervalMs();
-      const maxAge = intervalMs + GPS_FRESHNESS_BUFFER_MS; // Allow buffer beyond interval
-
-      if (state.lastFix && (Date.now() - state.lastFix.tsMs) < maxAge) {
-        debugLog(`Using cached GPS data (age: ${Date.now() - state.lastFix.tsMs}ms)`);
-        lat = state.lastFix.lat;
-        lon = state.lastFix.lon;
-        accuracy = state.lastFix.accM;
-      } else {
-        // Get fresh GPS coordinates for manual ping
-        debugLog("Requesting fresh GPS position for manual ping");
-        const pos = await getCurrentPosition();
-        lat = pos.coords.latitude;
-        lon = pos.coords.longitude;
-        accuracy = pos.coords.accuracy;
-        debugLog(`Fresh GPS acquired: lat=${lat.toFixed(5)}, lon=${lon.toFixed(5)}, accuracy=${accuracy}m`);
-        state.lastFix = {
-          lat,
-          lon,
-          accM: accuracy,
-          tsMs: Date.now(),
-        };
-        updateGpsUi();
-      }
-    }
+    // Get GPS coordinates
+    const coords = await getGpsCoordinatesForPing(!manual && state.running);
+    if (!coords) return; // GPS not available, message already shown
+    
+    const { lat, lon, accuracy } = coords;
 
     const payload = buildPayload(lat, lon);
     debugLog(`Sending ping to channel: "${payload}"`);
@@ -623,80 +764,23 @@ async function sendPing(manual = false) {
     startCooldown();
 
     // Update status after ping is sent
-    // Brief delay to show "Ping sent" status before moving to countdown
-    setStatus(manual ? "Ping sent" : "Auto ping sent", "text-emerald-300");
+    setStatus(manual ? "Ping sent" : "Auto ping sent", STATUS_COLORS.success);
     
+    // Start API countdown after brief delay to show "Ping sent" message
     setTimeout(() => {
       if (state.connection) {
-        // Start countdown for API post
         startApiCountdown(MESHMAPPER_DELAY_MS);
       }
     }, STATUS_UPDATE_DELAY_MS);
 
-    // Schedule MeshMapper API call with 7-second delay (non-blocking)
-    // Clear any existing timer first
-    if (state.meshMapperTimer) {
-      debugLog("Clearing existing MeshMapper timer");
-      clearTimeout(state.meshMapperTimer);
-    }
-
-    debugLog(`Scheduling MeshMapper API post in ${MESHMAPPER_DELAY_MS}ms`);
-    state.meshMapperTimer = setTimeout(async () => {
-      // Capture accuracy in closure to ensure it's available in nested callback
-      const capturedAccuracy = accuracy;
-      
-      // Stop the API countdown since we're posting now
-      stopApiCountdown();
-      setStatus("Posting to API...", "text-sky-300");
-      
-      try {
-        await postToMeshMapperAPI(lat, lon);
-      } catch (error) {
-        debugError("MeshMapper API post failed:", error);
-        // Continue with map refresh and status update even if API fails
-      }
-      
-      // Update map after API post to ensure backend updated
-      setTimeout(() => {
-        if (capturedAccuracy && capturedAccuracy < GPS_ACCURACY_THRESHOLD_M) {
-          debugLog(`Refreshing coverage map (accuracy ${capturedAccuracy}m within threshold)`);
-          scheduleCoverageRefresh(lat, lon);
-        } else {
-          debugLog(`Skipping map refresh (accuracy ${capturedAccuracy}m exceeds threshold)`);
-        }
-        
-        // Set status to idle after map update
-        if (state.connection) {
-          // If in auto mode, schedule next ping. Otherwise, set to idle
-          if (state.running) {
-            // Schedule the next auto ping with countdown
-            debugLog("Scheduling next auto ping");
-            scheduleNextAutoPing();
-          } else {
-            debugLog("Setting status to idle");
-            setStatus("Idle", "text-slate-300");
-          }
-        }
-      }, MAP_REFRESH_DELAY_MS);
-      
-      state.meshMapperTimer = null;
-    }, MESHMAPPER_DELAY_MS);
+    // Schedule MeshMapper API post and map refresh
+    scheduleApiPostAndMapRefresh(lat, lon, accuracy);
     
-    const nowStr = new Date().toLocaleString();
-    if (lastPingEl) lastPingEl.textContent = `${nowStr} — ${payload}`;
-
-    // Session log
-    if (sessionPingsEl) {
-      const line = `${nowStr}  ${lat.toFixed(5)} ${lon.toFixed(5)}`;
-      const li = document.createElement('li');
-      li.textContent = line;
-      sessionPingsEl.appendChild(li);
-       // Auto-scroll to bottom when a new entry arrives
-      sessionPingsEl.scrollTop = sessionPingsEl.scrollHeight;
-    }
+    // Update UI with ping info
+    logPingToUI(payload, lat, lon);
   } catch (e) {
     debugError(`Ping operation failed: ${e.message}`, e);
-    setStatus(e.message || "Ping failed", "text-red-300");
+    setStatus(e.message || "Ping failed", STATUS_COLORS.error);
   }
 }
 
@@ -705,10 +789,9 @@ function stopAutoPing(stopGps = false) {
   debugLog(`stopAutoPing called (stopGps=${stopGps})`);
   // Check if we're in cooldown before stopping (unless stopGps is true for disconnect)
   if (!stopGps && isInCooldown()) {
-    const remainingMs = state.cooldownEndTime - Date.now();
-    const remainingSec = Math.ceil(remainingMs / 1000);
+    const remainingSec = getRemainingCooldownSeconds();
     debugLog(`Auto ping stop blocked by cooldown (${remainingSec}s remaining)`);
-    setStatus(`Please wait ${remainingSec}s before toggling auto mode`, "text-amber-300");
+    setStatus(`Please wait ${remainingSec}s before toggling auto mode`, STATUS_COLORS.warning);
     return;
   }
   
@@ -760,10 +843,9 @@ function startAutoPing() {
   
   // Check if we're in cooldown
   if (isInCooldown()) {
-    const remainingMs = state.cooldownEndTime - Date.now();
-    const remainingSec = Math.ceil(remainingMs / 1000);
+    const remainingSec = getRemainingCooldownSeconds();
     debugLog(`Auto ping start blocked by cooldown (${remainingSec}s remaining)`);
-    setStatus(`Please wait ${remainingSec}s before toggling auto mode`, "text-amber-300");
+    setStatus(`Please wait ${remainingSec}s before toggling auto mode`, STATUS_COLORS.warning);
     return;
   }
   
@@ -800,7 +882,7 @@ async function connect() {
     return;
   }
   connectBtn.disabled = true;
-  setStatus("Connecting…", "text-sky-300");
+  setStatus("Connecting…", STATUS_COLORS.info);
 
   try {
     debugLog("Opening BLE connection...");
@@ -810,7 +892,7 @@ async function connect() {
 
     conn.on("connected", async () => {
       debugLog("BLE connected event fired");
-      setStatus("Connected", "text-emerald-300");
+      setStatus("Connected", STATUS_COLORS.success);
       setConnectButton(true);
       connectBtn.disabled = false;
       const selfInfo = await conn.getSelfInfo();
@@ -828,13 +910,13 @@ async function connect() {
         await primeGpsOnce();
       } catch (e) {
         debugError(`Channel setup failed: ${e.message}`, e);
-        setStatus(e.message || "Channel setup failed", "text-red-300");
+        setStatus(e.message || "Channel setup failed", STATUS_COLORS.error);
       }
     });
 
     conn.on("disconnected", () => {
       debugLog("BLE disconnected event fired");
-      setStatus("Disconnected", "text-red-300");
+      setStatus("Disconnected", STATUS_COLORS.error);
       setConnectButton(false);
       deviceInfoEl.textContent = "—";
       state.connection = null;
@@ -845,20 +927,8 @@ async function connect() {
       stopGeoWatch();
       stopGpsAgeUpdater(); // Ensure age updater stops
       
-      // Clean up timers
-      if (state.meshMapperTimer) {
-        debugLog("Clearing MeshMapper timer on disconnect");
-        clearTimeout(state.meshMapperTimer);
-        state.meshMapperTimer = null;
-      }
-      if (state.cooldownUpdateTimer) {
-        debugLog("Clearing cooldown timer on disconnect");
-        clearTimeout(state.cooldownUpdateTimer);
-        state.cooldownUpdateTimer = null;
-      }
-      stopAutoCountdown();
-      stopApiCountdown();
-      state.cooldownEndTime = null;
+      // Clean up all timers
+      cleanupAllTimers();
       
       state.lastFix = null;
       state.gpsState = "idle";
@@ -868,7 +938,7 @@ async function connect() {
 
   } catch (e) {
     debugError(`BLE connection failed: ${e.message}`, e);
-    setStatus("Failed to connect", "text-red-300");
+    setStatus("Failed to connect", STATUS_COLORS.error);
     connectBtn.disabled = false;
   }
 }
@@ -880,7 +950,7 @@ async function disconnect() {
   }
 
   connectBtn.disabled = true;
-  setStatus("Disconnecting...", "text-sky-300");
+  setStatus("Disconnecting...", STATUS_COLORS.info);
 
   try {
     // WebBleConnection typically exposes one of these.
@@ -898,7 +968,7 @@ async function disconnect() {
     }
   } catch (e) {
     debugError(`BLE disconnect failed: ${e.message}`, e);
-    setStatus(e.message || "Disconnect failed", "text-red-300");
+    setStatus(e.message || "Disconnect failed", STATUS_COLORS.error);
   } finally {
     connectBtn.disabled = false;
   }
@@ -912,7 +982,7 @@ document.addEventListener("visibilitychange", async () => {
     if (state.running) {
       debugLog("Stopping auto ping due to page hidden");
       stopAutoPing(true); // Ignore cooldown check when page is hidden
-      setStatus("Lost focus, auto mode stopped", "text-amber-300");
+      setStatus("Lost focus, auto mode stopped", STATUS_COLORS.warning);
     } else {
       debugLog("Releasing wake lock due to page hidden");
       releaseWakeLock();
@@ -926,7 +996,7 @@ document.addEventListener("visibilitychange", async () => {
 // ---- Bind UI & init ----
 export async function onLoad() {
   debugLog("wardrive.js onLoad() called - initializing");
-  setStatus("Disconnected", "text-red-300");
+  setStatus("Disconnected", STATUS_COLORS.error);
   enableControls(false);
   updateAutoButton();
 
@@ -939,7 +1009,7 @@ export async function onLoad() {
       }
     } catch (e) {
       debugError(`Connection button error: ${e.message}`, e);
-      setStatus(e.message || "Connection error", "text-red-300");
+      setStatus(e.message || "Connection error", STATUS_COLORS.error);
     }
   });
   sendPingBtn.addEventListener("click", () => {
@@ -950,7 +1020,7 @@ export async function onLoad() {
     debugLog("Auto toggle button clicked");
     if (state.running) {
       stopAutoPing();
-      setStatus("Auto mode stopped", "text-slate-300");
+      setStatus("Auto mode stopped", STATUS_COLORS.idle);
     } else {
       startAutoPing();
     }
