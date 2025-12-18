@@ -471,21 +471,38 @@ function startRepeaterTracking(sessionLi) {
     repeaters: new Map() // Map of repeaterID -> SNR
   };
   
+  console.log(`[Repeater Tracker] Started listening for channel echoes (${REPEATER_LISTEN_MS}ms window)`);
+  
   // Create listener for LogRxData events
   state.repeaterLogListener = (logData) => {
     try {
       // Check if repeater data collection is still active
       if (!state.repeaterData) return;
       
+      // Log raw LogRxData event for debugging
+      console.log('[Repeater Tracker] LogRxData event received:', {
+        hasRaw: !!logData?.raw,
+        rawLength: logData?.raw?.length,
+        lastSnr: logData?.lastSnr
+      });
+      
       // Validate input data
-      if (!logData || typeof logData.lastSnr !== 'number' || !logData.raw) return;
+      if (!logData || typeof logData.lastSnr !== 'number' || !logData.raw) {
+        console.log('[Repeater Tracker] Invalid LogRxData - missing required fields');
+        return;
+      }
       
       // Parse the packet from raw data
       let packet;
       try {
         packet = Packet.fromBytes(logData.raw);
+        console.log('[Repeater Tracker] Packet parsed:', {
+          payloadType: packet.getPayloadType(),
+          pathLength: packet.path?.length || 0,
+          hasPath: !!packet.path
+        });
       } catch (parseError) {
-        console.warn("Failed to parse packet from LogRxData:", parseError);
+        console.warn("[Repeater Tracker] Failed to parse packet from LogRxData:", parseError);
         return;
       }
       
@@ -493,6 +510,7 @@ function startRepeaterTracking(sessionLi) {
       // Verify path exists and has at least one byte (repeater ID)
       if (packet.getPayloadType() === Packet.PAYLOAD_TYPE_GRP_TXT && 
           packet.path && packet.path.length > 0) {
+        console.log('[Repeater Tracker] Group text message detected with path');
         // Extract repeater ID (first byte of path)
         const repeaterId = packet.path[0];
         
@@ -513,7 +531,9 @@ function startRepeaterTracking(sessionLi) {
         if (!state.repeaterData.repeaters.has(repeaterId) || 
             state.repeaterData.repeaters.get(repeaterId) < snr) {
           state.repeaterData.repeaters.set(repeaterId, snr);
-          console.log(`Repeater detected: ID=${repeaterId}, SNR=${snr}dB`);
+          console.log(`[Repeater Tracker] ✓ Channel echo detected: Repeater ID=${repeaterId}, SNR=${snr}dB`);
+        } else {
+          console.log(`[Repeater Tracker] Duplicate echo from Repeater ID=${repeaterId} with lower/equal SNR=${snr}dB (keeping existing SNR=${state.repeaterData.repeaters.get(repeaterId)}dB)`);
         }
       }
     } catch (e) {
@@ -559,7 +579,9 @@ function stopRepeaterTracking() {
       // Append to the existing text in the session log
       const currentText = state.repeaterData.sessionLi.textContent;
       state.repeaterData.sessionLi.textContent = `${currentText}  [${repeaterList}]`;
-      console.log(`Session ping updated with ${repeaters.size} repeater(s)`);
+      console.log(`[Repeater Tracker] Stopped listening. Total ${repeaters.size} unique repeater(s) detected: [${repeaterList}]`);
+    } else {
+      console.log(`[Repeater Tracker] Stopped listening. No channel echoes detected in ${REPEATER_LISTEN_MS}ms window`);
     }
   }
   
