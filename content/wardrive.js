@@ -474,6 +474,9 @@ function startRepeaterTracking(sessionLi) {
   // Create listener for LogRxData events
   state.repeaterLogListener = (logData) => {
     try {
+      // Check if repeater data collection is still active
+      if (!state.repeaterData) return;
+      
       // Parse the packet from raw data
       const packet = Packet.fromBytes(logData.raw);
       
@@ -484,6 +487,7 @@ function startRepeaterTracking(sessionLi) {
         const snr = Math.round(logData.lastSnr);
         
         // Store or update repeater data (keep best/strongest SNR if duplicate)
+        // Higher (less negative) SNR values indicate better signal quality
         if (!state.repeaterData.repeaters.has(repeaterId) || 
             state.repeaterData.repeaters.get(repeaterId) < snr) {
           state.repeaterData.repeaters.set(repeaterId, snr);
@@ -523,7 +527,8 @@ function stopRepeaterTracking() {
   if (state.repeaterData && state.repeaterData.sessionLi) {
     const repeaters = state.repeaterData.repeaters;
     if (repeaters.size > 0) {
-      // Format repeater data as [ID1(-SNR1),ID2(-SNR2),...]
+      // Format repeater data as [ID1(SNR1),ID2(SNR2),...]
+      // SNR values are typically negative, e.g., [25(-112),21(-109)]
       const repeaterList = Array.from(repeaters.entries())
         .sort((a, b) => a[0] - b[0]) // Sort by repeater ID
         .map(([id, snr]) => `${id}(${snr})`)
