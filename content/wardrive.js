@@ -29,10 +29,20 @@ const MESHMAPPER_DELAY_MS = 7000;              // Delay MeshMapper API call by 7
 const COOLDOWN_MS = 7000;                      // Cooldown period for manual ping and auto toggle
 const STATUS_UPDATE_DELAY_MS = 100;            // Brief delay to ensure "Ping sent" status is visible
 const MAP_REFRESH_DELAY_MS = 1000;             // Delay after API post to ensure backend updated
+const COUNTDOWN_UPDATE_INTERVAL_MS = 1000;     // Update countdown displays every second
 const WARDROVE_KEY     = new Uint8Array([
   0x40, 0x76, 0xC3, 0x15, 0xC1, 0xEF, 0x38, 0x5F,
   0xA9, 0x3F, 0x06, 0x60, 0x27, 0x32, 0x0F, 0xE5
 ]);
+
+// ---- Utility helpers ----
+// Clear a timer and return null for assignment
+function clearTimer(timerId, timerType = 'timeout') {
+  if (timerId) {
+    timerType === 'interval' ? clearInterval(timerId) : clearTimeout(timerId);
+  }
+  return null;
+}
 
 // MeshMapper API Configuration
 const MESHMAPPER_API_URL = "https://yow.meshmapper.net/wardriving-api.php";
@@ -85,13 +95,37 @@ function setStatus(text, color = "text-slate-300") {
   statusEl.textContent = text;
   statusEl.className = `font-semibold ${color}`;
 }
+
+// Generic countdown helper to reduce duplication
+function createCountdownManager(name, timeKey, timerKey, updateFn) {
+  return {
+    start(delayMs) {
+      debugLog(`${name}: starting countdown, delay:`, delayMs, 'ms');
+      this.stop();
+      state[timeKey] = Date.now() + delayMs;
+      updateFn();
+      state[timerKey] = setInterval(updateFn, COUNTDOWN_UPDATE_INTERVAL_MS);
+      debugLog(`${name}: countdown timer started`);
+    },
+    stop() {
+      debugLog(`${name}: clearing countdown timer`);
+      state[timerKey] = clearTimer(state[timerKey], 'interval');
+      state[timeKey] = null;
+    },
+    getRemainingMs() {
+      return state[timeKey] ? state[timeKey] - Date.now() : 0;
+    }
+  };
+}
+
+// Auto-ping countdown
 function updateAutoCountdownStatus() {
   if (!state.running || !state.nextAutoPingTime) {
     debugLog('updateAutoCountdownStatus: skipping (not running or no next ping time)');
     return;
   }
   
-  const remainingMs = state.nextAutoPingTime - Date.now();
+  const remainingMs = autoCountdown.getRemainingMs();
   if (remainingMs <= 0) {
     debugLog('updateAutoCountdownStatus: sending auto ping now');
     setStatus("Sending auto ping...", "text-sky-300");
@@ -102,38 +136,22 @@ function updateAutoCountdownStatus() {
   debugLog('updateAutoCountdownStatus: countdown', remainingSec, 'seconds');
   setStatus(`Waiting for next auto ping (${remainingSec}s)`, "text-slate-300");
 }
-function startAutoCountdown(intervalMs) {
-  debugLog('startAutoCountdown: interval', intervalMs, 'ms');
-  // Stop any existing countdown
-  stopAutoCountdown();
-  
-  // Set the next ping time
-  state.nextAutoPingTime = Date.now() + intervalMs;
-  
-  // Update immediately
-  updateAutoCountdownStatus();
-  
-  // Update every second
-  state.autoCountdownTimer = setInterval(() => {
-    updateAutoCountdownStatus();
-  }, 1000);
-  debugLog('startAutoCountdown: countdown timer started');
-}
-function stopAutoCountdown() {
-  debugLog('stopAutoCountdown: clearing countdown timer');
-  if (state.autoCountdownTimer) {
-    clearInterval(state.autoCountdownTimer);
-    state.autoCountdownTimer = null;
-  }
-  state.nextAutoPingTime = null;
-}
+
+const autoCountdown = createCountdownManager(
+  'autoCountdown',
+  'nextAutoPingTime',
+  'autoCountdownTimer',
+  updateAutoCountdownStatus
+);
+
+// API post countdown
 function updateApiCountdownStatus() {
   if (!state.apiPostTime) {
     debugLog('updateApiCountdownStatus: no API post time set');
     return;
   }
   
-  const remainingMs = state.apiPostTime - Date.now();
+  const remainingMs = apiCountdown.getRemainingMs();
   if (remainingMs <= 0) {
     debugLog('updateApiCountdownStatus: posting to API now');
     setStatus("Posting to API...", "text-sky-300");
@@ -144,33 +162,25 @@ function updateApiCountdownStatus() {
   debugLog('updateApiCountdownStatus: API post countdown', remainingSec, 'seconds');
   setStatus(`Wait to post API (${remainingSec}s)`, "text-sky-300");
 }
-function startApiCountdown(delayMs) {
-  debugLog('startApiCountdown: delay', delayMs, 'ms');
-  // Stop any existing countdown
-  stopApiCountdown();
-  
-  // Set the API post time
-  state.apiPostTime = Date.now() + delayMs;
-  
-  // Update immediately
-  updateApiCountdownStatus();
-  
-  // Update every second
-  state.apiCountdownTimer = setInterval(() => {
-    updateApiCountdownStatus();
-  }, 1000);
-  debugLog('startApiCountdown: API countdown timer started');
+
+const apiCountdown = createCountdownManager(
+  'apiCountdown',
+  'apiPostTime',
+  'apiCountdownTimer',
+  updateApiCountdownStatus
+);
+
+// Legacy functions for backward compatibility
+const startAutoCountdown = (intervalMs) => autoCountdown.start(intervalMs);
+const stopAutoCountdown = () => autoCountdown.stop();
+const startApiCountdown = (delayMs) => apiCountdown.start(delayMs);
+const stopApiCountdown = () => apiCountdown.stop();
+function getCooldownRemainingMs() {
+  return state.cooldownEndTime ? state.cooldownEndTime - Date.now() : 0;
 }
-function stopApiCountdown() {
-  debugLog('stopApiCountdown: clearing API countdown timer');
-  if (state.apiCountdownTimer) {
-    clearInterval(state.apiCountdownTimer);
-    state.apiCountdownTimer = null;
-  }
-  state.apiPostTime = null;
-}
+
 function isInCooldown() {
-  const inCooldown = state.cooldownEndTime && Date.now() < state.cooldownEndTime;
+  const inCooldown = getCooldownRemainingMs() > 0;
   debugLog('isInCooldown:', inCooldown, 'cooldownEndTime:', state.cooldownEndTime);
   return inCooldown;
 }
@@ -180,9 +190,7 @@ function startCooldown() {
   updateControlsForCooldown();
   
   // Clear any existing cooldown update and schedule a new one
-  if (state.cooldownUpdateTimer) {
-    clearTimeout(state.cooldownUpdateTimer);
-  }
+  state.cooldownUpdateTimer = clearTimer(state.cooldownUpdateTimer);
   state.cooldownUpdateTimer = setTimeout(() => {
     debugLog('startCooldown: cooldown period ended');
     state.cooldownEndTime = null;
@@ -228,8 +236,7 @@ function scheduleCoverageRefresh(lat, lon, delayMs = 0) {
     return;
   }
 
-  if (coverageRefreshTimer) clearTimeout(coverageRefreshTimer);
-
+  coverageRefreshTimer = clearTimer(coverageRefreshTimer);
   coverageRefreshTimer = setTimeout(() => {
     const url = buildCoverageEmbedUrl(lat, lon);
     debugLog('scheduleCoverageRefresh: updating iframe to:', url);
@@ -386,10 +393,7 @@ function startGpsAgeUpdater() {
 // Stop GPS age display updates
 function stopGpsAgeUpdater() {
   debugLog('stopGpsAgeUpdater: stopping GPS age updater');
-  if (state.gpsAgeUpdateTimer) {
-    clearInterval(state.gpsAgeUpdateTimer);
-    state.gpsAgeUpdateTimer = null;
-  }
+  state.gpsAgeUpdateTimer = clearTimer(state.gpsAgeUpdateTimer, 'interval');
 }
 function startGeoWatch() {
   debugLog('startGeoWatch: starting continuous GPS watch');
@@ -609,8 +613,7 @@ async function sendPing(manual = false) {
   try {
     // Check cooldown only for manual pings
     if (manual && isInCooldown()) {
-      const remainingMs = state.cooldownEndTime - Date.now();
-      const remainingSec = Math.ceil(remainingMs / 1000);
+      const remainingSec = Math.ceil(getCooldownRemainingMs() / 1000);
       debugLog('sendPing: in cooldown, remaining:', remainingSec, 's');
       setStatus(`Please wait ${remainingSec}s before sending another ping`, "text-amber-300");
       return;
@@ -693,11 +696,8 @@ async function sendPing(manual = false) {
     }, STATUS_UPDATE_DELAY_MS);
 
     // Schedule MeshMapper API call with 7-second delay (non-blocking)
-    // Clear any existing timer first
-    if (state.meshMapperTimer) {
-      debugLog('sendPing: clearing existing MeshMapper timer');
-      clearTimeout(state.meshMapperTimer);
-    }
+    debugLog('sendPing: clearing existing MeshMapper timer');
+    state.meshMapperTimer = clearTimer(state.meshMapperTimer);
 
     debugLog('sendPing: scheduling MeshMapper API call with', MESHMAPPER_DELAY_MS, 'ms delay');
     state.meshMapperTimer = setTimeout(async () => {
@@ -774,18 +774,14 @@ function stopAutoPing(stopGps = false) {
   debugLog('stopAutoPing: stopping auto ping, stopGps:', stopGps);
   // Check if we're in cooldown before stopping (unless stopGps is true for disconnect)
   if (!stopGps && isInCooldown()) {
-    const remainingMs = state.cooldownEndTime - Date.now();
-    const remainingSec = Math.ceil(remainingMs / 1000);
+    const remainingSec = Math.ceil(getCooldownRemainingMs() / 1000);
     debugLog('stopAutoPing: in cooldown, remaining:', remainingSec, 's');
     setStatus(`Please wait ${remainingSec}s before toggling auto mode`, "text-amber-300");
     return;
   }
   
-  if (state.autoTimerId) {
-    debugLog('stopAutoPing: clearing auto timer');
-    clearTimeout(state.autoTimerId);
-    state.autoTimerId = null;
-  }
+  debugLog('stopAutoPing: clearing auto timer');
+  state.autoTimerId = clearTimer(state.autoTimerId);
   stopAutoCountdown();
   
   // Only stop GPS watch when disconnecting or page hidden, not during normal stop
@@ -833,19 +829,15 @@ function startAutoPing() {
   
   // Check if we're in cooldown
   if (isInCooldown()) {
-    const remainingMs = state.cooldownEndTime - Date.now();
-    const remainingSec = Math.ceil(remainingMs / 1000);
+    const remainingSec = Math.ceil(getCooldownRemainingMs() / 1000);
     debugLog('startAutoPing: in cooldown, remaining:', remainingSec, 's');
     setStatus(`Please wait ${remainingSec}s before toggling auto mode`, "text-amber-300");
     return;
   }
   
   // Clean up any existing auto-ping timer (but keep GPS watch running)
-  if (state.autoTimerId) {
-    debugLog('startAutoPing: clearing existing auto timer');
-    clearTimeout(state.autoTimerId);
-    state.autoTimerId = null;
-  }
+  debugLog('startAutoPing: clearing existing auto timer');
+  state.autoTimerId = clearTimer(state.autoTimerId);
   stopAutoCountdown();
   
   // Start GPS watch for continuous updates
@@ -925,14 +917,8 @@ async function connect() {
       
       // Clean up timers
       debugLog('connect: cleaning up timers on disconnect');
-      if (state.meshMapperTimer) {
-        clearTimeout(state.meshMapperTimer);
-        state.meshMapperTimer = null;
-      }
-      if (state.cooldownUpdateTimer) {
-        clearTimeout(state.cooldownUpdateTimer);
-        state.cooldownUpdateTimer = null;
-      }
+      state.meshMapperTimer = clearTimer(state.meshMapperTimer);
+      state.cooldownUpdateTimer = clearTimer(state.cooldownUpdateTimer);
       stopAutoCountdown();
       stopApiCountdown();
       state.cooldownEndTime = null;
