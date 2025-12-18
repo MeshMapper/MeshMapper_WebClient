@@ -118,6 +118,18 @@ This app automatically posts ping data to the YOW MeshMapper API to help compare
 
 ---
 
+## Debug Logging
+
+A lightweight debugging system designed for development without impacting production performance.
+
+### Features
+
+- **Toggle Control** — Enable via URL parameter (`?debug=true`) or set the default directly in code
+- **Consistent Logging API** — Use `debugLog()`, `debugWarn()`, and `debugError()` for uniform output
+- **Production-Safe** — Disabled by default to keep the console clean in production environments
+
+---
+
 ## 📋 Requirements
 
 ### MeshCore Device
