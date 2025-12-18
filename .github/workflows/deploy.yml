@@ -1,7 +1,7 @@
 name: Deploy to GitHub Pages
 
 on: 
-  push:
+  push: 
     branches: 
       - main
       - dev
@@ -9,8 +9,8 @@ on:
 
 permissions: 
   contents: read
-  pages:  write
-  id-token: write
+  pages:   write
+  id-token:  write
 
 concurrency:
   group:  "pages"
@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   build-and-deploy:
-    runs-on: ubuntu-latest
+    runs-on:  ubuntu-latest
     steps: 
       - name:  Checkout main branch
         uses:  actions/checkout@v4
@@ -29,27 +29,25 @@ jobs:
       - name: Checkout dev branch
         uses: actions/checkout@v4
         with:
-          ref: dev
+          ref:  dev
           path: dev-content
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
-      - name: Prepare combined deployment
-        run: |
+      - name:  Prepare combined deployment
+        run:  |
           mkdir -p _site
           
           # Copy main branch content to root
           cp -r main-content/* _site/ 2>/dev/null || true
-          cp -r main-content/.??* _site/ 2>/dev/null || true
           
           # Copy dev branch content to /dev subdirectory
           mkdir -p _site/dev
           cp -r dev-content/* _site/dev/ 2>/dev/null || true
-          cp -r dev-content/. ??* _site/dev/ 2>/dev/null || true
           
           # Clean up git directories
-          rm -rf _site/. git _site/.github _site/dev/.git _site/dev/.github
+          rm -rf _site/. git _site/.github _site/dev/.git _site/dev/. github
 
       - name: Upload artifact
         uses:  actions/upload-pages-artifact@v3
@@ -58,8 +56,8 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
         
-      - name: Comment deployment URL
+      - name:  Comment deployment URL
         run: |
           echo "✅ Deployed successfully!"
           echo "📦 Main branch: https://mralders0n.github.io/MeshCore-GOME-WarDriver/"
-          echo "🔧 Dev branch: https://mralders0n.github.io/MeshCore-GOME-WarDriver/dev/"
+          echo "🔧 Dev branch:  https://mralders0n.github.io/MeshCore-GOME-WarDriver/dev/"
