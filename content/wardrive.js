@@ -481,10 +481,18 @@ function startRepeaterTracking(sessionLi) {
       if (!logData || typeof logData.lastSnr !== 'number' || !logData.raw) return;
       
       // Parse the packet from raw data
-      const packet = Packet.fromBytes(logData.raw);
+      let packet;
+      try {
+        packet = Packet.fromBytes(logData.raw);
+      } catch (parseError) {
+        console.warn("Failed to parse packet from LogRxData:", parseError);
+        return;
+      }
       
       // Check if this is a group text message (our ping echo)
-      if (packet.getPayloadType() === Packet.PAYLOAD_TYPE_GRP_TXT && packet.path && packet.path.length > 0) {
+      // Verify path exists and has at least one byte (repeater ID)
+      if (packet.getPayloadType() === Packet.PAYLOAD_TYPE_GRP_TXT && 
+          packet.path && packet.path.length > 0 && packet.path[0] !== undefined) {
         // Extract repeater ID (first byte of path)
         const repeaterId = packet.path[0];
         const snr = Math.round(logData.lastSnr);
@@ -710,7 +718,8 @@ async function sendPing(manual = false) {
       state.meshMapperTimer = null;
     }, MESHMAPPER_DELAY_MS);
     
-    const nowStr = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+    // Format timestamp as ISO 8601 without milliseconds: YYYY-MM-DDTHH:MM:SSZ
+    const nowStr = new Date().toISOString().split('.')[0] + 'Z';
     if (lastPingEl) lastPingEl.textContent = `${nowStr} — ${payload}`;
 
     // Session log
