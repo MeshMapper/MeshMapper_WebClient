@@ -27,7 +27,7 @@ const OTTAWA_CENTER_LAT = 45.4215;             // Ottawa Parliament Hill latitud
 const OTTAWA_CENTER_LON = -75.6972;            // Ottawa Parliament Hill longitude
 const GEOFENCE_RADIUS_KM = 150;                // Ottawa geofence radius in kilometers
 const MIN_PING_DISTANCE_M = 25;                // Minimum movement required between pings in meters
-const DEBUG_GPS_LOGGING = false;               // Enable detailed GPS filtering console logs (set to true for debugging)
+const DEBUG_GPS_LOGGING = true;               // Enable detailed GPS filtering console logs (set to true for debugging)
 
 // MeshMapper API Configuration
 const MESHMAPPER_API_URL = "https://yow.meshmapper.net/wardriving-api.php";
