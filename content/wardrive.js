@@ -461,6 +461,9 @@ function buildPayload(lat, lon) {
 }
 
 // ---- Repeater Tracking ----
+// Tracks channel echoes (repeater responses) after sending a ping
+// Debug output is logged to browser console with [Repeater Tracker] prefix
+// Open DevTools console to see real-time echo detection and diagnose connectivity issues
 function startRepeaterTracking(sessionLi) {
   // Clean up any existing tracking
   stopRepeaterTracking();
@@ -471,21 +474,38 @@ function startRepeaterTracking(sessionLi) {
     repeaters: new Map() // Map of repeaterID -> SNR
   };
   
+  console.log(`[Repeater Tracker] Started listening for channel echoes (${REPEATER_LISTEN_MS}ms window)`);
+  
   // Create listener for LogRxData events
   state.repeaterLogListener = (logData) => {
     try {
       // Check if repeater data collection is still active
       if (!state.repeaterData) return;
       
+      // Log raw LogRxData event for debugging
+      console.log('[Repeater Tracker] LogRxData event received:', {
+        hasRaw: !!logData?.raw,
+        rawLength: logData?.raw?.length,
+        lastSnr: logData?.lastSnr
+      });
+      
       // Validate input data
-      if (!logData || typeof logData.lastSnr !== 'number' || !logData.raw) return;
+      if (!logData || typeof logData.lastSnr !== 'number' || !logData.raw) {
+        console.log('[Repeater Tracker] Invalid LogRxData - missing required fields');
+        return;
+      }
       
       // Parse the packet from raw data
       let packet;
       try {
         packet = Packet.fromBytes(logData.raw);
+        console.log('[Repeater Tracker] Packet parsed:', {
+          payloadType: packet.getPayloadType(),
+          pathLength: packet.path?.length || 0,
+          hasPath: !!packet.path
+        });
       } catch (parseError) {
-        console.warn("Failed to parse packet from LogRxData:", parseError);
+        console.warn("[Repeater Tracker] Failed to parse packet from LogRxData:", parseError);
         return;
       }
       
@@ -493,6 +513,7 @@ function startRepeaterTracking(sessionLi) {
       // Verify path exists and has at least one byte (repeater ID)
       if (packet.getPayloadType() === Packet.PAYLOAD_TYPE_GRP_TXT && 
           packet.path && packet.path.length > 0) {
+        console.log('[Repeater Tracker] Group text message detected with path');
         // Extract repeater ID (first byte of path)
         const repeaterId = packet.path[0];
         
@@ -513,7 +534,9 @@ function startRepeaterTracking(sessionLi) {
         if (!state.repeaterData.repeaters.has(repeaterId) || 
             state.repeaterData.repeaters.get(repeaterId) < snr) {
           state.repeaterData.repeaters.set(repeaterId, snr);
-          console.log(`Repeater detected: ID=${repeaterId}, SNR=${snr}dB`);
+          console.log(`[Repeater Tracker] ✓ Channel echo detected: Repeater ID=${repeaterId}, SNR=${snr}dB`);
+        } else {
+          console.log(`[Repeater Tracker] Duplicate echo from Repeater ID=${repeaterId} with lower/equal SNR=${snr}dB (keeping existing SNR=${state.repeaterData.repeaters.get(repeaterId)}dB)`);
         }
       }
     } catch (e) {
@@ -559,7 +582,9 @@ function stopRepeaterTracking() {
       // Append to the existing text in the session log
       const currentText = state.repeaterData.sessionLi.textContent;
       state.repeaterData.sessionLi.textContent = `${currentText}  [${repeaterList}]`;
-      console.log(`Session ping updated with ${repeaters.size} repeater(s)`);
+      console.log(`[Repeater Tracker] Stopped listening. Total ${repeaters.size} unique repeater(s) detected: [${repeaterList}]`);
+    } else {
+      console.log(`[Repeater Tracker] Stopped listening. No channel echoes detected in ${REPEATER_LISTEN_MS}ms window`);
     }
   }
   
@@ -670,6 +695,25 @@ async function sendPing(manual = false) {
 
     const payload = buildPayload(lat, lon);
 
+    // Format timestamp as ISO 8601 without milliseconds: YYYY-MM-DDTHH:MM:SSZ
+    const nowStr = new Date().toISOString().split('.')[0] + 'Z';
+    
+    // Create session log entry and start tracking BEFORE sending ping
+    // This ensures we capture echoes that arrive immediately after transmission
+    let sessionLogLi = null;
+    if (sessionPingsEl) {
+      const line = `${nowStr}  ${lat.toFixed(5)} ${lon.toFixed(5)}`;
+      sessionLogLi = document.createElement('li');
+      sessionLogLi.textContent = line;
+      sessionPingsEl.appendChild(sessionLogLi);
+      // Auto-scroll to bottom when a new entry arrives
+      sessionPingsEl.scrollTop = sessionPingsEl.scrollHeight;
+      
+      // Start tracking repeater echoes BEFORE sending the ping
+      // This is critical: echoes can arrive within milliseconds of transmission
+      startRepeaterTracking(sessionLogLi);
+    }
+
     const ch = await ensureChannel();
     await state.connection.sendChannelTextMessage(ch.channelIdx, payload);
 
@@ -729,22 +773,8 @@ async function sendPing(manual = false) {
       state.meshMapperTimer = null;
     }, MESHMAPPER_DELAY_MS);
     
-    // Format timestamp as ISO 8601 without milliseconds: YYYY-MM-DDTHH:MM:SSZ
-    const nowStr = new Date().toISOString().split('.')[0] + 'Z';
+    // Update last ping display
     if (lastPingEl) lastPingEl.textContent = `${nowStr} — ${payload}`;
-
-    // Session log
-    if (sessionPingsEl) {
-      const line = `${nowStr}  ${lat.toFixed(5)} ${lon.toFixed(5)}`;
-      const li = document.createElement('li');
-      li.textContent = line;
-      sessionPingsEl.appendChild(li);
-       // Auto-scroll to bottom when a new entry arrives
-      sessionPingsEl.scrollTop = sessionPingsEl.scrollHeight;
-      
-      // Start tracking repeater echoes for this ping
-      startRepeaterTracking(li);
-    }
   } catch (e) {
     console.error("Ping failed:", e);
     setStatus(e.message || "Ping failed", "text-red-300");
