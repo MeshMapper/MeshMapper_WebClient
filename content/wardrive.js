@@ -8,7 +8,9 @@
 import { WebBleConnection } from "./mc/index.js"; // your BLE client
 
 // ---- Debug Configuration ----
-const DEBUG_ENABLED = true; // Set to false to disable all debug logging
+// Enable debug logging via URL parameter (?debug=true) or set default here
+const urlParams = new URLSearchParams(window.location.search);
+const DEBUG_ENABLED = urlParams.get('debug') === 'true' || false; // Set to true to enable debug logging by default
 
 // Debug logging helper function
 function debugLog(message, ...args) {
@@ -217,7 +219,7 @@ function scheduleCoverageRefresh(lat, lon, delayMs = 0) {
 
   coverageRefreshTimer = setTimeout(() => {
     const url = buildCoverageEmbedUrl(lat, lon);
-    console.log("Coverage iframe URL:", url);
+    debugLog("Coverage iframe URL:", url);
     coverageFrameEl.src = url;
   }, delayMs);
 }
@@ -650,7 +652,7 @@ async function sendPing(manual = false) {
       try {
         await postToMeshMapperAPI(lat, lon);
       } catch (error) {
-        console.error("MeshMapper API post failed:", error);
+        debugError("MeshMapper API post failed:", error);
         // Continue with map refresh and status update even if API fails
       }
       
