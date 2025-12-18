@@ -42,6 +42,8 @@ const MESHMAPPER_DELAY_MS = 7000;              // Delay MeshMapper API call by 7
 const COOLDOWN_MS = 7000;                      // Cooldown period for manual ping and auto toggle
 const STATUS_UPDATE_DELAY_MS = 100;            // Brief delay to ensure "Ping sent" status is visible
 const MAP_REFRESH_DELAY_MS = 1000;             // Delay after API post to ensure backend updated
+const MIN_PAUSE_THRESHOLD_MS = 1000;           // Minimum timer value (1 second) to pause
+const MAX_REASONABLE_TIMER_MS = 5 * 60 * 1000; // Maximum reasonable timer value (5 minutes) to handle clock skew
 const WARDROVE_KEY     = new Uint8Array([
   0x40, 0x76, 0xC3, 0x15, 0xC1, 0xEF, 0x38, 0x5F,
   0xA9, 0x3F, 0x06, 0x60, 0x27, 0x32, 0x0F, 0xE5
@@ -90,7 +92,8 @@ const state = {
   nextAutoPingTime: null, // Timestamp when next auto-ping will occur
   apiCountdownTimer: null, // Timer for API post countdown display
   apiPostTime: null, // Timestamp when API post will occur
-  skipReason: null // Reason for skipping a ping - internal value only (e.g., "gps too old")
+  skipReason: null, // Reason for skipping a ping - internal value only (e.g., "gps too old")
+  pausedAutoTimerRemainingMs: null // Remaining time when auto ping timer was paused by manual ping
 };
 
 // ---- UI helpers ----
@@ -205,6 +208,41 @@ function stopAutoCountdown() {
   autoCountdownTimer.stop();
 }
 
+function pauseAutoCountdown() {
+  // Calculate remaining time before pausing
+  if (state.nextAutoPingTime) {
+    const remainingMs = state.nextAutoPingTime - Date.now();
+    // Only pause if there's meaningful time remaining and not unreasonably large
+    if (remainingMs > MIN_PAUSE_THRESHOLD_MS && remainingMs < MAX_REASONABLE_TIMER_MS) {
+      state.pausedAutoTimerRemainingMs = remainingMs;
+      debugLog(`Pausing auto countdown with ${state.pausedAutoTimerRemainingMs}ms remaining`);
+    } else {
+      debugLog(`Auto countdown time out of reasonable range (${remainingMs}ms), not pausing`);
+      state.pausedAutoTimerRemainingMs = null;
+    }
+  }
+  // Stop the auto ping timer (but keep autoTimerId so we know auto mode is active)
+  autoCountdownTimer.stop();
+  state.nextAutoPingTime = null;
+}
+
+function resumeAutoCountdown() {
+  // Resume auto countdown from paused time
+  if (state.pausedAutoTimerRemainingMs !== null) {
+    // Validate paused time is still reasonable before resuming
+    if (state.pausedAutoTimerRemainingMs > MIN_PAUSE_THRESHOLD_MS && state.pausedAutoTimerRemainingMs < MAX_REASONABLE_TIMER_MS) {
+      debugLog(`Resuming auto countdown with ${state.pausedAutoTimerRemainingMs}ms remaining`);
+      startAutoCountdown(state.pausedAutoTimerRemainingMs);
+      state.pausedAutoTimerRemainingMs = null;
+      return true;
+    } else {
+      debugLog(`Paused time out of reasonable range (${state.pausedAutoTimerRemainingMs}ms), not resuming`);
+      state.pausedAutoTimerRemainingMs = null;
+    }
+  }
+  return false;
+}
+
 function startApiCountdown(delayMs) {
   state.apiPostTime = Date.now() + delayMs;
   apiCountdownTimer.start(delayMs);
@@ -267,6 +305,7 @@ function cleanupAllTimers() {
   stopAutoCountdown();
   stopApiCountdown();
   state.cooldownEndTime = null;
+  state.pausedAutoTimerRemainingMs = null;
 }
 
 function enableControls(connected) {
@@ -667,8 +706,15 @@ function scheduleApiPostAndMapRefresh(lat, lon, accuracy) {
       // Update status based on current mode
       if (state.connection) {
         if (state.running) {
-          debugLog("Scheduling next auto ping");
-          scheduleNextAutoPing();
+          // Check if we should resume a paused auto countdown (manual ping during auto mode)
+          const resumed = resumeAutoCountdown();
+          if (!resumed) {
+            // No paused timer to resume, schedule new auto ping (this was an auto ping)
+            debugLog("Scheduling next auto ping");
+            scheduleNextAutoPing();
+          } else {
+            debugLog("Resumed auto countdown after manual ping");
+          }
         } else {
           debugLog("Setting status to idle");
           setStatus("Idle", STATUS_COLORS.idle);
@@ -832,10 +878,19 @@ async function sendPing(manual = false) {
       return;
     }
 
-    // Stop the countdown timer when sending an auto ping to avoid status conflicts
-    if (!manual && state.running) {
+    // Handle countdown timers based on ping type
+    if (manual && state.running) {
+      // Manual ping during auto mode: pause the auto countdown
+      debugLog("Manual ping during auto mode - pausing auto countdown");
+      pauseAutoCountdown();
+      setStatus("Sending manual ping...", STATUS_COLORS.info);
+    } else if (!manual && state.running) {
+      // Auto ping: stop the countdown timer to avoid status conflicts
       stopAutoCountdown();
       setStatus("Sending auto ping...", STATUS_COLORS.info);
+    } else if (manual) {
+      // Manual ping when auto is not running
+      setStatus("Sending manual ping...", STATUS_COLORS.info);
     }
 
     // Get GPS coordinates
@@ -901,8 +956,9 @@ function stopAutoPing(stopGps = false) {
   }
   stopAutoCountdown();
   
-  // Clear skip reason
+  // Clear skip reason and paused timer state
   state.skipReason = null;
+  state.pausedAutoTimerRemainingMs = null;
   
   // Only stop GPS watch when disconnecting or page hidden, not during normal stop
   if (stopGps) {
