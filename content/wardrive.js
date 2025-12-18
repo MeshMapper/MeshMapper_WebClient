@@ -27,6 +27,51 @@ const MESHMAPPER_API_URL = "https://yow.meshmapper.net/wardriving-api.php";
 const MESHMAPPER_API_KEY = "59C7754DABDF5C11CA5F5D8368F89";
 const MESHMAPPER_DEFAULT_WHO = "GOME-WarDriver"; // Default identifier
 
+// GPS Enhancement Configuration
+const MIN_PING_DISTANCE_M = 25;                // Minimum distance between pings in meters
+const OTTAWA_CENTER_LAT = 45.4215;             // Ottawa center (Parliament Hill) latitude
+const OTTAWA_CENTER_LON = -75.6972;            // Ottawa center (Parliament Hill) longitude
+const OTTAWA_GEOFENCE_RADIUS_KM = 150;         // Service area radius in kilometers (covers greater Ottawa region)
+
+// ---- GPS Distance Calculation (Haversine Formula) ----
+const EARTH_RADIUS_METERS = 6371000; // Earth's mean radius in meters
+const DEG_TO_RAD = Math.PI / 180;    // Conversion factor from degrees to radians
+
+/**
+ * Calculate the great-circle distance between two GPS coordinates using the Haversine formula.
+ * @param {number} lat1 - Latitude of first point in degrees
+ * @param {number} lon1 - Longitude of first point in degrees
+ * @param {number} lat2 - Latitude of second point in degrees
+ * @param {number} lon2 - Longitude of second point in degrees
+ * @returns {number} Distance in meters
+ */
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const φ1 = lat1 * DEG_TO_RAD;
+  const φ2 = lat2 * DEG_TO_RAD;
+  const Δφ = (lat2 - lat1) * DEG_TO_RAD;
+  const Δλ = (lon2 - lon1) * DEG_TO_RAD;
+
+  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+            Math.cos(φ1) * Math.cos(φ2) *
+            Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return EARTH_RADIUS_METERS * c; // Distance in meters
+}
+
+/**
+ * Check if current location is within the Ottawa geofence.
+ * @param {number} lat - Current latitude
+ * @param {number} lon - Current longitude
+ * @returns {object} { inBounds: boolean, distanceKm: number }
+ */
+function checkGeofence(lat, lon) {
+  const distanceM = calculateDistance(lat, lon, OTTAWA_CENTER_LAT, OTTAWA_CENTER_LON);
+  const distanceKm = distanceM / 1000;
+  const inBounds = distanceKm <= OTTAWA_GEOFENCE_RADIUS_KM;
+  return { inBounds, distanceKm };
+}
+
 // ---- DOM refs (from index.html; unchanged except the two new selectors) ----
 const $ = (id) => document.getElementById(id);
 const statusEl       = $("status");
@@ -64,7 +109,8 @@ const state = {
   autoCountdownTimer: null, // Timer for auto-ping countdown display
   nextAutoPingTime: null, // Timestamp when next auto-ping will occur
   apiCountdownTimer: null, // Timer for API post countdown display
-  apiPostTime: null // Timestamp when API post will occur
+  apiPostTime: null, // Timestamp when API post will occur
+  lastPingLocation: null // { lat, lon, tsMs } - location of last successful ping for distance filtering
 };
 
 // ---- UI helpers ----
@@ -555,10 +601,55 @@ async function sendPing(manual = false) {
       }
     }
 
+    // Check geofence: ensure we're within the Ottawa service area
+    const geofenceCheck = checkGeofence(lat, lon);
+    if (!geofenceCheck.inBounds) {
+      const msg = `Location outside service area (${geofenceCheck.distanceKm.toFixed(1)}km from Ottawa)`;
+      console.log(`Geofence check failed: ${msg}`);
+      setStatus(msg, "text-red-300");
+      
+      // In auto mode, schedule next ping to keep checking location
+      if (!manual && state.running) {
+        scheduleNextAutoPing();
+      }
+      return;
+    }
+    
+    // Check distance from last ping: skip if too close (within 25m)
+    if (state.lastPingLocation) {
+      const distanceFromLastPing = calculateDistance(
+        lat, lon,
+        state.lastPingLocation.lat, state.lastPingLocation.lon
+      );
+      
+      console.log(`Distance from last ping: ${distanceFromLastPing.toFixed(1)}m`);
+      
+      if (distanceFromLastPing < MIN_PING_DISTANCE_M) {
+        const remainingDistance = MIN_PING_DISTANCE_M - distanceFromLastPing;
+        const msg = `Ping skipped, too close to last ping (${distanceFromLastPing.toFixed(1)}m away). Need ${remainingDistance.toFixed(1)}m more to ping`;
+        console.log(msg);
+        setStatus(msg, "text-amber-300");
+        
+        // In auto mode, schedule next ping to keep checking distance
+        if (!manual && state.running) {
+          scheduleNextAutoPing();
+        }
+        return;
+      }
+    }
+
     const payload = buildPayload(lat, lon);
 
     const ch = await ensureChannel();
     await state.connection.sendChannelTextMessage(ch.channelIdx, payload);
+
+    // Store this location as the last successful ping location for distance filtering
+    state.lastPingLocation = {
+      lat,
+      lon,
+      tsMs: Date.now()
+    };
+    console.log(`Last ping location updated: ${lat.toFixed(5)}, ${lon.toFixed(5)}`);
 
     // Start cooldown period after successful ping
     startCooldown();
@@ -765,6 +856,7 @@ async function connect() {
       state.cooldownEndTime = null;
       
       state.lastFix = null;
+      state.lastPingLocation = null; // Clear last ping location on disconnect
       state.gpsState = "idle";
       updateGpsUi();
     });
