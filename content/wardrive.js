@@ -108,6 +108,16 @@ function setStatus(text, color = STATUS_COLORS.idle) {
   statusEl.className = `font-semibold ${color}`;
 }
 
+// Helper function to apply status from countdown result
+function applyCountdownStatus(result, defaultColor) {
+  if (!result) return;
+  if (typeof result === 'string') {
+    setStatus(result, defaultColor);
+  } else {
+    setStatus(result.message, result.color || defaultColor);
+  }
+}
+
 // Countdown timer management - generalized for reuse
 function createCountdownTimer(getEndTime, getStatusMessage) {
   return {
@@ -126,26 +136,12 @@ function createCountdownTimer(getEndTime, getStatusMessage) {
       
       const remainingMs = this.endTime - Date.now();
       if (remainingMs <= 0) {
-        const result = getStatusMessage(0);
-        if (!result) return;
-        // Handle both string and object format
-        if (typeof result === 'string') {
-          setStatus(result, STATUS_COLORS.info);
-        } else {
-          setStatus(result.message, result.color || STATUS_COLORS.info);
-        }
+        applyCountdownStatus(getStatusMessage(0), STATUS_COLORS.info);
         return;
       }
       
       const remainingSec = Math.ceil(remainingMs / 1000);
-      const result = getStatusMessage(remainingSec);
-      if (!result) return;
-      // Handle both string and object format
-      if (typeof result === 'string') {
-        setStatus(result, STATUS_COLORS.idle);
-      } else {
-        setStatus(result.message, result.color || STATUS_COLORS.idle);
-      }
+      applyCountdownStatus(getStatusMessage(remainingSec), STATUS_COLORS.idle);
     },
     
     stop() {
