@@ -42,6 +42,7 @@ const MESHMAPPER_DELAY_MS = 7000;              // Delay MeshMapper API call by 7
 const COOLDOWN_MS = 7000;                      // Cooldown period for manual ping and auto toggle
 const STATUS_UPDATE_DELAY_MS = 100;            // Brief delay to ensure "Ping sent" status is visible
 const MAP_REFRESH_DELAY_MS = 1000;             // Delay after API post to ensure backend updated
+const MAX_REASONABLE_TIMER_MS = 5 * 60 * 1000; // Maximum reasonable timer value (5 minutes) to handle clock skew
 const WARDROVE_KEY     = new Uint8Array([
   0x40, 0x76, 0xC3, 0x15, 0xC1, 0xEF, 0x38, 0x5F,
   0xA9, 0x3F, 0x06, 0x60, 0x27, 0x32, 0x0F, 0xE5
@@ -211,9 +212,8 @@ function pauseAutoCountdown() {
   if (state.nextAutoPingTime) {
     const remainingMs = state.nextAutoPingTime - Date.now();
     // Only pause if there's meaningful time remaining (more than 1 second)
-    // and not unreasonably large (max 5 minutes to handle clock skew)
-    const maxReasonableMs = 5 * 60 * 1000; // 5 minutes
-    if (remainingMs > 1000 && remainingMs < maxReasonableMs) {
+    // and not unreasonably large to handle clock skew
+    if (remainingMs > 1000 && remainingMs < MAX_REASONABLE_TIMER_MS) {
       state.pausedAutoTimerRemainingMs = remainingMs;
       debugLog(`Pausing auto countdown with ${state.pausedAutoTimerRemainingMs}ms remaining`);
     } else {
@@ -230,8 +230,7 @@ function resumeAutoCountdown() {
   // Resume auto countdown from paused time
   if (state.pausedAutoTimerRemainingMs !== null) {
     // Validate paused time is still reasonable before resuming
-    const maxReasonableMs = 5 * 60 * 1000; // 5 minutes
-    if (state.pausedAutoTimerRemainingMs > 1000 && state.pausedAutoTimerRemainingMs < maxReasonableMs) {
+    if (state.pausedAutoTimerRemainingMs > 1000 && state.pausedAutoTimerRemainingMs < MAX_REASONABLE_TIMER_MS) {
       debugLog(`Resuming auto countdown with ${state.pausedAutoTimerRemainingMs}ms remaining`);
       startAutoCountdown(state.pausedAutoTimerRemainingMs);
       state.pausedAutoTimerRemainingMs = null;
