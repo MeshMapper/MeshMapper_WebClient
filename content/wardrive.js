@@ -629,8 +629,10 @@ async function sendPing(manual = false) {
       // Auto mode: use GPS watch data
       if (!state.lastFix) {
         // If no GPS fix yet in auto mode, skip this ping and wait for watch to acquire location
-        console.warn("Auto ping skipped: waiting for GPS fix");
-        setStatus("Waiting for GPS fix...", "text-amber-300");
+        if (DEBUG_GPS_LOGGING) {
+          console.warn("[GPS] Auto ping skipped: waiting for GPS fix");
+        }
+        handlePingSkip("Waiting for GPS fix...", manual);
         return;
       }
       lat = state.lastFix.lat;
