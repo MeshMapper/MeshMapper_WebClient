@@ -1,65 +1,57 @@
 name: Deploy to GitHub Pages
 
-on:
-  push:
-    branches:
+on: 
+  push: 
+    branches: 
       - main
       - dev
   workflow_dispatch:
 
-permissions: 
+permissions:
   contents: read
   pages:  write
   id-token: write
 
 concurrency:
-  group:  "pages-${{ github.ref }}"
+  group:  "pages"
   cancel-in-progress: true
 
-jobs:
-  build-and-deploy:
+jobs: 
+  build-and-deploy: 
     runs-on: ubuntu-latest
     steps:
-      - name:  Checkout
+      - name: Checkout main branch
         uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main-content
 
-      - name: Determine deployment path
-        id: deploy-path
-        run:  |
-          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            echo "path=." >> $GITHUB_OUTPUT
-            echo "environment=production" >> $GITHUB_OUTPUT
-          else
-            echo "path=dev" >> $GITHUB_OUTPUT
-            echo "environment=development" >> $GITHUB_OUTPUT
-          fi
+      - name: Checkout dev branch
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          path: dev-content
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
-      - name: Prepare deployment directory
+      - name: Prepare combined deployment
         run: |
-          mkdir -p _site/${{ steps. deploy-path.outputs.path }}
-          if [ "${{ steps. deploy-path.outputs.path }}" == "." ]; then
-            cp -r * _site/ 2>/dev/null || true
-            cp -r .??* _site/ 2>/dev/null || true
-            rm -rf _site/.git _site/.github
-          else
-            cp -r * _site/${{ steps.deploy-path.outputs.path }}/ 2>/dev/null || true
-            rm -rf _site/${{ steps.deploy-path.outputs.path }}/.git
-          fi
+          mkdir -p _site
+          cp -r main-content/* _site/ 2>/dev/null || true
+          mkdir -p _site/dev
+          cp -r dev-content/* _site/dev/ 2>/dev/null || true
+          rm -rf _site/. git _site/.github _site/dev/.git _site/dev/. github
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses:  actions/deploy-pages@v4
         
       - name: Comment deployment URL
         run: |
-          if [ "${{ steps.deploy-path.outputs.environment }}" == "production" ]; then
-            echo "✅ Production deployed to main site"
-          else
-            echo "✅ Development deployed to /dev subdirectory"
-          fi
+          echo "✅ Deployed successfully!"
+          echo "📦 Main branch: https://mralders0n.github.io/MeshCore-GOME-WarDriver/"
+          echo "🔧 Dev branch: https://mralders0n.github.io/MeshCore-GOME-WarDriver/dev/"
