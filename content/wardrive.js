@@ -494,20 +494,22 @@ function startRepeaterTracking(sessionLi) {
       if (packet.getPayloadType() === Packet.PAYLOAD_TYPE_GRP_TXT && 
           packet.path && packet.path.length > 0) {
         // Extract repeater ID (first byte of path)
-        // Note: repeaterId can be 0 (valid byte value), so we check path.length instead
         const repeaterId = packet.path[0];
         
         // Validate repeater ID is a valid byte value (0-255)
-        if (typeof repeaterId !== 'number' || repeaterId < 0 || repeaterId > 255) {
+        // Note: repeaterId can be 0 (valid byte value), so we check type and range
+        if (repeaterId === undefined || typeof repeaterId !== 'number' || 
+            !Number.isInteger(repeaterId) || repeaterId < 0 || repeaterId > 255) {
           console.warn(`Invalid repeater ID: ${repeaterId}`);
           return;
         }
         
-        // SNR ranges from -12 to +12 dB (Int8 / 4)
+        // SNR ranges from -12 to +12 dB
+        // Note: logData.lastSnr is already processed (readInt8() / 4) by the connection layer
         const snr = Math.round(logData.lastSnr);
         
-        // Store or update repeater data (keep best/strongest SNR if duplicate)
-        // Higher (less negative) SNR values indicate better signal quality
+        // Store or update repeater data
+        // Keep the highest SNR value (closest to +12dB) for duplicate repeaters
         if (!state.repeaterData.repeaters.has(repeaterId) || 
             state.repeaterData.repeaters.get(repeaterId) < snr) {
           state.repeaterData.repeaters.set(repeaterId, snr);
