@@ -7,6 +7,28 @@
 
 import { WebBleConnection } from "./mc/index.js"; // your BLE client
 
+// ---- Debug Configuration ----
+const DEBUG_ENABLED = true; // Set to false to disable all debug logging
+
+// Debug logging helper function
+function debugLog(message, ...args) {
+  if (DEBUG_ENABLED) {
+    console.log(`[DEBUG] ${message}`, ...args);
+  }
+}
+
+function debugWarn(message, ...args) {
+  if (DEBUG_ENABLED) {
+    console.warn(`[DEBUG] ${message}`, ...args);
+  }
+}
+
+function debugError(message, ...args) {
+  if (DEBUG_ENABLED) {
+    console.error(`[DEBUG] ${message}`, ...args);
+  }
+}
+
 // ---- Config ----
 const CHANNEL_NAME     = "#wardriving";        // change to "#wardrive" if needed
 const DEFAULT_INTERVAL_S = 30;                 // fallback if selector unavailable
@@ -228,45 +250,48 @@ function setConnectButton(connected) {
 
 // ---- Wake Lock helpers ----
 async function acquireWakeLock() {
+  debugLog("Attempting to acquire wake lock");
   if (navigator.bluetooth && typeof navigator.bluetooth.setScreenDimEnabled === "function") {
     try {
       navigator.bluetooth.setScreenDimEnabled(true);
       state.bluefyLockEnabled = true;
-      console.log("Bluefy screen-dim prevention enabled");
+      debugLog("Bluefy screen-dim prevention enabled");
       return;
     } catch (e) {
-      console.warn("Bluefy setScreenDimEnabled failed:", e);
+      debugWarn("Bluefy setScreenDimEnabled failed:", e);
     }
   }
   try {
     if ("wakeLock" in navigator && typeof navigator.wakeLock.request === "function") {
       state.wakeLock = await navigator.wakeLock.request("screen");
-      console.log("Wake lock acquired");
-      state.wakeLock.addEventListener?.("release", () => console.log("Wake lock released"));
+      debugLog("Wake lock acquired successfully");
+      state.wakeLock.addEventListener?.("release", () => debugLog("Wake lock released"));
     } else {
-      console.log("Wake Lock API not supported");
+      debugLog("Wake Lock API not supported on this device");
     }
   } catch (err) {
-    console.error(`Could not obtain wake lock: ${err.name}, ${err.message}`);
+    debugError(`Could not obtain wake lock: ${err.name}, ${err.message}`);
   }
 }
 async function releaseWakeLock() {
+  debugLog("Attempting to release wake lock");
   if (state.bluefyLockEnabled && navigator.bluetooth && typeof navigator.bluetooth.setScreenDimEnabled === "function") {
     try {
       navigator.bluetooth.setScreenDimEnabled(false);
       state.bluefyLockEnabled = false;
-      console.log("Bluefy screen-dim prevention disabled");
+      debugLog("Bluefy screen-dim prevention disabled");
     } catch (e) {
-      console.warn("Bluefy setScreenDimEnabled(false) failed:", e);
+      debugWarn("Bluefy setScreenDimEnabled(false) failed:", e);
     }
   }
   try {
     if (state.wakeLock) {
       await state.wakeLock.release?.();
       state.wakeLock = null;
+      debugLog("Wake lock released successfully");
     }
   } catch (e) {
-    console.warn("Error releasing wake lock:", e);
+    debugWarn("Error releasing wake lock:", e);
     state.wakeLock = null;
   }
 }
@@ -331,15 +356,23 @@ function stopGpsAgeUpdater() {
   }
 }
 function startGeoWatch() {
-  if (state.geoWatchId) return;
-  if (!("geolocation" in navigator)) return;
+  if (state.geoWatchId) {
+    debugLog("GPS watch already running, skipping start");
+    return;
+  }
+  if (!("geolocation" in navigator)) {
+    debugError("Geolocation not available in navigator");
+    return;
+  }
 
+  debugLog("Starting GPS watch");
   state.gpsState = "acquiring";
   updateGpsUi();
   startGpsAgeUpdater(); // Start the age counter
 
   state.geoWatchId = navigator.geolocation.watchPosition(
     (pos) => {
+      debugLog(`GPS fix acquired: lat=${pos.coords.latitude.toFixed(5)}, lon=${pos.coords.longitude.toFixed(5)}, accuracy=${pos.coords.accuracy}m`);
       state.lastFix = {
         lat: pos.coords.latitude,
         lon: pos.coords.longitude,
@@ -350,7 +383,7 @@ function startGeoWatch() {
       updateGpsUi();
     },
     (err) => {
-      console.warn("watchPosition error:", err);
+      debugError(`GPS watch error: ${err.code} - ${err.message}`);
       state.gpsState = "error";
       // Keep UI honest if it fails
       updateGpsUi();
@@ -363,12 +396,17 @@ function startGeoWatch() {
   );
 }
 function stopGeoWatch() {
-  if (!state.geoWatchId) return;
+  if (!state.geoWatchId) {
+    debugLog("No GPS watch to stop");
+    return;
+  }
+  debugLog("Stopping GPS watch");
   navigator.geolocation.clearWatch(state.geoWatchId);
   state.geoWatchId = null;
   stopGpsAgeUpdater(); // Stop the age counter
 }
 async function primeGpsOnce() {
+  debugLog("Priming GPS with initial position request");
   // Start continuous watch so the UI keeps updating
   startGeoWatch();
 
@@ -378,6 +416,7 @@ async function primeGpsOnce() {
   try {
     const pos = await getCurrentPosition();
 
+    debugLog(`Initial GPS position acquired: lat=${pos.coords.latitude.toFixed(5)}, lon=${pos.coords.longitude.toFixed(5)}, accuracy=${pos.coords.accuracy}m`);
     state.lastFix = {
       lat: pos.coords.latitude,
       lon: pos.coords.longitude,
@@ -390,14 +429,17 @@ async function primeGpsOnce() {
 
     // Only refresh the coverage map if we have an accurate fix
     if (state.lastFix.accM && state.lastFix.accM < GPS_ACCURACY_THRESHOLD_M) {
+      debugLog(`GPS accuracy ${state.lastFix.accM}m is within threshold, refreshing coverage map`);
       scheduleCoverageRefresh(
         state.lastFix.lat,
         state.lastFix.lon
       );
+    } else {
+      debugLog(`GPS accuracy ${state.lastFix.accM}m exceeds threshold (${GPS_ACCURACY_THRESHOLD_M}m), skipping map refresh`);
     }
 
   } catch (e) {
-    console.warn("primeGpsOnce failed:", e);
+    debugError(`primeGpsOnce failed: ${e.message}`);
     state.gpsState = "error";
     updateGpsUi();
   }
@@ -408,16 +450,22 @@ async function primeGpsOnce() {
 // ---- Channel helpers ----
 async function ensureChannel() {
   if (!state.connection) throw new Error("Not connected");
-  if (state.channel) return state.channel;
+  if (state.channel) {
+    debugLog(`Using existing channel: ${CHANNEL_NAME}`);
+    return state.channel;
+  }
 
+  debugLog(`Looking up channel: ${CHANNEL_NAME}`);
   const ch = await state.connection.findChannelByName(CHANNEL_NAME);
   if (!ch) {
+    debugError(`Channel ${CHANNEL_NAME} not found on device`);
     enableControls(false);
     throw new Error(
       `Channel ${CHANNEL_NAME} not found. Join it on your companion first.`
     );
   }
 
+  debugLog(`Channel found: ${CHANNEL_NAME} (index: ${ch.channelIdx})`);
   state.channel = ch;
   enableControls(true);
   channelInfoEl.textContent = `${CHANNEL_NAME} (CH:${ch.channelIdx})`;
@@ -476,7 +524,7 @@ async function postToMeshMapperAPI(lat, lon) {
       test: 0
     };
 
-    console.log("Posting to MeshMapper API:", { lat, lon, who: whoIdentifier, power: powerValue });
+    debugLog(`Posting to MeshMapper API: lat=${lat.toFixed(5)}, lon=${lon.toFixed(5)}, who=${whoIdentifier}, power=${powerValue}`);
 
     // POST to MeshMapper API
     const response = await fetch(MESHMAPPER_API_URL, {
@@ -488,23 +536,25 @@ async function postToMeshMapperAPI(lat, lon) {
     });
 
     if (!response.ok) {
-      console.warn(`MeshMapper API returned status ${response.status}`);
+      debugWarn(`MeshMapper API returned error status ${response.status}`);
     } else {
-      console.log("Successfully posted to MeshMapper API");
+      debugLog(`MeshMapper API post successful (status ${response.status})`);
     }
   } catch (error) {
     // Log error but don't fail the ping
-    console.error("Failed to post to MeshMapper API:", error);
+    debugError(`MeshMapper API post failed: ${error.message}`);
   }
 }
 
 // ---- Ping ----
 async function sendPing(manual = false) {
+  debugLog(`sendPing called (manual=${manual})`);
   try {
     // Check cooldown only for manual pings
     if (manual && isInCooldown()) {
       const remainingMs = state.cooldownEndTime - Date.now();
       const remainingSec = Math.ceil(remainingMs / 1000);
+      debugLog(`Manual ping blocked by cooldown (${remainingSec}s remaining)`);
       setStatus(`Please wait ${remainingSec}s before sending another ping`, "text-amber-300");
       return;
     }
@@ -523,10 +573,11 @@ async function sendPing(manual = false) {
       // Auto mode: use GPS watch data
       if (!state.lastFix) {
         // If no GPS fix yet in auto mode, skip this ping and wait for watch to acquire location
-        console.warn("Auto ping skipped: waiting for GPS fix");
+        debugWarn("Auto ping skipped: no GPS fix available yet");
         setStatus("Waiting for GPS fix...", "text-amber-300");
         return;
       }
+      debugLog(`Using GPS watch data for auto ping: lat=${state.lastFix.lat.toFixed(5)}, lon=${state.lastFix.lon.toFixed(5)}`);
       lat = state.lastFix.lat;
       lon = state.lastFix.lon;
       accuracy = state.lastFix.accM;
@@ -536,15 +587,18 @@ async function sendPing(manual = false) {
       const maxAge = intervalMs + GPS_FRESHNESS_BUFFER_MS; // Allow buffer beyond interval
 
       if (state.lastFix && (Date.now() - state.lastFix.tsMs) < maxAge) {
+        debugLog(`Using cached GPS data (age: ${Date.now() - state.lastFix.tsMs}ms)`);
         lat = state.lastFix.lat;
         lon = state.lastFix.lon;
         accuracy = state.lastFix.accM;
       } else {
         // Get fresh GPS coordinates for manual ping
+        debugLog("Requesting fresh GPS position for manual ping");
         const pos = await getCurrentPosition();
         lat = pos.coords.latitude;
         lon = pos.coords.longitude;
         accuracy = pos.coords.accuracy;
+        debugLog(`Fresh GPS acquired: lat=${lat.toFixed(5)}, lon=${lon.toFixed(5)}, accuracy=${accuracy}m`);
         state.lastFix = {
           lat,
           lon,
@@ -556,11 +610,14 @@ async function sendPing(manual = false) {
     }
 
     const payload = buildPayload(lat, lon);
+    debugLog(`Sending ping to channel: "${payload}"`);
 
     const ch = await ensureChannel();
     await state.connection.sendChannelTextMessage(ch.channelIdx, payload);
+    debugLog(`Ping sent successfully to channel ${ch.channelIdx}`);
 
     // Start cooldown period after successful ping
+    debugLog(`Starting ${COOLDOWN_MS}ms cooldown`);
     startCooldown();
 
     // Update status after ping is sent
@@ -577,9 +634,11 @@ async function sendPing(manual = false) {
     // Schedule MeshMapper API call with 7-second delay (non-blocking)
     // Clear any existing timer first
     if (state.meshMapperTimer) {
+      debugLog("Clearing existing MeshMapper timer");
       clearTimeout(state.meshMapperTimer);
     }
 
+    debugLog(`Scheduling MeshMapper API post in ${MESHMAPPER_DELAY_MS}ms`);
     state.meshMapperTimer = setTimeout(async () => {
       // Capture accuracy in closure to ensure it's available in nested callback
       const capturedAccuracy = accuracy;
@@ -598,7 +657,10 @@ async function sendPing(manual = false) {
       // Update map after API post to ensure backend updated
       setTimeout(() => {
         if (capturedAccuracy && capturedAccuracy < GPS_ACCURACY_THRESHOLD_M) {
+          debugLog(`Refreshing coverage map (accuracy ${capturedAccuracy}m within threshold)`);
           scheduleCoverageRefresh(lat, lon);
+        } else {
+          debugLog(`Skipping map refresh (accuracy ${capturedAccuracy}m exceeds threshold)`);
         }
         
         // Set status to idle after map update
@@ -606,8 +668,10 @@ async function sendPing(manual = false) {
           // If in auto mode, schedule next ping. Otherwise, set to idle
           if (state.running) {
             // Schedule the next auto ping with countdown
+            debugLog("Scheduling next auto ping");
             scheduleNextAutoPing();
           } else {
+            debugLog("Setting status to idle");
             setStatus("Idle", "text-slate-300");
           }
         }
@@ -629,22 +693,25 @@ async function sendPing(manual = false) {
       sessionPingsEl.scrollTop = sessionPingsEl.scrollHeight;
     }
   } catch (e) {
-    console.error("Ping failed:", e);
+    debugError(`Ping operation failed: ${e.message}`, e);
     setStatus(e.message || "Ping failed", "text-red-300");
   }
 }
 
 // ---- Auto mode ----
 function stopAutoPing(stopGps = false) {
+  debugLog(`stopAutoPing called (stopGps=${stopGps})`);
   // Check if we're in cooldown before stopping (unless stopGps is true for disconnect)
   if (!stopGps && isInCooldown()) {
     const remainingMs = state.cooldownEndTime - Date.now();
     const remainingSec = Math.ceil(remainingMs / 1000);
+    debugLog(`Auto ping stop blocked by cooldown (${remainingSec}s remaining)`);
     setStatus(`Please wait ${remainingSec}s before toggling auto mode`, "text-amber-300");
     return;
   }
   
   if (state.autoTimerId) {
+    debugLog("Clearing auto ping timer");
     clearTimeout(state.autoTimerId);
     state.autoTimerId = null;
   }
@@ -658,11 +725,16 @@ function stopAutoPing(stopGps = false) {
   state.running = false;
   updateAutoButton();
   releaseWakeLock();
+  debugLog("Auto ping stopped");
 }
 function scheduleNextAutoPing() {
-  if (!state.running) return;
+  if (!state.running) {
+    debugLog("Not scheduling next auto ping - auto mode not running");
+    return;
+  }
   
   const intervalMs = getSelectedIntervalMs();
+  debugLog(`Scheduling next auto ping in ${intervalMs}ms`);
   
   // Start countdown immediately
   startAutoCountdown(intervalMs);
@@ -670,13 +742,16 @@ function scheduleNextAutoPing() {
   // Schedule the next ping
   state.autoTimerId = setTimeout(() => {
     if (state.running) {
+      debugLog("Auto ping timer fired, sending ping");
       sendPing(false).catch(console.error);
     }
   }, intervalMs);
 }
 
 function startAutoPing() {
+  debugLog("startAutoPing called");
   if (!state.connection) {
+    debugError("Cannot start auto ping - not connected");
     alert("Connect to a MeshCore device first.");
     return;
   }
@@ -685,33 +760,40 @@ function startAutoPing() {
   if (isInCooldown()) {
     const remainingMs = state.cooldownEndTime - Date.now();
     const remainingSec = Math.ceil(remainingMs / 1000);
+    debugLog(`Auto ping start blocked by cooldown (${remainingSec}s remaining)`);
     setStatus(`Please wait ${remainingSec}s before toggling auto mode`, "text-amber-300");
     return;
   }
   
   // Clean up any existing auto-ping timer (but keep GPS watch running)
   if (state.autoTimerId) {
+    debugLog("Clearing existing auto ping timer");
     clearTimeout(state.autoTimerId);
     state.autoTimerId = null;
   }
   stopAutoCountdown();
   
   // Start GPS watch for continuous updates
+  debugLog("Starting GPS watch for auto mode");
   startGeoWatch();
   
   state.running = true;
   updateAutoButton();
 
   // Acquire wake lock for auto mode
+  debugLog("Acquiring wake lock for auto mode");
   acquireWakeLock().catch(console.error);
 
   // Send first ping immediately
+  debugLog("Sending initial auto ping");
   sendPing(false).catch(console.error);
 }
 
 // ---- BLE connect / disconnect ----
 async function connect() {
+  debugLog("connect() called");
   if (!("bluetooth" in navigator)) {
+    debugError("Web Bluetooth not supported");
     alert("Web Bluetooth not supported in this browser.");
     return;
   }
@@ -719,27 +801,37 @@ async function connect() {
   setStatus("Connecting…", "text-sky-300");
 
   try {
+    debugLog("Opening BLE connection...");
     const conn = await WebBleConnection.open();
     state.connection = conn;
+    debugLog("BLE connection object created");
 
     conn.on("connected", async () => {
+      debugLog("BLE connected event fired");
       setStatus("Connected", "text-emerald-300");
       setConnectButton(true);
       connectBtn.disabled = false;
       const selfInfo = await conn.getSelfInfo();
+      debugLog(`Device info: ${selfInfo?.name || "[No device]"}`);
       deviceInfoEl.textContent = selfInfo?.name || "[No device]";
       updateAutoButton();
-      try { await conn.syncDeviceTime?.(); } catch { /* optional */ }
+      try { 
+        await conn.syncDeviceTime?.(); 
+        debugLog("Device time synced");
+      } catch { 
+        debugLog("Device time sync not available or failed");
+      }
       try {
         await ensureChannel();
         await primeGpsOnce();
       } catch (e) {
-        console.error("Channel setup failed:", e);
+        debugError(`Channel setup failed: ${e.message}`, e);
         setStatus(e.message || "Channel setup failed", "text-red-300");
       }
     });
 
     conn.on("disconnected", () => {
+      debugLog("BLE disconnected event fired");
       setStatus("Disconnected", "text-red-300");
       setConnectButton(false);
       deviceInfoEl.textContent = "—";
@@ -753,10 +845,12 @@ async function connect() {
       
       // Clean up timers
       if (state.meshMapperTimer) {
+        debugLog("Clearing MeshMapper timer on disconnect");
         clearTimeout(state.meshMapperTimer);
         state.meshMapperTimer = null;
       }
       if (state.cooldownUpdateTimer) {
+        debugLog("Clearing cooldown timer on disconnect");
         clearTimeout(state.cooldownUpdateTimer);
         state.cooldownUpdateTimer = null;
       }
@@ -767,16 +861,21 @@ async function connect() {
       state.lastFix = null;
       state.gpsState = "idle";
       updateGpsUi();
+      debugLog("Disconnect cleanup complete");
     });
 
   } catch (e) {
-    console.error("BLE connect failed:", e);
+    debugError(`BLE connection failed: ${e.message}`, e);
     setStatus("Failed to connect", "text-red-300");
     connectBtn.disabled = false;
   }
 }
 async function disconnect() {
-  if (!state.connection) return;
+  debugLog("disconnect() called");
+  if (!state.connection) {
+    debugLog("No connection to disconnect");
+    return;
+  }
 
   connectBtn.disabled = true;
   setStatus("Disconnecting...", "text-sky-300");
@@ -784,16 +883,19 @@ async function disconnect() {
   try {
     // WebBleConnection typically exposes one of these.
     if (typeof state.connection.close === "function") {
+      debugLog("Calling connection.close()");
       await state.connection.close();
     } else if (typeof state.connection.disconnect === "function") {
+      debugLog("Calling connection.disconnect()");
       await state.connection.disconnect();
     } else if (typeof state.connection.device?.gatt?.disconnect === "function") {
+      debugLog("Calling device.gatt.disconnect()");
       state.connection.device.gatt.disconnect();
     } else {
-      console.warn("No known disconnect method on connection object");
+      debugWarn("No known disconnect method on connection object");
     }
   } catch (e) {
-    console.error("BLE disconnect failed:", e);
+    debugError(`BLE disconnect failed: ${e.message}`, e);
     setStatus(e.message || "Disconnect failed", "text-red-300");
   } finally {
     connectBtn.disabled = false;
@@ -804,19 +906,24 @@ async function disconnect() {
 // ---- Page visibility ----
 document.addEventListener("visibilitychange", async () => {
   if (document.hidden) {
+    debugLog("Page visibility changed to hidden");
     if (state.running) {
+      debugLog("Stopping auto ping due to page hidden");
       stopAutoPing(true); // Ignore cooldown check when page is hidden
       setStatus("Lost focus, auto mode stopped", "text-amber-300");
     } else {
+      debugLog("Releasing wake lock due to page hidden");
       releaseWakeLock();
     }
   } else {
+    debugLog("Page visibility changed to visible");
     // On visible again, user can manually re-start Auto.
   }
 });
 
 // ---- Bind UI & init ----
 export async function onLoad() {
+  debugLog("wardrive.js onLoad() called - initializing");
   setStatus("Disconnected", "text-red-300");
   enableControls(false);
   updateAutoButton();
@@ -829,12 +936,16 @@ export async function onLoad() {
         await connect();
       }
     } catch (e) {
-      console.error(e);
+      debugError(`Connection button error: ${e.message}`, e);
       setStatus(e.message || "Connection error", "text-red-300");
     }
   });
-  sendPingBtn.addEventListener("click", () => sendPing(true).catch(console.error));
+  sendPingBtn.addEventListener("click", () => {
+    debugLog("Manual ping button clicked");
+    sendPing(true).catch(console.error);
+  });
   autoToggleBtn.addEventListener("click", () => {
+    debugLog("Auto toggle button clicked");
     if (state.running) {
       stopAutoPing();
       setStatus("Auto mode stopped", "text-slate-300");
@@ -844,5 +955,12 @@ export async function onLoad() {
   });
 
   // Prompt location permission early (optional)
-  try { await getCurrentPosition(); } catch { /* will prompt at first send */ }
+  debugLog("Requesting initial location permission");
+  try { 
+    await getCurrentPosition(); 
+    debugLog("Initial location permission granted");
+  } catch (e) { 
+    debugLog(`Initial location permission not granted: ${e.message}`);
+  }
+  debugLog("wardrive.js initialization complete");
 }
