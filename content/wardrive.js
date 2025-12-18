@@ -614,6 +614,7 @@ async function postToMeshMapperAPI(lat, lon) {
 
 // ---- Ping ----
 async function sendPing(manual = false) {
+  console.log(`\n=== SEND PING (${manual ? 'MANUAL' : 'AUTO'}) ===`);
   try {
     // Check cooldown only for manual pings
     if (manual && isInCooldown()) {
@@ -672,13 +673,14 @@ async function sendPing(manual = false) {
     // Validate GPS coordinates (note: 0 is a valid coordinate)
     if (lat == null || lon == null || typeof lat !== 'number' || typeof lon !== 'number' || isNaN(lat) || isNaN(lon)) {
       const msg = "Invalid GPS coordinates - cannot send ping";
-      console.error(`GPS validation failed: lat=${lat}, lon=${lon}`);
+      console.error(`❌ GPS validation failed: lat=${lat}, lon=${lon}`);
       setStatus(msg, "text-red-300");
       if (!manual && state.running) {
         scheduleNextAutoPing();
       }
       return;
     }
+    console.log(`✓ GPS coordinates valid: ${lat.toFixed(5)}, ${lon.toFixed(5)}, accuracy: ±${accuracy ? Math.round(accuracy) : '?'}m`);
     
     // Check geofence: ensure we're within the Ottawa service area
     console.log(`Checking geofence for location: ${lat.toFixed(5)}, ${lon.toFixed(5)}`);
@@ -723,6 +725,7 @@ async function sendPing(manual = false) {
     }
 
     const payload = buildPayload(lat, lon);
+    console.log(`✓ All checks passed! Sending ping: "${payload}"`);
 
     const ch = await ensureChannel();
     await state.connection.sendChannelTextMessage(ch.channelIdx, payload);
@@ -886,7 +889,9 @@ function startAutoPing() {
 
 // ---- BLE connect / disconnect ----
 async function connect() {
+  console.log("\n=== Attempting to connect via Bluetooth ===");
   if (!("bluetooth" in navigator)) {
+    console.error("❌ Web Bluetooth not supported in this browser");
     alert("Web Bluetooth not supported in this browser.");
     return;
   }
@@ -898,10 +903,12 @@ async function connect() {
     state.connection = conn;
 
     conn.on("connected", async () => {
+      console.log("✓ Bluetooth connected successfully");
       setStatus("Connected", "text-emerald-300");
       setConnectButton(true);
       connectBtn.disabled = false;
       const selfInfo = await conn.getSelfInfo();
+      console.log(`Device info: ${selfInfo?.name || "[No device]"}`);
       deviceInfoEl.textContent = selfInfo?.name || "[No device]";
       updateAutoButton();
       try { await conn.syncDeviceTime?.(); } catch { /* optional */ }
@@ -993,6 +1000,10 @@ document.addEventListener("visibilitychange", async () => {
 
 // ---- Bind UI & init ----
 export async function onLoad() {
+  console.log("=== MeshCore WarDriver Initialized ===");
+  console.log(`Geofence: ${OTTAWA_GEOFENCE_RADIUS_KM}km radius around Ottawa (${OTTAWA_CENTER_LAT}, ${OTTAWA_CENTER_LON})`);
+  console.log(`Min ping distance: ${MIN_PING_DISTANCE_M}m`);
+  console.log(`Channel: ${CHANNEL_NAME}`);
   setStatus("Disconnected", "text-red-300");
   enableControls(false);
   updateAutoButton();
