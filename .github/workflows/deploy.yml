@@ -1,7 +1,7 @@
 name: Deploy to GitHub Pages
 
 on: 
-  push: 
+  push:
     branches: 
       - main
       - dev
@@ -41,15 +41,16 @@ jobs:
           cp -r main-content/* _site/ 2>/dev/null || true
           mkdir -p _site/dev
           cp -r dev-content/* _site/dev/ 2>/dev/null || true
-          rm -rf _site/. git _site/.github _site/dev/.git _site/dev/. github
+          find _site -name ". git" -exec rm -rf {} + 2>/dev/null || true
+          find _site -name ".github" -exec rm -rf {} + 2>/dev/null || true
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses:  actions/deploy-pages@v4
-        
+        uses: actions/deploy-pages@v4
+
       - name: Comment deployment URL
         run: |
           echo "✅ Deployed successfully!"
