@@ -477,11 +477,14 @@ function startRepeaterTracking(sessionLi) {
       // Check if repeater data collection is still active
       if (!state.repeaterData) return;
       
+      // Validate input data
+      if (!logData || typeof logData.lastSnr !== 'number' || !logData.raw) return;
+      
       // Parse the packet from raw data
       const packet = Packet.fromBytes(logData.raw);
       
       // Check if this is a group text message (our ping echo)
-      if (packet.payload_type === Packet.PAYLOAD_TYPE_GRP_TXT && packet.path && packet.path.length > 0) {
+      if (packet.getPayloadType() === Packet.PAYLOAD_TYPE_GRP_TXT && packet.path && packet.path.length > 0) {
         // Extract repeater ID (first byte of path)
         const repeaterId = packet.path[0];
         const snr = Math.round(logData.lastSnr);
@@ -707,7 +710,7 @@ async function sendPing(manual = false) {
       state.meshMapperTimer = null;
     }, MESHMAPPER_DELAY_MS);
     
-    const nowStr = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const nowStr = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
     if (lastPingEl) lastPingEl.textContent = `${nowStr} — ${payload}`;
 
     // Session log
