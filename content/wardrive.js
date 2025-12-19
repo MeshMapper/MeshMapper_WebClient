@@ -5,7 +5,7 @@
 // - Manual "Send Ping" and Auto mode (interval selectable: 15/30/60s)
 // - Acquire wake lock during auto mode to keep screen awake
 
-import { WebBleConnection } from "./mc/index.js"; // your BLE client
+import { WebBleConnection, Constants, Packet } from "./mc/index.js"; // your BLE client
 
 // ---- Debug Configuration ----
 // Enable debug logging via URL parameter (?debug=true) or set default here
@@ -44,6 +44,26 @@ const STATUS_UPDATE_DELAY_MS = 100;            // Brief delay to ensure "Ping se
 const MAP_REFRESH_DELAY_MS = 1000;             // Delay after API post to ensure backend updated
 const MIN_PAUSE_THRESHOLD_MS = 1000;           // Minimum timer value (1 second) to pause
 const MAX_REASONABLE_TIMER_MS = 5 * 60 * 1000; // Maximum reasonable timer value (5 minutes) to handle clock skew
+const RX_LOG_LISTEN_WINDOW_MS = 7000;          // Listen window for repeater echoes (7 seconds)
+
+// Pre-computed channel hash and key for the wardriving channel
+// These will be computed once at startup and used for message correlation and decryption
+let WARDRIVING_CHANNEL_HASH = null;
+let WARDRIVING_CHANNEL_KEY = null;
+
+// Initialize the wardriving channel hash and key at startup
+(async function initializeChannelHash() {
+  try {
+    WARDRIVING_CHANNEL_KEY = await deriveChannelKey(CHANNEL_NAME);
+    WARDRIVING_CHANNEL_HASH = await computeChannelHash(WARDRIVING_CHANNEL_KEY);
+    debugLog(`Wardriving channel hash pre-computed at startup: 0x${WARDRIVING_CHANNEL_HASH.toString(16).padStart(2, '0')}`);
+    debugLog(`Wardriving channel key cached for message decryption (${WARDRIVING_CHANNEL_KEY.length} bytes)`);
+  } catch (error) {
+    debugError(`CRITICAL: Failed to pre-compute channel hash/key: ${error.message}`);
+    debugError(`Repeater echo tracking will be disabled. Please reload the page.`);
+    // Channel hash and key remain null, which will be checked before starting tracking
+  }
+})();
 
 // Ottawa Geofence Configuration
 const OTTAWA_CENTER_LAT = 45.4215;  // Parliament Hill latitude
@@ -100,7 +120,16 @@ const state = {
   skipReason: null, // Reason for skipping a ping - internal value only (e.g., "gps too old")
   pausedAutoTimerRemainingMs: null, // Remaining time when auto ping timer was paused by manual ping
   lastSuccessfulPingLocation: null, // { lat, lon } of the last successful ping (Mesh + API)
-  distanceUpdateTimer: null // Timer for updating distance display
+  distanceUpdateTimer: null, // Timer for updating distance display
+  repeaterTracking: {
+    isListening: false,           // Whether we're currently listening for echoes
+    sentTimestamp: null,          // Timestamp when the ping was sent
+    sentPayload: null,            // The payload text that was sent
+    channelIdx: null,             // Channel index for reference
+    repeaters: new Map(),         // Map<repeaterId, {snr, seenCount}>
+    listenTimeout: null,          // Timeout handle for 7-second window
+    rxLogHandler: null,           // Handler function for rx_log events
+  }
 };
 
 // ---- UI helpers ----
@@ -972,6 +1001,379 @@ function scheduleApiPostAndMapRefresh(lat, lon, accuracy) {
   }, MESHMAPPER_DELAY_MS);
 }
 
+// ---- Repeater Echo Tracking ----
+
+/**
+ * Compute channel hash from channel secret (first byte of SHA-256)
+ * @param {Uint8Array} channelSecret - The 16-byte channel secret
+ * @returns {Promise<number>} The channel hash (first byte of SHA-256)
+ */
+async function computeChannelHash(channelSecret) {
+  const hashBuffer = await crypto.subtle.digest('SHA-256', channelSecret);
+  const hashArray = new Uint8Array(hashBuffer);
+  return hashArray[0];
+}
+
+/**
+ * Decrypt GroupText payload and extract message text
+ * Payload structure: [1 byte channel_hash][2 bytes MAC][encrypted data]
+ * Encrypted data: [4 bytes timestamp][1 byte flags][message text]
+ * @param {Uint8Array} payload - The packet payload
+ * @param {Uint8Array} channelKey - The 16-byte channel secret for decryption
+ * @returns {Promise<string|null>} The decrypted message text, or null if decryption fails
+ */
+async function decryptGroupTextPayload(payload, channelKey) {
+  try {
+    debugLog(`[DECRYPT] Starting GroupText payload decryption`);
+    debugLog(`[DECRYPT] Payload length: ${payload.length} bytes`);
+    debugLog(`[DECRYPT] Channel key length: ${channelKey.length} bytes`);
+    
+    // Validate payload length
+    if (payload.length < 3) {
+      debugLog(`[DECRYPT] ABORT: Payload too short for decryption (${payload.length} bytes, need at least 3)`);
+      return null;
+    }
+    
+    // Extract components
+    const channelHash = payload[0];
+    const cipherMAC = payload.slice(1, 3);
+    const encryptedData = payload.slice(3);
+    
+    debugLog(`[DECRYPT] Channel hash: 0x${channelHash.toString(16).padStart(2, '0')}`);
+    debugLog(`[DECRYPT] Cipher MAC: ${Array.from(cipherMAC).map(b => b.toString(16).padStart(2, '0')).join('')}`);
+    debugLog(`[DECRYPT] Encrypted data length: ${encryptedData.length} bytes`);
+    
+    if (encryptedData.length === 0) {
+      debugLog(`[DECRYPT] ABORT: No encrypted data to decrypt`);
+      return null;
+    }
+    
+    // Log first 32 bytes of encrypted data for debugging
+    const encPreview = Array.from(encryptedData.slice(0, Math.min(32, encryptedData.length)))
+      .map(b => b.toString(16).padStart(2, '0')).join('');
+    debugLog(`[DECRYPT] Encrypted data preview (first 32 bytes): ${encPreview}...`);
+    
+    // Use aes-js library for proper AES-ECB decryption
+    debugLog(`[DECRYPT] Using aes-js library for AES-ECB decryption`);
+    
+    // Check if aes-js is available
+    if (typeof aesjs === 'undefined') {
+      debugError(`[DECRYPT] ABORT: aes-js library not loaded`);
+      return null;
+    }
+    
+    // Convert Uint8Array to regular array for aes-js
+    const keyArray = Array.from(channelKey);
+    const encryptedArray = Array.from(encryptedData);
+    
+    debugLog(`[DECRYPT] Decrypting ${encryptedData.length} bytes with AES-ECB...`);
+    
+    // Create AES-ECB decryption instance
+    const aesCbc = new aesjs.ModeOfOperation.ecb(keyArray);
+    
+    // Decrypt block by block (ECB processes each 16-byte block independently)
+    const blockSize = 16;
+    const decryptedBytes = new Uint8Array(encryptedArray.length);
+    
+    for (let i = 0; i < encryptedArray.length; i += blockSize) {
+      const block = encryptedArray.slice(i, i + blockSize);
+      
+      // Pad last block if necessary
+      while (block.length < blockSize) {
+        block.push(0);
+      }
+      
+      const decryptedBlock = aesCbc.decrypt(block);
+      decryptedBytes.set(decryptedBlock, i);
+    }
+    
+    debugLog(`[DECRYPT] Decryption completed successfully`);
+    debugLog(`[DECRYPT] Decrypted data length: ${decryptedBytes.length} bytes`);
+    
+    // Log decrypted bytes for debugging
+    const decPreview = Array.from(decryptedBytes.slice(0, Math.min(32, decryptedBytes.length)))
+      .map(b => b.toString(16).padStart(2, '0')).join(' ');
+    debugLog(`[DECRYPT] Decrypted data preview (first 32 bytes): ${decPreview}...`);
+    
+    // Decrypted structure: [4 bytes timestamp][1 byte flags][message text]
+    if (decryptedBytes.length < 5) {
+      debugLog(`[DECRYPT] ABORT: Decrypted data too short (${decryptedBytes.length} bytes, need at least 5)`);
+      return null;
+    }
+    
+    // Extract timestamp (4 bytes, little-endian)
+    const timestamp = decryptedBytes[0] | (decryptedBytes[1] << 8) | (decryptedBytes[2] << 16) | (decryptedBytes[3] << 24);
+    debugLog(`[DECRYPT] Timestamp: ${timestamp} (${new Date(timestamp * 1000).toISOString()})`);
+    
+    // Extract flags (1 byte)
+    const flags = decryptedBytes[4];
+    debugLog(`[DECRYPT] Flags: 0x${flags.toString(16).padStart(2, '0')}`);
+    
+    // Extract message (remaining bytes)
+    const messageBytes = decryptedBytes.slice(5);
+    debugLog(`[DECRYPT] Message bytes length: ${messageBytes.length}`);
+    
+    // Decode as UTF-8 and strip null terminators
+    const decoder = new TextDecoder('utf-8');
+    const messageText = decoder.decode(messageBytes).replace(/\0+$/, '').trim();
+    
+    debugLog(`[DECRYPT] ✅ Message decrypted successfully: "${messageText}"`);
+    debugLog(`[DECRYPT] Message length: ${messageText.length} characters`);
+    
+    return messageText;
+    
+  } catch (error) {
+    debugError(`[DECRYPT] ❌ Failed to decrypt GroupText payload: ${error.message}`);
+    debugError(`[DECRYPT] Error stack: ${error.stack}`);
+    return null;
+  }
+}
+
+/**
+ * Start listening for repeater echoes via rx_log
+ * Uses the pre-computed WARDRIVING_CHANNEL_HASH for message correlation
+ * @param {string} payload - The ping payload that was sent
+ * @param {number} channelIdx - The channel index where the ping was sent
+ */
+function startRepeaterTracking(payload, channelIdx) {
+  debugLog(`Starting repeater echo tracking for ping: "${payload}" on channel ${channelIdx}`);
+  debugLog(`7-second rx_log listening window opened at ${new Date().toISOString()}`);
+  
+  // Verify we have the channel hash
+  if (WARDRIVING_CHANNEL_HASH === null) {
+    debugError(`Cannot start repeater tracking: channel hash not initialized`);
+    return;
+  }
+  
+  // Clear any existing tracking state
+  stopRepeaterTracking();
+  
+  debugLog(`Using pre-computed channel hash for correlation: 0x${WARDRIVING_CHANNEL_HASH.toString(16).padStart(2, '0')}`);
+  
+  // Initialize tracking state
+  state.repeaterTracking.isListening = true;
+  state.repeaterTracking.sentTimestamp = Date.now();
+  state.repeaterTracking.sentPayload = payload;
+  state.repeaterTracking.channelIdx = channelIdx;
+  state.repeaterTracking.repeaters.clear();
+  
+  // Create the rx_log handler
+  const rxLogHandler = (data) => {
+    handleRxLogEvent(data, payload, channelIdx, WARDRIVING_CHANNEL_HASH);
+  };
+  
+  // Store the handler so we can remove it later
+  state.repeaterTracking.rxLogHandler = rxLogHandler;
+  
+  // Listen for rx_log events
+  if (state.connection) {
+    state.connection.on(Constants.PushCodes.LogRxData, rxLogHandler);
+    debugLog(`Registered LogRxData event handler`);
+  }
+  
+  // Set timeout to stop listening after 7 seconds
+  state.repeaterTracking.listenTimeout = setTimeout(() => {
+    debugLog(`7-second rx_log listening window closed at ${new Date().toISOString()}`);
+    stopRepeaterTracking();
+  }, RX_LOG_LISTEN_WINDOW_MS);
+}
+
+/**
+ * Handle an rx_log event and check if it's a repeater echo of our ping
+ * @param {Object} data - The LogRxData event data (contains lastSnr, lastRssi, raw)
+ * @param {string} originalPayload - The payload we sent
+ * @param {number} channelIdx - The channel index where we sent the ping
+ * @param {number} expectedChannelHash - The channel hash we expect (for message correlation)
+ */
+function handleRxLogEvent(data, originalPayload, channelIdx, expectedChannelHash) {
+  try {
+    debugLog(`Received rx_log entry: SNR=${data.lastSnr}, RSSI=${data.lastRssi}`);
+    
+    // Parse the packet from raw data
+    const packet = Packet.fromBytes(data.raw);
+    
+    // VALIDATION STEP 1: Header validation (MUST occur before all other checks)
+    // Expected header for channel GroupText packets: 0x15
+    // Binary: 00 0101 01
+    // - Bits 0-1: Route Type = 01 (Flood)
+    // - Bits 2-5: Payload Type = 0101 (GroupText = 5)
+    // - Bits 6-7: Protocol Version = 00
+    const EXPECTED_HEADER = 0x15;
+    if (packet.header !== EXPECTED_HEADER) {
+      debugLog(`Ignoring rx_log entry: header validation failed (header=0x${packet.header.toString(16).padStart(2, '0')}, expected=0x${EXPECTED_HEADER.toString(16).padStart(2, '0')})`);
+      return;
+    }
+    
+    debugLog(`Parsed packet: header=0x${packet.header.toString(16).padStart(2, '0')}, route_type=${packet.route_type_string}, payload_type=${packet.payload_type_string}, path_len=${packet.path.length}`);
+    debugLog(`Header validation passed: 0x${packet.header.toString(16).padStart(2, '0')}`);
+    
+    // VALIDATION STEP 2: Verify payload type is GRP_TXT (redundant with header check but kept for clarity)
+    if (packet.payload_type !== Packet.PAYLOAD_TYPE_GRP_TXT) {
+      debugLog(`Ignoring rx_log entry: not a channel message (payload_type=${packet.payload_type})`);
+      return;
+    }
+    
+    // VALIDATION STEP 3: Validate this message is for our channel by comparing channel hash
+    // Channel message payload structure: [1 byte channel_hash][2 bytes MAC][encrypted message]
+    if (packet.payload.length < 3) {
+      debugLog(`Ignoring rx_log entry: payload too short to contain channel hash`);
+      return;
+    }
+    
+    const packetChannelHash = packet.payload[0];
+    debugLog(`Message correlation check: packet_channel_hash=0x${packetChannelHash.toString(16).padStart(2, '0')}, expected=0x${expectedChannelHash.toString(16).padStart(2, '0')}`);
+    
+    if (packetChannelHash !== expectedChannelHash) {
+      debugLog(`Ignoring rx_log entry: channel hash mismatch (packet=0x${packetChannelHash.toString(16).padStart(2, '0')}, expected=0x${expectedChannelHash.toString(16).padStart(2, '0')})`);
+      return;
+    }
+    
+    debugLog(`Channel hash match confirmed - this is a message on our channel`);
+    
+    // VALIDATION STEP 4: Decrypt and verify message content matches what we sent
+    // This ensures we're tracking echoes of OUR specific ping, not other messages on the channel
+    debugLog(`[MESSAGE_CORRELATION] Starting message content verification...`);
+    
+    if (WARDRIVING_CHANNEL_KEY) {
+      debugLog(`[MESSAGE_CORRELATION] Channel key available, attempting decryption...`);
+      const decryptedMessage = await decryptGroupTextPayload(packet.payload, WARDRIVING_CHANNEL_KEY);
+      
+      if (decryptedMessage === null) {
+        debugLog(`[MESSAGE_CORRELATION] ❌ REJECT: Failed to decrypt message`);
+        return;
+      }
+      
+      debugLog(`[MESSAGE_CORRELATION] Decryption successful, comparing content...`);
+      debugLog(`[MESSAGE_CORRELATION] Decrypted: "${decryptedMessage}" (${decryptedMessage.length} chars)`);
+      debugLog(`[MESSAGE_CORRELATION] Expected:  "${originalPayload}" (${originalPayload.length} chars)`);
+      
+      // Channel messages include sender name prefix: "SenderName: Message"
+      // Check if our expected message is contained in the decrypted text
+      // This handles both exact matches and messages with sender prefixes
+      const messageMatches = decryptedMessage === originalPayload || decryptedMessage.includes(originalPayload);
+      
+      if (!messageMatches) {
+        debugLog(`[MESSAGE_CORRELATION] ❌ REJECT: Message content mismatch (not an echo of our ping)`);
+        debugLog(`[MESSAGE_CORRELATION] This is a different message on the same channel`);
+        return;
+      }
+      
+      if (decryptedMessage === originalPayload) {
+        debugLog(`[MESSAGE_CORRELATION] ✅ Exact message match confirmed - this is an echo of our ping!`);
+      } else {
+        debugLog(`[MESSAGE_CORRELATION] ✅ Message contained in decrypted text (with sender prefix) - this is an echo of our ping!`);
+      }
+    } else {
+      debugWarn(`[MESSAGE_CORRELATION] ⚠️ WARNING: Cannot verify message content - channel key not available`);
+      debugWarn(`[MESSAGE_CORRELATION] Proceeding without message content verification (less reliable)`);
+    }
+    
+    // VALIDATION STEP 5: Check path length (repeater echo vs direct transmission)
+    // For channel messages, the path contains repeater hops
+    // Each hop in the path is 1 byte (repeater ID)
+    if (packet.path.length === 0) {
+      debugLog(`Ignoring rx_log entry: no path (direct transmission, not a repeater echo)`);
+      return;
+    }
+    
+    // Convert entire path to hex string for the repeater identifier
+    // This represents the complete path this message took
+    // Example: path [0x25, 0x21] becomes "2521"
+    const pathHex = Array.from(packet.path)
+      .map(byte => byte.toString(16).padStart(2, '0'))
+      .join('');
+    
+    debugLog(`Repeater echo accepted: path=${pathHex}, SNR=${data.lastSnr}, path_length=${packet.path.length}`);
+    
+    // Check if we already have this path
+    if (state.repeaterTracking.repeaters.has(pathHex)) {
+      const existing = state.repeaterTracking.repeaters.get(pathHex);
+      debugLog(`Deduplication: path ${pathHex} already seen (existing SNR=${existing.snr}, new SNR=${data.lastSnr})`);
+      
+      // Keep the best (highest) SNR
+      if (data.lastSnr > existing.snr) {
+        debugLog(`Deduplication decision: updating path ${pathHex} with better SNR: ${existing.snr} -> ${data.lastSnr}`);
+        state.repeaterTracking.repeaters.set(pathHex, {
+          snr: data.lastSnr,
+          seenCount: existing.seenCount + 1
+        });
+      } else {
+        debugLog(`Deduplication decision: keeping existing SNR for path ${pathHex} (existing ${existing.snr} >= new ${data.lastSnr})`);
+        // Still increment seen count
+        existing.seenCount++;
+      }
+    } else {
+      // New path
+      debugLog(`Adding new repeater echo: path=${pathHex}, SNR=${data.lastSnr}`);
+      state.repeaterTracking.repeaters.set(pathHex, {
+        snr: data.lastSnr,
+        seenCount: 1
+      });
+    }
+  } catch (error) {
+    debugError(`Error processing rx_log entry: ${error.message}`, error);
+  }
+}
+
+/**
+ * Stop listening for repeater echoes and return the results
+ * @returns {Array<{repeaterId: string, snr: number}>} Array of repeater telemetry
+ */
+function stopRepeaterTracking() {
+  if (!state.repeaterTracking.isListening) {
+    return [];
+  }
+  
+  debugLog(`Stopping repeater echo tracking`);
+  
+  // Stop listening for rx_log events
+  if (state.connection && state.repeaterTracking.rxLogHandler) {
+    state.connection.off(Constants.PushCodes.LogRxData, state.repeaterTracking.rxLogHandler);
+    debugLog(`Unregistered LogRxData event handler`);
+  }
+  
+  // Clear timeout
+  if (state.repeaterTracking.listenTimeout) {
+    clearTimeout(state.repeaterTracking.listenTimeout);
+    state.repeaterTracking.listenTimeout = null;
+  }
+  
+  // Get the results
+  const repeaters = Array.from(state.repeaterTracking.repeaters.entries()).map(([id, data]) => ({
+    repeaterId: id,
+    snr: data.snr
+  }));
+  
+  // Sort by repeater ID for deterministic output
+  repeaters.sort((a, b) => a.repeaterId.localeCompare(b.repeaterId));
+  
+  debugLog(`Final aggregated repeater list: ${repeaters.length > 0 ? repeaters.map(r => `${r.repeaterId}(${r.snr}dB)`).join(', ') : 'none'}`);
+  
+  // Reset state
+  state.repeaterTracking.isListening = false;
+  state.repeaterTracking.sentTimestamp = null;
+  state.repeaterTracking.sentPayload = null;
+  state.repeaterTracking.repeaters.clear();
+  state.repeaterTracking.rxLogHandler = null;
+  
+  return repeaters;
+}
+
+/**
+ * Format repeater telemetry for output
+ * @param {Array<{repeaterId: string, snr: number}>} repeaters - Array of repeater telemetry
+ * @returns {string} Formatted repeater string (e.g., "25(-112),2521(-109)" or "none")
+ */
+function formatRepeaterTelemetry(repeaters) {
+  if (repeaters.length === 0) {
+    return "none";
+  }
+  
+  // Format as: path(snr), path(snr), ...
+  // Round SNR to integers for cleaner output (matches meshcore-cli behavior)
+  return repeaters.map(r => `${r.repeaterId}(${Math.round(r.snr)})`).join(',');
+}
+
 // ---- Ping ----
 /**
  * Acquire fresh GPS coordinates and update state
@@ -1087,26 +1489,57 @@ async function getGpsCoordinatesForPing(isAutoMode) {
 }
 
 /**
- * Log ping information to the UI
+ * Log ping information to the UI with repeater telemetry
+ * Creates a session log entry that will be updated with repeater data
  * @param {string} payload - The ping message
  * @param {number} lat - Latitude
  * @param {number} lon - Longitude
+ * @returns {HTMLElement|null} The list item element for later updates, or null
  */
 function logPingToUI(payload, lat, lon) {
-  const nowStr = new Date().toLocaleString();
+  // Use ISO format for data storage but user-friendly format for display
+  const now = new Date();
+  const isoStr = now.toISOString();
   
   if (lastPingEl) {
-    lastPingEl.textContent = `${nowStr} — ${payload}`;
+    lastPingEl.textContent = `${now.toLocaleString()} — ${payload}`;
   }
 
   if (sessionPingsEl) {
-    const line = `${nowStr}  ${lat.toFixed(5)} ${lon.toFixed(5)}`;
+    // Create log entry with placeholder for repeater data
+    // Format: timestamp | lat,lon | repeaters (using ISO for consistency with requirements)
+    const line = `${isoStr} | ${lat.toFixed(5)},${lon.toFixed(5)} | ...`;
     const li = document.createElement('li');
     li.textContent = line;
+    li.setAttribute('data-timestamp', isoStr);
+    li.setAttribute('data-lat', lat.toFixed(5));
+    li.setAttribute('data-lon', lon.toFixed(5));
     sessionPingsEl.appendChild(li);
     // Auto-scroll to bottom
     sessionPingsEl.scrollTop = sessionPingsEl.scrollHeight;
+    return li;
   }
+  
+  return null;
+}
+
+/**
+ * Update a ping log entry with repeater telemetry
+ * @param {HTMLElement|null} logEntry - The log entry element to update
+ * @param {Array<{repeaterId: string, snr: number}>} repeaters - Array of repeater telemetry
+ */
+function updatePingLogWithRepeaters(logEntry, repeaters) {
+  if (!logEntry) return;
+  
+  const timestamp = logEntry.getAttribute('data-timestamp');
+  const lat = logEntry.getAttribute('data-lat');
+  const lon = logEntry.getAttribute('data-lon');
+  const repeaterStr = formatRepeaterTelemetry(repeaters);
+  
+  // Update the log entry with final repeater data
+  logEntry.textContent = `${timestamp} | ${lat},${lon} | ${repeaterStr}`;
+  
+  debugLog(`Updated ping log entry with repeater telemetry: ${repeaterStr}`);
 }
 
 /**
@@ -1199,6 +1632,11 @@ async function sendPing(manual = false) {
     debugLog(`Sending ping to channel: "${payload}"`);
 
     const ch = await ensureChannel();
+    
+    // Start repeater echo tracking BEFORE sending the ping
+    debugLog(`Channel ping transmission: timestamp=${new Date().toISOString()}, channel=${ch.channelIdx}, payload="${payload}"`);
+    startRepeaterTracking(payload, ch.channelIdx);
+    
     await state.connection.sendChannelTextMessage(ch.channelIdx, payload);
     debugLog(`Ping sent successfully to channel ${ch.channelIdx}`);
 
@@ -1226,8 +1664,21 @@ async function sendPing(manual = false) {
     // Schedule MeshMapper API post and map refresh
     scheduleApiPostAndMapRefresh(lat, lon, accuracy);
     
-    // Update UI with ping info
-    logPingToUI(payload, lat, lon);
+    // Create UI log entry with placeholder for repeater data
+    const logEntry = logPingToUI(payload, lat, lon);
+    
+    // Schedule repeater telemetry update after 7-second window
+    // Store timeout handle for cleanup if needed
+    const updateTimeout = setTimeout(() => {
+      const repeaters = stopRepeaterTracking();
+      updatePingLogWithRepeaters(logEntry, repeaters);
+    }, RX_LOG_LISTEN_WINDOW_MS);
+    
+    // Note: This timeout is intentionally not stored in state because:
+    // - It's tied to a specific ping and log entry (logEntry)
+    // - It will complete naturally after 7 seconds
+    // - stopRepeaterTracking() will be called which cleans up the main listener
+    // - On disconnect, stopRepeaterTracking() is called directly which stops listening immediately
     
     // Update distance display immediately after successful ping
     updateDistanceUi();
@@ -1389,6 +1840,7 @@ async function connect() {
       stopGeoWatch();
       stopGpsAgeUpdater(); // Ensure age updater stops
       stopDistanceUpdater(); // Ensure distance updater stops
+      stopRepeaterTracking(); // Stop repeater echo tracking
       
       // Clean up all timers
       cleanupAllTimers();
