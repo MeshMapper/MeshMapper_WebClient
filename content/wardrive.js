@@ -1171,11 +1171,8 @@ function startRepeaterTracking(payload, channelIdx) {
     debugLog(`Registered LogRxData event handler`);
   }
   
-  // Set timeout to stop listening after 7 seconds
-  state.repeaterTracking.listenTimeout = setTimeout(() => {
-    debugLog(`7-second rx_log listening window closed at ${new Date().toISOString()}`);
-    stopRepeaterTracking();
-  }, RX_LOG_LISTEN_WINDOW_MS);
+  // Note: The 7-second timeout to stop listening is managed by the caller (sendPing function)
+  // This allows the caller to both stop tracking AND retrieve results at the same time
 }
 
 /**
@@ -1362,7 +1359,7 @@ function stopRepeaterTracking() {
 /**
  * Format repeater telemetry for output
  * @param {Array<{repeaterId: string, snr: number}>} repeaters - Array of repeater telemetry
- * @returns {string} Formatted repeater string (e.g., "25(-112),2521(-109)" or "none")
+ * @returns {string} Formatted repeater string (e.g., "4e(11.5),77(9.75)" or "none")
  */
 function formatRepeaterTelemetry(repeaters) {
   if (repeaters.length === 0) {
@@ -1370,8 +1367,8 @@ function formatRepeaterTelemetry(repeaters) {
   }
   
   // Format as: path(snr), path(snr), ...
-  // Round SNR to integers for cleaner output (matches meshcore-cli behavior)
-  return repeaters.map(r => `${r.repeaterId}(${Math.round(r.snr)})`).join(',');
+  // Display exact SNR values as received
+  return repeaters.map(r => `${r.repeaterId}(${r.snr})`).join(',');
 }
 
 // ---- Ping ----
