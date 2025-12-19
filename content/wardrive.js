@@ -78,6 +78,9 @@ const MESHMAPPER_API_URL = "https://yow.meshmapper.net/wardriving-api.php";
 const MESHMAPPER_API_KEY = "59C7754DABDF5C11CA5F5D8368F89";
 const MESHMAPPER_DEFAULT_WHO = "GOME-WarDriver"; // Default identifier
 
+// Capacity Check API Configuration
+const CAPACITY_CHECK_API_URL = "https://yow.meshmapper.net/capacitycheck.php";
+
 // ---- DOM refs (from index.html; unchanged except the two new selectors) ----
 const $ = (id) => document.getElementById(id);
 const statusEl       = $("status");
@@ -121,6 +124,8 @@ const state = {
   lastSuccessfulPingLocation: null, // { lat, lon } of the last successful ping (Mesh + API)
   distanceUpdateTimer: null, // Timer for updating distance display
   capturedPingCoords: null, // { lat, lon, accuracy } captured at ping time, used for API post after 7s delay
+  devicePublicKey: null, // Public key of connected device (hex string)
+  capacityCheckInProgress: false, // Guard flag for in-flight capacity checks
   repeaterTracking: {
     isListening: false,           // Whether we're currently listening for echoes
     sentTimestamp: null,          // Timestamp when the ping was sent
@@ -1041,6 +1046,63 @@ async function postToMeshMapperAPI(lat, lon, heardRepeats) {
   }
 }
 
+// ---- Capacity Check API ----
+/**
+ * Helper to redact public key for logging (shows first 6 and last 6 chars)
+ * @param {string} publicKey - The public key hex string
+ * @returns {string} Redacted public key for safe logging
+ */
+function redactPublicKey(publicKey) {
+  if (!publicKey || publicKey.length < 12) {
+    return '[invalid]';
+  }
+  return `${publicKey.substring(0, 6)}...${publicKey.substring(publicKey.length - 6)}`;
+}
+
+/**
+ * Post capacity check request to determine if wardriving is allowed
+ * @param {string} reason - One of "connect", "check", "disconnect"
+ * @param {string} publicKey - The device public key (hex string)
+ * @param {string} who - The device identifier
+ * @returns {Promise<{allowed: boolean}>} Capacity check response
+ * @throws {Error} On network errors or invalid responses (fail closed)
+ */
+async function postCapacityCheck(reason, publicKey, who) {
+  try {
+    debugLog(`Capacity check: reason="${reason}", who="${who}", public_key="${redactPublicKey(publicKey)}"`);
+    
+    const payload = {
+      key: MESHMAPPER_API_KEY,
+      public_key: publicKey,
+      who: who,
+      reason: reason
+    };
+
+    const response = await fetch(CAPACITY_CHECK_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    debugLog(`Capacity check response: status=${response.status}`);
+
+    if (!response.ok) {
+      debugWarn(`Capacity check API returned error status ${response.status}`);
+      // Fail closed: treat HTTP errors as not allowed
+      return { allowed: false };
+    }
+
+    const data = await response.json();
+    debugLog(`Capacity check result: allowed=${data.allowed}`);
+    
+    return { allowed: data.allowed === true };
+  } catch (error) {
+    // Fail closed: network errors = not allowed
+    debugError(`Capacity check failed: ${error.message}`);
+    return { allowed: false };
+  }
+}
+
 /**
  * Post to MeshMapper API and refresh coverage map after heard repeats are finalized
  * This executes immediately (no delay) because it's called after the RX listening window
@@ -1647,6 +1709,63 @@ async function sendPing(manual = false) {
       return;
     }
 
+    // Validate public key is available
+    if (!state.devicePublicKey) {
+      const errorMsg = "Unable to read device public key. Reconnect and try again.";
+      debugError(`Ping blocked: ${errorMsg}`);
+      setStatus(errorMsg, STATUS_COLORS.error);
+      if (manual) {
+        alert(errorMsg);
+      } else if (state.running) {
+        // Stop auto ping on missing public key
+        stopAutoPing(false);
+      }
+      return;
+    }
+
+    // Capacity check: determine reason based on ping type
+    const capacityReason = manual ? "connect" : "check";
+    const who = getDeviceIdentifier();
+    
+    // Check if a capacity check is already in progress (prevent race conditions)
+    if (state.capacityCheckInProgress) {
+      debugLog(`Capacity check already in progress, skipping ping`);
+      if (!manual && state.running) {
+        scheduleNextAutoPing();
+      }
+      return;
+    }
+    
+    // Set in-progress flag
+    state.capacityCheckInProgress = true;
+    
+    try {
+      debugLog(`Performing capacity check with reason="${capacityReason}"`);
+      const capacityResult = await postCapacityCheck(capacityReason, state.devicePublicKey, who);
+      
+      if (!capacityResult.allowed) {
+        debugLog(`Capacity check denied wardriving (reason="${capacityReason}")`);
+        
+        if (manual) {
+          // Manual ping: show error message
+          setStatus("Wardriving is currently at capacity. Try again later.", STATUS_COLORS.error);
+          alert("Wardriving is currently at capacity. Try again later.");
+        } else if (state.running) {
+          // Auto ping: stop auto mode immediately
+          debugLog("Stopping auto ping due to capacity denial");
+          stopAutoPing(false);
+          setStatus("Wardriving disabled or at capacity. Auto ping stopped.", STATUS_COLORS.error);
+        }
+        
+        return;
+      }
+      
+      debugLog(`Capacity check approved wardriving (reason="${capacityReason}")`);
+    } finally {
+      // Clear in-progress flag
+      state.capacityCheckInProgress = false;
+    }
+
     // Handle countdown timers based on ping type
     if (manual && state.running) {
       // Manual ping during auto mode: pause the auto countdown
@@ -1817,6 +1936,16 @@ function stopAutoPing(stopGps = false) {
     return;
   }
   
+  // Call capacity check API with "disconnect" if connection remains and we have public key
+  // Only on normal stop (not on disconnect, which already handles this)
+  if (!stopGps && state.connection && state.devicePublicKey) {
+    const who = getDeviceIdentifier();
+    debugLog("Sending disconnect capacity check on auto ping stop");
+    postCapacityCheck("disconnect", state.devicePublicKey, who).catch(err => {
+      debugWarn(`Auto ping stop capacity check failed: ${err.message}`);
+    });
+  }
+  
   if (state.autoTimerId) {
     debugLog("Clearing auto ping timer");
     clearTimeout(state.autoTimerId);
@@ -1869,6 +1998,15 @@ function startAutoPing() {
     return;
   }
   
+  // Validate public key is available
+  if (!state.devicePublicKey) {
+    const errorMsg = "Unable to read device public key. Reconnect and try again.";
+    debugError(`Auto ping blocked: ${errorMsg}`);
+    setStatus(errorMsg, STATUS_COLORS.error);
+    alert(errorMsg);
+    return;
+  }
+  
   // Check if we're in cooldown
   if (isInCooldown()) {
     const remainingSec = getRemainingCooldownSeconds();
@@ -1877,31 +2015,50 @@ function startAutoPing() {
     return;
   }
   
-  // Clean up any existing auto-ping timer (but keep GPS watch running)
-  if (state.autoTimerId) {
-    debugLog("Clearing existing auto ping timer");
-    clearTimeout(state.autoTimerId);
-    state.autoTimerId = null;
-  }
-  stopAutoCountdown();
+  // Capacity check: acquire slot with "connect" reason
+  const who = getDeviceIdentifier();
+  debugLog(`Performing capacity check with reason="connect" before starting auto ping`);
+  setStatus("Checking wardriving capacity...", STATUS_COLORS.info);
   
-  // Clear any previous skip reason
-  state.skipReason = null;
-  
-  // Start GPS watch for continuous updates
-  debugLog("Starting GPS watch for auto mode");
-  startGeoWatch();
-  
-  state.running = true;
-  updateAutoButton();
+  postCapacityCheck("connect", state.devicePublicKey, who).then(capacityResult => {
+    if (!capacityResult.allowed) {
+      debugLog("Capacity check denied auto ping start");
+      setStatus("Wardriving is currently at capacity or disabled.", STATUS_COLORS.error);
+      alert("Wardriving is currently at capacity or disabled. Try again later.");
+      return;
+    }
+    
+    debugLog("Capacity check approved auto ping start");
+    
+    // Clean up any existing auto-ping timer (but keep GPS watch running)
+    if (state.autoTimerId) {
+      debugLog("Clearing existing auto ping timer");
+      clearTimeout(state.autoTimerId);
+      state.autoTimerId = null;
+    }
+    stopAutoCountdown();
+    
+    // Clear any previous skip reason
+    state.skipReason = null;
+    
+    // Start GPS watch for continuous updates
+    debugLog("Starting GPS watch for auto mode");
+    startGeoWatch();
+    
+    state.running = true;
+    updateAutoButton();
 
-  // Acquire wake lock for auto mode
-  debugLog("Acquiring wake lock for auto mode");
-  acquireWakeLock().catch(console.error);
+    // Acquire wake lock for auto mode
+    debugLog("Acquiring wake lock for auto mode");
+    acquireWakeLock().catch(console.error);
 
-  // Send first ping immediately
-  debugLog("Sending initial auto ping");
-  sendPing(false).catch(console.error);
+    // Send first ping immediately
+    debugLog("Sending initial auto ping");
+    sendPing(false).catch(console.error);
+  }).catch(error => {
+    debugError(`Capacity check failed: ${error.message}`);
+    setStatus("Failed to check wardriving capacity. Try again.", STATUS_COLORS.error);
+  });
 }
 
 // ---- BLE connect / disconnect ----
@@ -1929,6 +2086,20 @@ async function connect() {
       const selfInfo = await conn.getSelfInfo();
       debugLog(`Device info: ${selfInfo?.name || "[No device]"}`);
       deviceInfoEl.textContent = selfInfo?.name || "[No device]";
+      
+      // Extract and store public key
+      if (selfInfo?.publicKey) {
+        // Convert Uint8Array to hex string
+        const publicKeyHex = Array.from(selfInfo.publicKey)
+          .map(b => b.toString(16).padStart(2, '0'))
+          .join('');
+        state.devicePublicKey = publicKeyHex;
+        debugLog(`Device public key extracted: ${redactPublicKey(publicKeyHex)}`);
+      } else {
+        debugError("Device public key not found in selfInfo");
+        state.devicePublicKey = null;
+      }
+      
       updateAutoButton();
       try { 
         await conn.syncDeviceTime?.(); 
@@ -1947,11 +2118,22 @@ async function connect() {
 
     conn.on("disconnected", () => {
       debugLog("BLE disconnected event fired");
+      
+      // Call capacity check API with "disconnect" reason (best effort, non-blocking)
+      if (state.devicePublicKey) {
+        const who = getDeviceIdentifier();
+        debugLog("Sending disconnect capacity check");
+        postCapacityCheck("disconnect", state.devicePublicKey, who).catch(err => {
+          debugWarn(`Disconnect capacity check failed: ${err.message}`);
+        });
+      }
+      
       setStatus("Disconnected", STATUS_COLORS.error);
       setConnectButton(false);
       deviceInfoEl.textContent = "—";
       state.connection = null;
       state.channel = null;
+      state.devicePublicKey = null; // Clear public key on disconnect
       stopAutoPing(true); // Ignore cooldown check on disconnect
       enableControls(false);
       updateAutoButton();
