@@ -162,9 +162,11 @@ function setStatus(text, color = STATUS_COLORS.idle, immediate = false) {
   const now = Date.now();
   const timeSinceLastSet = now - statusMessageState.lastSetTime;
   
-  // Special case: if this is the same message, just update it immediately
+  // Special case: if this is the same message, just update timestamp without changing UI
+  // This maintains accurate timing for subsequent messages
   if (text === statusMessageState.currentText && color === statusMessageState.currentColor) {
     debugLog(`Status update (same message): "${text}"`);
+    statusMessageState.lastSetTime = now;
     return;
   }
   
@@ -237,7 +239,10 @@ function createCountdownTimer(getEndTime, getStatusMessage) {
   return {
     timerId: null,
     endTime: null,
-    isFirstUpdate: true, // Track if this is the first update after start
+    // Track if this is the first update after starting the countdown
+    // First update respects minimum visibility of the previous status message
+    // Subsequent updates (7s→6s→5s) apply immediately for smooth countdown display
+    isFirstUpdate: true,
     
     start(durationMs) {
       this.stop();
@@ -257,10 +262,12 @@ function createCountdownTimer(getEndTime, getStatusMessage) {
       }
       
       const remainingSec = Math.ceil(remainingMs / 1000);
-      // First update respects minimum visibility, subsequent updates are immediate
+      // First update respects minimum visibility of previous message
+      // Subsequent updates are immediate for smooth 1-second countdown intervals
       const immediate = !this.isFirstUpdate;
-      this.isFirstUpdate = false;
       applyCountdownStatus(getStatusMessage(remainingSec), STATUS_COLORS.idle, immediate);
+      // Mark first update as complete after calling applyCountdownStatus
+      this.isFirstUpdate = false;
     },
     
     stop() {
