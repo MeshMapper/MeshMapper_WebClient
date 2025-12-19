@@ -219,16 +219,16 @@ function applyStatusImmediately(text, color) {
 
 /**
  * Apply status message from countdown timer result
- * Countdown timers should update immediately (bypass minimum visibility)
  * @param {string|{message: string, color: string}|null} result - Status message (string) or object with message and optional color
  * @param {string} defaultColor - Default color to use if result is a string or object without color
+ * @param {boolean} immediate - If true, bypass minimum visibility (for countdown updates)
  */
-function applyCountdownStatus(result, defaultColor) {
+function applyCountdownStatus(result, defaultColor, immediate = true) {
   if (!result) return;
   if (typeof result === 'string') {
-    setStatus(result, defaultColor, true); // immediate = true for countdown updates
+    setStatus(result, defaultColor, immediate);
   } else {
-    setStatus(result.message, result.color || defaultColor, true); // immediate = true for countdown updates
+    setStatus(result.message, result.color || defaultColor, immediate);
   }
 }
 
@@ -237,10 +237,12 @@ function createCountdownTimer(getEndTime, getStatusMessage) {
   return {
     timerId: null,
     endTime: null,
+    isFirstUpdate: true, // Track if this is the first update after start
     
     start(durationMs) {
       this.stop();
       this.endTime = Date.now() + durationMs;
+      this.isFirstUpdate = true; // Reset flag when starting
       this.update();
       this.timerId = setInterval(() => this.update(), 1000);
     },
@@ -255,7 +257,10 @@ function createCountdownTimer(getEndTime, getStatusMessage) {
       }
       
       const remainingSec = Math.ceil(remainingMs / 1000);
-      applyCountdownStatus(getStatusMessage(remainingSec), STATUS_COLORS.idle);
+      // First update respects minimum visibility, subsequent updates are immediate
+      const immediate = !this.isFirstUpdate;
+      this.isFirstUpdate = false;
+      applyCountdownStatus(getStatusMessage(remainingSec), STATUS_COLORS.idle, immediate);
     },
     
     stop() {
@@ -264,6 +269,7 @@ function createCountdownTimer(getEndTime, getStatusMessage) {
         this.timerId = null;
       }
       this.endTime = null;
+      this.isFirstUpdate = true; // Reset flag when stopping
     }
   };
 }
@@ -1726,13 +1732,12 @@ async function sendPing(manual = false) {
     // Create UI log entry with placeholder for repeater data
     const logEntry = logPingToUI(payload, lat, lon);
     
-    // Start RX listening countdown after brief delay to show "Ping sent" message
-    setTimeout(() => {
-      if (state.connection) {
-        debugLog(`Starting RX listening window for ${RX_LOG_LISTEN_WINDOW_MS}ms`);
-        startRxListeningCountdown(RX_LOG_LISTEN_WINDOW_MS);
-      }
-    }, STATUS_UPDATE_DELAY_MS);
+    // Start RX listening countdown
+    // The minimum 500ms visibility of "Ping sent" is enforced by setStatus()
+    if (state.connection) {
+      debugLog(`Starting RX listening window for ${RX_LOG_LISTEN_WINDOW_MS}ms`);
+      startRxListeningCountdown(RX_LOG_LISTEN_WINDOW_MS);
+    }
     
     // Schedule the sequence: listen for 7s, THEN finalize repeats and post to API
     // This timeout is stored in meshMapperTimer for cleanup purposes
