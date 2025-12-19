@@ -46,20 +46,22 @@ const MIN_PAUSE_THRESHOLD_MS = 1000;           // Minimum timer value (1 second)
 const MAX_REASONABLE_TIMER_MS = 5 * 60 * 1000; // Maximum reasonable timer value (5 minutes) to handle clock skew
 const RX_LOG_LISTEN_WINDOW_MS = 7000;          // Listen window for repeater echoes (7 seconds)
 
-// Pre-computed channel hash for the wardriving channel
-// This will be computed once at startup and used for message correlation
+// Pre-computed channel hash and key for the wardriving channel
+// These will be computed once at startup and used for message correlation and decryption
 let WARDRIVING_CHANNEL_HASH = null;
+let WARDRIVING_CHANNEL_KEY = null;
 
-// Initialize the wardriving channel hash at startup
+// Initialize the wardriving channel hash and key at startup
 (async function initializeChannelHash() {
   try {
-    const channelKey = await deriveChannelKey(CHANNEL_NAME);
-    WARDRIVING_CHANNEL_HASH = await computeChannelHash(channelKey);
+    WARDRIVING_CHANNEL_KEY = await deriveChannelKey(CHANNEL_NAME);
+    WARDRIVING_CHANNEL_HASH = await computeChannelHash(WARDRIVING_CHANNEL_KEY);
     debugLog(`Wardriving channel hash pre-computed at startup: 0x${WARDRIVING_CHANNEL_HASH.toString(16).padStart(2, '0')}`);
+    debugLog(`Wardriving channel key cached for message decryption (${WARDRIVING_CHANNEL_KEY.length} bytes)`);
   } catch (error) {
-    debugError(`CRITICAL: Failed to pre-compute channel hash: ${error.message}`);
+    debugError(`CRITICAL: Failed to pre-compute channel hash/key: ${error.message}`);
     debugError(`Repeater echo tracking will be disabled. Please reload the page.`);
-    // Channel hash remains null, which will be checked before starting tracking
+    // Channel hash and key remain null, which will be checked before starting tracking
   }
 })();
 
@@ -1013,6 +1015,122 @@ async function computeChannelHash(channelSecret) {
 }
 
 /**
+ * Decrypt GroupText payload and extract message text
+ * Payload structure: [1 byte channel_hash][2 bytes MAC][encrypted data]
+ * Encrypted data: [4 bytes timestamp][1 byte flags][message text]
+ * @param {Uint8Array} payload - The packet payload
+ * @param {Uint8Array} channelKey - The 16-byte channel secret for decryption
+ * @returns {Promise<string|null>} The decrypted message text, or null if decryption fails
+ */
+async function decryptGroupTextPayload(payload, channelKey) {
+  try {
+    debugLog(`[DECRYPT] Starting GroupText payload decryption`);
+    debugLog(`[DECRYPT] Payload length: ${payload.length} bytes`);
+    debugLog(`[DECRYPT] Channel key length: ${channelKey.length} bytes`);
+    
+    // Validate payload length
+    if (payload.length < 3) {
+      debugLog(`[DECRYPT] ABORT: Payload too short for decryption (${payload.length} bytes, need at least 3)`);
+      return null;
+    }
+    
+    // Extract components
+    const channelHash = payload[0];
+    const cipherMAC = payload.slice(1, 3);
+    const encryptedData = payload.slice(3);
+    
+    debugLog(`[DECRYPT] Channel hash: 0x${channelHash.toString(16).padStart(2, '0')}`);
+    debugLog(`[DECRYPT] Cipher MAC: ${Array.from(cipherMAC).map(b => b.toString(16).padStart(2, '0')).join('')}`);
+    debugLog(`[DECRYPT] Encrypted data length: ${encryptedData.length} bytes`);
+    
+    if (encryptedData.length === 0) {
+      debugLog(`[DECRYPT] ABORT: No encrypted data to decrypt`);
+      return null;
+    }
+    
+    // Log first 32 bytes of encrypted data for debugging
+    const encPreview = Array.from(encryptedData.slice(0, Math.min(32, encryptedData.length)))
+      .map(b => b.toString(16).padStart(2, '0')).join('');
+    debugLog(`[DECRYPT] Encrypted data preview (first 32 bytes): ${encPreview}...`);
+    
+    // Pad to 16-byte blocks if needed (AES block size)
+    const blockSize = 16;
+    const paddedLength = Math.ceil(encryptedData.length / blockSize) * blockSize;
+    const paddedData = new Uint8Array(paddedLength);
+    paddedData.set(encryptedData);
+    
+    if (paddedLength !== encryptedData.length) {
+      debugLog(`[DECRYPT] Padded encrypted data from ${encryptedData.length} to ${paddedLength} bytes`);
+    }
+    
+    // Web Crypto API doesn't support ECB mode directly
+    // We simulate ECB by using CBC with a zero IV
+    const iv = new Uint8Array(16); // Zero IV for ECB simulation
+    debugLog(`[DECRYPT] Using AES-CBC with zero IV to simulate ECB mode`);
+    
+    // Import the channel key for AES-CBC decryption
+    debugLog(`[DECRYPT] Importing channel key for AES-CBC decryption...`);
+    const cryptoKey = await crypto.subtle.importKey(
+      'raw',
+      channelKey,
+      { name: 'AES-CBC' },
+      false,
+      ['decrypt']
+    );
+    debugLog(`[DECRYPT] Channel key imported successfully`);
+    
+    // Decrypt using AES-CBC with zero IV (simulates ECB)
+    debugLog(`[DECRYPT] Decrypting ${paddedData.length} bytes...`);
+    const decryptedBuffer = await crypto.subtle.decrypt(
+      { name: 'AES-CBC', iv: iv },
+      cryptoKey,
+      paddedData
+    );
+    debugLog(`[DECRYPT] Decryption completed successfully`);
+    
+    const decryptedBytes = new Uint8Array(decryptedBuffer);
+    debugLog(`[DECRYPT] Decrypted data length: ${decryptedBytes.length} bytes`);
+    
+    // Log decrypted bytes for debugging
+    const decPreview = Array.from(decryptedBytes.slice(0, Math.min(32, decryptedBytes.length)))
+      .map(b => b.toString(16).padStart(2, '0')).join(' ');
+    debugLog(`[DECRYPT] Decrypted data preview (first 32 bytes): ${decPreview}...`);
+    
+    // Decrypted structure: [4 bytes timestamp][1 byte flags][message text]
+    if (decryptedBytes.length < 5) {
+      debugLog(`[DECRYPT] ABORT: Decrypted data too short (${decryptedBytes.length} bytes, need at least 5)`);
+      return null;
+    }
+    
+    // Extract timestamp (4 bytes, little-endian)
+    const timestamp = decryptedBytes[0] | (decryptedBytes[1] << 8) | (decryptedBytes[2] << 16) | (decryptedBytes[3] << 24);
+    debugLog(`[DECRYPT] Timestamp: ${timestamp} (${new Date(timestamp * 1000).toISOString()})`);
+    
+    // Extract flags (1 byte)
+    const flags = decryptedBytes[4];
+    debugLog(`[DECRYPT] Flags: 0x${flags.toString(16).padStart(2, '0')}`);
+    
+    // Extract message (remaining bytes)
+    const messageBytes = decryptedBytes.slice(5);
+    debugLog(`[DECRYPT] Message bytes length: ${messageBytes.length}`);
+    
+    // Decode as UTF-8 and strip null terminators
+    const decoder = new TextDecoder('utf-8');
+    const messageText = decoder.decode(messageBytes).replace(/\0+$/, '').trim();
+    
+    debugLog(`[DECRYPT] ✅ Message decrypted successfully: "${messageText}"`);
+    debugLog(`[DECRYPT] Message length: ${messageText.length} characters`);
+    
+    return messageText;
+    
+  } catch (error) {
+    debugError(`[DECRYPT] ❌ Failed to decrypt GroupText payload: ${error.message}`);
+    debugError(`[DECRYPT] Error stack: ${error.stack}`);
+    return null;
+  }
+}
+
+/**
  * Start listening for repeater echoes via rx_log
  * Uses the pre-computed WARDRIVING_CHANNEL_HASH for message correlation
  * @param {string} payload - The ping payload that was sent
@@ -1113,6 +1231,37 @@ function handleRxLogEvent(data, originalPayload, channelIdx, expectedChannelHash
     
     debugLog(`Channel hash match confirmed - this is a message on our channel`);
     
+    // VALIDATION STEP 4: Decrypt and verify message content matches what we sent
+    // This ensures we're tracking echoes of OUR specific ping, not other messages on the channel
+    debugLog(`[MESSAGE_CORRELATION] Starting message content verification...`);
+    
+    if (WARDRIVING_CHANNEL_KEY) {
+      debugLog(`[MESSAGE_CORRELATION] Channel key available, attempting decryption...`);
+      const decryptedMessage = await decryptGroupTextPayload(packet.payload, WARDRIVING_CHANNEL_KEY);
+      
+      if (decryptedMessage === null) {
+        debugLog(`[MESSAGE_CORRELATION] ❌ REJECT: Failed to decrypt message`);
+        return;
+      }
+      
+      debugLog(`[MESSAGE_CORRELATION] Decryption successful, comparing content...`);
+      debugLog(`[MESSAGE_CORRELATION] Decrypted: "${decryptedMessage}" (${decryptedMessage.length} chars)`);
+      debugLog(`[MESSAGE_CORRELATION] Expected:  "${originalPayload}" (${originalPayload.length} chars)`);
+      
+      // Compare decrypted message with what we sent
+      if (decryptedMessage !== originalPayload) {
+        debugLog(`[MESSAGE_CORRELATION] ❌ REJECT: Message content mismatch (not an echo of our ping)`);
+        debugLog(`[MESSAGE_CORRELATION] This is a different message on the same channel`);
+        return;
+      }
+      
+      debugLog(`[MESSAGE_CORRELATION] ✅ Message content match confirmed - this is an echo of our ping!`);
+    } else {
+      debugWarn(`[MESSAGE_CORRELATION] ⚠️ WARNING: Cannot verify message content - channel key not available`);
+      debugWarn(`[MESSAGE_CORRELATION] Proceeding without message content verification (less reliable)`);
+    }
+    
+    // VALIDATION STEP 5: Check path length (repeater echo vs direct transmission)
     // For channel messages, the path contains repeater hops
     // Each hop in the path is 1 byte (repeater ID)
     if (packet.path.length === 0) {
