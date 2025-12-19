@@ -141,22 +141,94 @@ const STATUS_COLORS = {
   info: "text-sky-300"
 };
 
-function setStatus(text, color = STATUS_COLORS.idle) {
+// Status message management with minimum visibility duration
+const MIN_STATUS_VISIBILITY_MS = 500; // Minimum time a status message must remain visible
+const statusMessageState = {
+  lastSetTime: 0,           // Timestamp when status was last set
+  pendingMessage: null,     // Pending message to display after minimum visibility
+  pendingTimer: null,       // Timer for pending message
+  currentText: '',          // Current status text
+  currentColor: ''          // Current status color
+};
+
+/**
+ * Set status message with minimum visibility enforcement
+ * Non-timed status messages will remain visible for at least 500ms before being replaced
+ * @param {string} text - Status message text
+ * @param {string} color - Status color class
+ * @param {boolean} immediate - If true, bypass minimum visibility (for countdown timers)
+ */
+function setStatus(text, color = STATUS_COLORS.idle, immediate = false) {
+  const now = Date.now();
+  const timeSinceLastSet = now - statusMessageState.lastSetTime;
+  
+  // Special case: if this is the same message, just update it immediately
+  if (text === statusMessageState.currentText && color === statusMessageState.currentColor) {
+    debugLog(`Status update (same message): "${text}"`);
+    return;
+  }
+  
+  // If immediate flag is set (for countdown timers), apply immediately
+  if (immediate) {
+    applyStatusImmediately(text, color);
+    return;
+  }
+  
+  // If minimum visibility time has passed, apply immediately
+  if (timeSinceLastSet >= MIN_STATUS_VISIBILITY_MS) {
+    applyStatusImmediately(text, color);
+    return;
+  }
+  
+  // Minimum visibility time has not passed, queue the message
+  const delayNeeded = MIN_STATUS_VISIBILITY_MS - timeSinceLastSet;
+  debugLog(`Status queued (${delayNeeded}ms delay): "${text}" (current: "${statusMessageState.currentText}")`);
+  
+  // Store pending message
+  statusMessageState.pendingMessage = { text, color };
+  
+  // Clear any existing pending timer
+  if (statusMessageState.pendingTimer) {
+    clearTimeout(statusMessageState.pendingTimer);
+  }
+  
+  // Schedule the pending message
+  statusMessageState.pendingTimer = setTimeout(() => {
+    if (statusMessageState.pendingMessage) {
+      const pending = statusMessageState.pendingMessage;
+      statusMessageState.pendingMessage = null;
+      statusMessageState.pendingTimer = null;
+      applyStatusImmediately(pending.text, pending.color);
+    }
+  }, delayNeeded);
+}
+
+/**
+ * Apply status message immediately to the UI
+ * @param {string} text - Status message text
+ * @param {string} color - Status color class
+ */
+function applyStatusImmediately(text, color) {
   statusEl.textContent = text;
   statusEl.className = `font-semibold ${color}`;
+  statusMessageState.lastSetTime = Date.now();
+  statusMessageState.currentText = text;
+  statusMessageState.currentColor = color;
+  debugLog(`Status applied: "${text}"`);
 }
 
 /**
  * Apply status message from countdown timer result
+ * Countdown timers should update immediately (bypass minimum visibility)
  * @param {string|{message: string, color: string}|null} result - Status message (string) or object with message and optional color
  * @param {string} defaultColor - Default color to use if result is a string or object without color
  */
 function applyCountdownStatus(result, defaultColor) {
   if (!result) return;
   if (typeof result === 'string') {
-    setStatus(result, defaultColor);
+    setStatus(result, defaultColor, true); // immediate = true for countdown updates
   } else {
-    setStatus(result.message, result.color || defaultColor);
+    setStatus(result.message, result.color || defaultColor, true); // immediate = true for countdown updates
   }
 }
 
@@ -345,6 +417,13 @@ function cleanupAllTimers() {
   if (state.cooldownUpdateTimer) {
     clearTimeout(state.cooldownUpdateTimer);
     state.cooldownUpdateTimer = null;
+  }
+  
+  // Clean up status message timer
+  if (statusMessageState.pendingTimer) {
+    clearTimeout(statusMessageState.pendingTimer);
+    statusMessageState.pendingTimer = null;
+    statusMessageState.pendingMessage = null;
   }
   
   // Clean up state timer references
