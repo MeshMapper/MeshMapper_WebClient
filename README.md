@@ -61,9 +61,11 @@ A browser-based Progressive Web App for wardriving with MeshCore devices. Connec
 - **Wake Lock**: Keeps screen on during auto mode for GPS accuracy
 
 ### 📡 Power Configuration
-Configure radio power for accurate coverage data:
-- N/A (default)
-- 0.3w, 0.6w, 1.0w
+**Auto-populated from your device** - The app automatically reads your companion's radio transmit power and selects the appropriate power level:
+- **Auto-detection**: Power setting is automatically selected from device on connect
+- **Manual override**: You can still manually change the power setting if needed
+- **Power levels**: N/A (default), 0.3w, 0.6w, 1.0w
+- **Accurate mapping**: Device tx_power (dBm) is intelligently mapped to wattage for coverage data
 
 ### 📊 Session Tracking
 - Scrollable **ping history log**
