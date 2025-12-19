@@ -2208,6 +2208,16 @@ async function disconnect() {
 document.addEventListener("visibilitychange", async () => {
   if (document.hidden) {
     debugLog("Page visibility changed to hidden");
+    
+    // Send disconnect capacity check before stopping auto ping
+    if (state.running && state.connection && state.devicePublicKey) {
+      const who = getDeviceIdentifier();
+      debugLog("Sending disconnect capacity check on page hidden");
+      postCapacityCheck("disconnect", state.devicePublicKey, who).catch(err => {
+        debugWarn(`Page hidden capacity check failed: ${err.message}`);
+      });
+    }
+    
     if (state.running) {
       debugLog("Stopping auto ping due to page hidden");
       stopAutoPing(true); // Ignore cooldown check when page is hidden
