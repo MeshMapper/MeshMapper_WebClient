@@ -1171,11 +1171,8 @@ function startRepeaterTracking(payload, channelIdx) {
     debugLog(`Registered LogRxData event handler`);
   }
   
-  // Set timeout to stop listening after 7 seconds
-  state.repeaterTracking.listenTimeout = setTimeout(() => {
-    debugLog(`7-second rx_log listening window closed at ${new Date().toISOString()}`);
-    stopRepeaterTracking();
-  }, RX_LOG_LISTEN_WINDOW_MS);
+  // Note: The 7-second timeout to stop listening is managed by the caller (sendPing function)
+  // This allows the caller to both stop tracking AND retrieve results at the same time
 }
 
 /**
