@@ -1093,6 +1093,18 @@ async function postCapacityCheck(reason, publicKey, who) {
     }
 
     const data = await response.json();
+    
+    // Validate response structure
+    if (typeof data !== 'object' || data === null) {
+      debugWarn(`Capacity check API returned invalid response (not an object)`);
+      return { allowed: false };
+    }
+    
+    if (!('allowed' in data)) {
+      debugWarn(`Capacity check API response missing 'allowed' field`);
+      return { allowed: false };
+    }
+    
     debugLog(`Capacity check result: allowed=${data.allowed}`);
     
     return { allowed: data.allowed === true };
@@ -2096,12 +2108,18 @@ async function connect() {
       
       // Extract and store public key
       if (selfInfo?.publicKey) {
-        // Convert Uint8Array to hex string
-        const publicKeyHex = Array.from(selfInfo.publicKey)
-          .map(b => b.toString(16).padStart(2, '0'))
-          .join('');
-        state.devicePublicKey = publicKeyHex;
-        debugLog(`Device public key extracted: ${redactPublicKey(publicKeyHex)}`);
+        // Validate publicKey is Uint8Array before converting
+        if (!(selfInfo.publicKey instanceof Uint8Array)) {
+          debugError(`Device public key is not a Uint8Array (got ${typeof selfInfo.publicKey})`);
+          state.devicePublicKey = null;
+        } else {
+          // Convert Uint8Array to hex string
+          const publicKeyHex = Array.from(selfInfo.publicKey)
+            .map(b => b.toString(16).padStart(2, '0'))
+            .join('');
+          state.devicePublicKey = publicKeyHex;
+          debugLog(`Device public key extracted: ${redactPublicKey(publicKeyHex)}`);
+        }
       } else {
         debugError("Device public key not found in selfInfo");
         state.devicePublicKey = null;
