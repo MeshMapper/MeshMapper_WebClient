@@ -1185,7 +1185,7 @@ function startRepeaterTracking(payload, channelIdx) {
  * @param {number} channelIdx - The channel index where we sent the ping
  * @param {number} expectedChannelHash - The channel hash we expect (for message correlation)
  */
-function handleRxLogEvent(data, originalPayload, channelIdx, expectedChannelHash) {
+async function handleRxLogEvent(data, originalPayload, channelIdx, expectedChannelHash) {
   try {
     debugLog(`Received rx_log entry: SNR=${data.lastSnr}, RSSI=${data.lastRssi}`);
     
