@@ -44,10 +44,6 @@ const STATUS_UPDATE_DELAY_MS = 100;            // Brief delay to ensure "Ping se
 const MAP_REFRESH_DELAY_MS = 1000;             // Delay after API post to ensure backend updated
 const MIN_PAUSE_THRESHOLD_MS = 1000;           // Minimum timer value (1 second) to pause
 const MAX_REASONABLE_TIMER_MS = 5 * 60 * 1000; // Maximum reasonable timer value (5 minutes) to handle clock skew
-const WARDROVE_KEY     = new Uint8Array([
-  0x40, 0x76, 0xC3, 0x15, 0xC1, 0xEF, 0x38, 0x5F,
-  0xA9, 0x3F, 0x06, 0x60, 0x27, 0x32, 0x0F, 0xE5
-]);
 
 // Ottawa Geofence Configuration
 const OTTAWA_CENTER_LAT = 45.4215;  // Parliament Hill latitude
@@ -714,8 +710,92 @@ async function primeGpsOnce() {
 }
 
 
+// ---- Key Derivation ----
+/**
+ * Derives a 16-byte channel key from a hashtag channel name using SHA-256.
+ * This allows any hashtag channel to be used (e.g., #wardriving, #wardrive, #test).
+ * Channel names must start with # and contain only a-z, 0-9, and dashes.
+ * 
+ * Algorithm: sha256(channelName).subarray(0, 16)
+ * 
+ * @param {string} channelName - The hashtag channel name (e.g., "#wardriving")
+ * @returns {Promise<Uint8Array>} A 16-byte key derived from the channel name
+ * @throws {Error} If channel name format is invalid
+ */
+async function deriveChannelKey(channelName) {
+  // Validate channel name format: must start with # and contain only a-z, 0-9, and dashes
+  if (!channelName.startsWith('#')) {
+    throw new Error(`Channel name must start with # (got: "${channelName}")`);
+  }
+  
+  // Check that the part after # contains only lowercase letters, numbers, and dashes
+  const nameWithoutHash = channelName.slice(1);
+  if (!/^[a-z0-9-]+$/.test(nameWithoutHash)) {
+    throw new Error(
+      `Channel name "${channelName}" contains invalid characters. Only a-z, 0-9, and dashes are allowed.`
+    );
+  }
+  
+  // Encode the channel name as UTF-8
+  const encoder = new TextEncoder();
+  const data = encoder.encode(channelName);
+  
+  // Hash using SHA-256
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  
+  // Take the first 16 bytes of the hash as the channel key
+  // This matches the pseudocode: sha256(#name).subarray(0, 16)
+  const hashArray = new Uint8Array(hashBuffer);
+  const channelKey = hashArray.slice(0, 16);
+  
+  debugLog(`Derived channel key for "${channelName}": ${Array.from(channelKey).map(b => b.toString(16).padStart(2, '0')).join('')}`);
+  
+  return channelKey;
+}
 
 // ---- Channel helpers ----
+async function createWardriveChannel() {
+  if (!state.connection) throw new Error("Not connected");
+  
+  debugLog(`Attempting to create channel: ${CHANNEL_NAME}`);
+  
+  // Get all channels
+  const channels = await state.connection.getChannels();
+  debugLog(`Retrieved ${channels.length} channels`);
+  
+  // Find first empty channel slot
+  let emptyIdx = -1;
+  for (let i = 0; i < channels.length; i++) {
+    if (channels[i].name === '') {
+      emptyIdx = i;
+      debugLog(`Found empty channel slot at index: ${emptyIdx}`);
+      break;
+    }
+  }
+  
+  // Throw error if no free slots
+  if (emptyIdx === -1) {
+    debugError(`No empty channel slots available`);
+    throw new Error(
+      `No empty channel slots available. Please free a channel slot on your companion first.`
+    );
+  }
+  
+  // Derive the channel key from the channel name
+  const channelKey = await deriveChannelKey(CHANNEL_NAME);
+  
+  // Create the channel
+  debugLog(`Creating channel ${CHANNEL_NAME} at index ${emptyIdx}`);
+  await state.connection.setChannel(emptyIdx, CHANNEL_NAME, channelKey);
+  debugLog(`Channel ${CHANNEL_NAME} created successfully at index ${emptyIdx}`);
+  
+  // Return channel object
+  return {
+    channelIdx: emptyIdx,
+    name: CHANNEL_NAME
+  };
+}
+
 async function ensureChannel() {
   if (!state.connection) throw new Error("Not connected");
   if (state.channel) {
@@ -724,16 +804,24 @@ async function ensureChannel() {
   }
 
   debugLog(`Looking up channel: ${CHANNEL_NAME}`);
-  const ch = await state.connection.findChannelByName(CHANNEL_NAME);
+  let ch = await state.connection.findChannelByName(CHANNEL_NAME);
+  
   if (!ch) {
-    debugError(`Channel ${CHANNEL_NAME} not found on device`);
-    enableControls(false);
-    throw new Error(
-      `Channel ${CHANNEL_NAME} not found. Join it on your companion first.`
-    );
+    debugLog(`Channel ${CHANNEL_NAME} not found, attempting to create it`);
+    try {
+      ch = await createWardriveChannel();
+      debugLog(`Channel ${CHANNEL_NAME} created successfully`);
+    } catch (e) {
+      debugError(`Failed to create channel ${CHANNEL_NAME}: ${e.message}`);
+      enableControls(false);
+      throw new Error(
+        `Channel ${CHANNEL_NAME} not found and could not be created: ${e.message}`
+      );
+    }
+  } else {
+    debugLog(`Channel found: ${CHANNEL_NAME} (index: ${ch.channelIdx})`);
   }
 
-  debugLog(`Channel found: ${CHANNEL_NAME} (index: ${ch.channelIdx})`);
   state.channel = ch;
   enableControls(true);
   channelInfoEl.textContent = `${CHANNEL_NAME} (CH:${ch.channelIdx})`;
