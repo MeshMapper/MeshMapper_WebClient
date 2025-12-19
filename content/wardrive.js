@@ -1054,6 +1054,9 @@ async function postApiAndRefreshMap(lat, lon, accuracy, heardRepeats) {
   
   setStatus("Posting to API", STATUS_COLORS.info);
   
+  // Hidden 3-second delay before API POST (user sees "Posting to API" status during this time)
+  await new Promise(resolve => setTimeout(resolve, 3000));
+  
   try {
     await postToMeshMapperAPI(lat, lon, heardRepeats);
   } catch (error) {
