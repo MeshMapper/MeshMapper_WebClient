@@ -46,6 +46,21 @@ const MIN_PAUSE_THRESHOLD_MS = 1000;           // Minimum timer value (1 second)
 const MAX_REASONABLE_TIMER_MS = 5 * 60 * 1000; // Maximum reasonable timer value (5 minutes) to handle clock skew
 const RX_LOG_LISTEN_WINDOW_MS = 7000;          // Listen window for repeater echoes (7 seconds)
 
+// Pre-computed channel hash for the wardriving channel
+// This will be computed once at startup and used for message correlation
+let WARDRIVING_CHANNEL_HASH = null;
+
+// Initialize the wardriving channel hash at startup
+(async function initializeChannelHash() {
+  try {
+    const channelKey = await deriveChannelKey(CHANNEL_NAME);
+    WARDRIVING_CHANNEL_HASH = await computeChannelHash(channelKey);
+    debugLog(`Wardriving channel hash pre-computed at startup: 0x${WARDRIVING_CHANNEL_HASH.toString(16).padStart(2, '0')}`);
+  } catch (error) {
+    debugError(`Failed to pre-compute channel hash: ${error.message}`);
+  }
+})();
+
 // Ottawa Geofence Configuration
 const OTTAWA_CENTER_LAT = 45.4215;  // Parliament Hill latitude
 const OTTAWA_CENTER_LON = -75.6972; // Parliament Hill longitude
@@ -106,6 +121,7 @@ const state = {
     isListening: false,           // Whether we're currently listening for echoes
     sentTimestamp: null,          // Timestamp when the ping was sent
     sentPayload: null,            // The payload text that was sent
+    channelIdx: null,             // Channel index for reference
     repeaters: new Map(),         // Map<repeaterId, {snr, seenCount}>
     listenTimeout: null,          // Timeout handle for 7-second window
     rxLogHandler: null,           // Handler function for rx_log events
@@ -984,7 +1000,19 @@ function scheduleApiPostAndMapRefresh(lat, lon, accuracy) {
 // ---- Repeater Echo Tracking ----
 
 /**
+ * Compute channel hash from channel secret (first byte of SHA-256)
+ * @param {Uint8Array} channelSecret - The 16-byte channel secret
+ * @returns {Promise<number>} The channel hash (first byte of SHA-256)
+ */
+async function computeChannelHash(channelSecret) {
+  const hashBuffer = await crypto.subtle.digest('SHA-256', channelSecret);
+  const hashArray = new Uint8Array(hashBuffer);
+  return hashArray[0];
+}
+
+/**
  * Start listening for repeater echoes via rx_log
+ * Uses the pre-computed WARDRIVING_CHANNEL_HASH for message correlation
  * @param {string} payload - The ping payload that was sent
  * @param {number} channelIdx - The channel index where the ping was sent
  */
@@ -992,18 +1020,27 @@ function startRepeaterTracking(payload, channelIdx) {
   debugLog(`Starting repeater echo tracking for ping: "${payload}" on channel ${channelIdx}`);
   debugLog(`7-second rx_log listening window opened at ${new Date().toISOString()}`);
   
+  // Verify we have the channel hash
+  if (WARDRIVING_CHANNEL_HASH === null) {
+    debugError(`Cannot start repeater tracking: channel hash not initialized`);
+    return;
+  }
+  
   // Clear any existing tracking state
   stopRepeaterTracking();
+  
+  debugLog(`Using pre-computed channel hash for correlation: 0x${WARDRIVING_CHANNEL_HASH.toString(16).padStart(2, '0')}`);
   
   // Initialize tracking state
   state.repeaterTracking.isListening = true;
   state.repeaterTracking.sentTimestamp = Date.now();
   state.repeaterTracking.sentPayload = payload;
+  state.repeaterTracking.channelIdx = channelIdx;
   state.repeaterTracking.repeaters.clear();
   
   // Create the rx_log handler
   const rxLogHandler = (data) => {
-    handleRxLogEvent(data, payload, channelIdx);
+    handleRxLogEvent(data, payload, channelIdx, WARDRIVING_CHANNEL_HASH);
   };
   
   // Store the handler so we can remove it later
@@ -1027,8 +1064,9 @@ function startRepeaterTracking(payload, channelIdx) {
  * @param {Object} data - The LogRxData event data (contains lastSnr, lastRssi, raw)
  * @param {string} originalPayload - The payload we sent
  * @param {number} channelIdx - The channel index where we sent the ping
+ * @param {number} expectedChannelHash - The channel hash we expect (for message correlation)
  */
-function handleRxLogEvent(data, originalPayload, channelIdx) {
+function handleRxLogEvent(data, originalPayload, channelIdx, expectedChannelHash) {
   try {
     debugLog(`Received rx_log entry: SNR=${data.lastSnr}, RSSI=${data.lastRssi}`);
     
@@ -1042,6 +1080,23 @@ function handleRxLogEvent(data, originalPayload, channelIdx) {
       debugLog(`Ignoring rx_log entry: not a channel message (payload_type=${packet.payload_type})`);
       return;
     }
+    
+    // CRITICAL: Validate this message is for our channel by comparing channel hash
+    // Channel message payload structure: [1 byte channel_hash][2 bytes MAC][encrypted message]
+    if (packet.payload.length < 3) {
+      debugLog(`Ignoring rx_log entry: payload too short to contain channel hash`);
+      return;
+    }
+    
+    const packetChannelHash = packet.payload[0];
+    debugLog(`Message correlation check: packet_channel_hash=0x${packetChannelHash.toString(16).padStart(2, '0')}, expected=0x${expectedChannelHash.toString(16).padStart(2, '0')}`);
+    
+    if (packetChannelHash !== expectedChannelHash) {
+      debugLog(`Ignoring rx_log entry: channel hash mismatch (packet=0x${packetChannelHash.toString(16).padStart(2, '0')}, expected=0x${expectedChannelHash.toString(16).padStart(2, '0')})`);
+      return;
+    }
+    
+    debugLog(`Channel hash match confirmed - this is a message on our channel`);
     
     // For channel messages, the path contains repeater hops
     // Each hop in the path is 1 byte (repeater ID)
@@ -1057,22 +1112,22 @@ function handleRxLogEvent(data, originalPayload, channelIdx) {
       .map(byte => byte.toString(16).padStart(2, '0'))
       .join('');
     
-    debugLog(`Detected repeater echo: path=${pathHex}, SNR=${data.lastSnr}, path_length=${packet.path.length}`);
+    debugLog(`Repeater echo accepted: path=${pathHex}, SNR=${data.lastSnr}, path_length=${packet.path.length}`);
     
     // Check if we already have this path
     if (state.repeaterTracking.repeaters.has(pathHex)) {
       const existing = state.repeaterTracking.repeaters.get(pathHex);
-      debugLog(`Path ${pathHex} already seen (existing SNR=${existing.snr}, new SNR=${data.lastSnr})`);
+      debugLog(`Deduplication: path ${pathHex} already seen (existing SNR=${existing.snr}, new SNR=${data.lastSnr})`);
       
       // Keep the best (highest) SNR
       if (data.lastSnr > existing.snr) {
-        debugLog(`Updating path ${pathHex} with better SNR: ${existing.snr} -> ${data.lastSnr}`);
+        debugLog(`Deduplication decision: updating path ${pathHex} with better SNR: ${existing.snr} -> ${data.lastSnr}`);
         state.repeaterTracking.repeaters.set(pathHex, {
           snr: data.lastSnr,
           seenCount: existing.seenCount + 1
         });
       } else {
-        debugLog(`Keeping existing SNR for path ${pathHex} (existing ${existing.snr} >= new ${data.lastSnr})`);
+        debugLog(`Deduplication decision: keeping existing SNR for path ${pathHex} (existing ${existing.snr} >= new ${data.lastSnr})`);
         // Still increment seen count
         existing.seenCount++;
       }
