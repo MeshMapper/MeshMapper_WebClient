@@ -53,12 +53,12 @@ Status messages follow these consistent conventions:
 - **Context**: Initial state and when BLE device disconnects
 - **Minimum Visibility**: N/A (persists until connection is established)
 
-#### Failed to connect
-- **Message**: `"Failed to connect"`
+#### Connection failed
+- **Message**: `"Connection failed"` (or error message)
 - **Color**: Red (error)
-- **Used in**: `connect()`
-- **Source**: `content/wardrive.js:1976`
-- **Context**: BLE connection fails
+- **Used in**: `connect()`, event handlers
+- **Source**: `content/wardrive.js:1976`, `content/wardrive.js:2059`
+- **Context**: BLE connection fails or connection button error
 - **Minimum Visibility**: N/A (error state persists)
 
 #### Channel setup failed
@@ -67,14 +67,6 @@ Status messages follow these consistent conventions:
 - **Used in**: `connect()`
 - **Source**: `content/wardrive.js:1944`
 - **Context**: Channel creation or lookup fails during connection
-- **Minimum Visibility**: N/A (error state persists)
-
-#### Connection error
-- **Message**: `"Connection error"` (or error message)
-- **Color**: Red (error)
-- **Used in**: `disconnect()`
-- **Source**: `content/wardrive.js:2059`
-- **Context**: Error during connection event handling
 - **Minimum Visibility**: N/A (error state persists)
 
 #### Disconnect failed
@@ -339,8 +331,8 @@ Result:     "Message A" (visible 500ms) → "Message C"
 
 ## Summary
 
-**Total Status Messages**: 27 unique message patterns
-- **Connection**: 8 messages
+**Total Status Messages**: 26 unique message patterns
+- **Connection**: 7 messages
 - **Ping Operation**: 7 messages
 - **GPS**: 2 messages
 - **Countdown Timers**: 6 message patterns (with dynamic countdown values)
@@ -349,4 +341,4 @@ Result:     "Message A" (visible 500ms) → "Message C"
 
 **Minimum Visibility**: All non-countdown messages enforce **500ms minimum visibility**. Countdown messages respect this minimum on first display, then update immediately.
 
-**Standardization**: All messages follow consistent conventions with no trailing punctuation, sentence case capitalization, and appropriate verb tenses.
+**Standardization**: All messages follow consistent conventions with no trailing punctuation, sentence case capitalization, appropriate verb tenses, and consistent error message format (X failed).

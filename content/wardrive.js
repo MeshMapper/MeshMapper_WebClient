@@ -289,7 +289,7 @@ const autoCountdownTimer = createCountdownTimer(
   (remainingSec) => {
     if (!state.running) return null;
     if (remainingSec === 0) {
-      return { message: "Sending auto ping...", color: STATUS_COLORS.info };
+      return { message: "Sending auto ping", color: STATUS_COLORS.info };
     }
     // If there's a skip reason, show it with the countdown in warning color
     if (state.skipReason === "outside geofence") {
@@ -1973,7 +1973,7 @@ async function connect() {
 
   } catch (e) {
     debugError(`BLE connection failed: ${e.message}`, e);
-    setStatus("Failed to connect", STATUS_COLORS.error);
+    setStatus("Connection failed", STATUS_COLORS.error);
     connectBtn.disabled = false;
   }
 }
@@ -2056,7 +2056,7 @@ export async function onLoad() {
       }
     } catch (e) {
       debugError(`Connection button error: ${e.message}`, e);
-      setStatus(e.message || "Connection error", STATUS_COLORS.error);
+      setStatus(e.message || "Connection failed", STATUS_COLORS.error);
     }
   });
   sendPingBtn.addEventListener("click", () => {
