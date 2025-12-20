@@ -79,6 +79,57 @@ const MESHMAPPER_CAPACITY_CHECK_URL = "https://yow.meshmapper.net/capacitycheck.
 const MESHMAPPER_API_KEY = "59C7754DABDF5C11CA5F5D8368F89";
 const MESHMAPPER_DEFAULT_WHO = "GOME-WarDriver"; // Default identifier
 
+// ---- App Version Configuration ----
+/**
+ * Extract and format the app version from the HTML data attribute.
+ * GitHub Actions injects the version into the body's data-app-version attribute.
+ * @returns {string} Formatted version string (e.g., "1.3.0" or "DEV-1734652800")
+ */
+function getAppVersion() {
+  try {
+    const versionAttr = document.body.getAttribute('data-app-version');
+    
+    if (!versionAttr) {
+      debugWarn('App version not found in HTML, using fallback');
+      return 'UNKNOWN';
+    }
+    
+    debugLog(`Raw version from HTML: ${versionAttr}`);
+    
+    // Check if version is a date string (contains spaces or hyphens followed by time)
+    // DEV versions look like: "2024-12-20 04:16 UTC" or similar
+    // Release versions look like: "v1.3.0" or "1.3.0"
+    const isDateString = /\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/.test(versionAttr);
+    
+    if (isDateString) {
+      // Parse the date and convert to EPOCH seconds
+      const parsedDate = new Date(versionAttr);
+      
+      if (isNaN(parsedDate.getTime())) {
+        debugWarn(`Failed to parse DEV date: ${versionAttr}`);
+        return 'DEV-UNKNOWN';
+      }
+      
+      // Convert to EPOCH seconds (not milliseconds)
+      const epochSeconds = Math.floor(parsedDate.getTime() / 1000);
+      const devVersion = `DEV-${epochSeconds}`;
+      debugLog(`DEV version computed: ${devVersion} (from ${versionAttr})`);
+      return devVersion;
+    } else {
+      // Release version - use as-is
+      debugLog(`Release version: ${versionAttr}`);
+      return versionAttr;
+    }
+  } catch (error) {
+    debugError(`Error extracting app version: ${error.message}`);
+    return 'ERROR';
+  }
+}
+
+// Cache the app version at startup
+const APP_VERSION = getAppVersion();
+debugLog(`App version initialized: ${APP_VERSION}`);
+
 // ---- DOM refs (from index.html; unchanged except the two new selectors) ----
 const $ = (id) => document.getElementById(id);
 const statusEl       = $("status");
@@ -1096,10 +1147,11 @@ async function postToMeshMapperAPI(lat, lon, heardRepeats) {
       who: getDeviceIdentifier(),
       power: getCurrentPowerSetting() || "N/A",
       heard_repeats: heardRepeats,
+      ver: APP_VERSION,
       test: 0
     };
 
-    debugLog(`Posting to MeshMapper API: lat=${lat.toFixed(5)}, lon=${lon.toFixed(5)}, who=${payload.who}, power=${payload.power}, heard_repeats=${heardRepeats}`);
+    debugLog(`Posting to MeshMapper API: lat=${lat.toFixed(5)}, lon=${lon.toFixed(5)}, who=${payload.who}, power=${payload.power}, heard_repeats=${heardRepeats}, ver=${payload.ver}`);
 
     const response = await fetch(MESHMAPPER_API_URL, {
       method: "POST",
