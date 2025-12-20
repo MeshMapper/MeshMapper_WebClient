@@ -1048,7 +1048,7 @@ async function checkCapacity(reason) {
       // Fail closed on network errors for connect
       if (reason === "connect") {
         debugError("Failing closed (denying connection) due to API error");
-        setStatus("WarDriving app is down", STATUS_COLORS.error);
+        setStatus("Disconnected: WarDriving app is down", STATUS_COLORS.error);
         state.disconnectReason = "app_down"; // Track disconnect reason
         return false;
       }
@@ -1060,7 +1060,7 @@ async function checkCapacity(reason) {
 
     // Handle capacity full vs. allowed cases separately
     if (data.allowed === false && reason === "connect") {
-      setStatus("WarDriving app has reached capacity", STATUS_COLORS.error);
+      setStatus("Disconnected: WarDriving app has reached capacity", STATUS_COLORS.error);
       state.disconnectReason = "capacity_full"; // Track disconnect reason
     }
     
@@ -1072,7 +1072,7 @@ async function checkCapacity(reason) {
     // Fail closed on network errors for connect
     if (reason === "connect") {
       debugError("Failing closed (denying connection) due to network error");
-      setStatus("WarDriving app is down", STATUS_COLORS.error);
+      setStatus("Disconnected: WarDriving app is down", STATUS_COLORS.error);
       state.disconnectReason = "app_down"; // Track disconnect reason
       return false;
     }
@@ -1117,7 +1117,8 @@ async function postToMeshMapperAPI(lat, lon, heardRepeats) {
         const data = await response.json();
         if (data.allowed === false) {
           debugWarn("MeshMapper API returned allowed=false, disconnecting");
-          setStatus("WarDriving app has reached capacity", STATUS_COLORS.error);
+          setStatus("Disconnected: WarDriving app has reached capacity", STATUS_COLORS.error);
+          state.disconnectReason = "capacity_full"; // Track disconnect reason
           // Disconnect after a brief delay to ensure user sees the message
           setTimeout(() => {
             disconnect().catch(err => debugError(`Disconnect after capacity denial failed: ${err.message}`));

@@ -91,23 +91,23 @@ Status messages follow these consistent conventions:
 - **Context**: When connecting to device and checking if a wardriving slot is available
 - **Minimum Visibility**: 500ms minimum enforced (or until API response received)
 
-#### WarDriving app has reached capacity
-- **Message**: `"WarDriving app has reached capacity"`
+#### Disconnected: WarDriving app has reached capacity
+- **Message**: `"Disconnected: WarDriving app has reached capacity"`
 - **Color**: Red (error)
 - **Used in**: `checkCapacity()`, `postToMeshMapperAPI()`
-- **Source**: `content/wardrive.js:1061`, `content/wardrive.js:1116`
+- **Source**: `content/wardrive.js:1063`, `content/wardrive.js:1120`
 - **Context**: Capacity check API denies slot on connect (returns allowed=false), or wardriving API returns allowed=false during active session
 - **Minimum Visibility**: N/A (error state persists; message is preserved during automatic disconnect)
-- **Notes**: Displayed when the API successfully responds but indicates capacity is full. When this error occurs during connection, the automatic disconnect flow preserves this status message instead of showing "Disconnected"
+- **Notes**: Displayed when the API successfully responds but indicates capacity is full. When this error occurs during connection, the automatic disconnect flow preserves this status message instead of showing "Disconnected". Message format standardized with "Disconnected: " prefix to clearly indicate disconnect state.
 
-#### WarDriving app is down
-- **Message**: `"WarDriving app is down"`
+#### Disconnected: WarDriving app is down
+- **Message**: `"Disconnected: WarDriving app is down"`
 - **Color**: Red (error)
 - **Used in**: `checkCapacity()`
-- **Source**: `content/wardrive.js:1050`, `content/wardrive.js:1072`
+- **Source**: `content/wardrive.js:1050`, `content/wardrive.js:1074`
 - **Context**: Capacity check API returns error status or network is unreachable during connect
 - **Minimum Visibility**: N/A (error state persists; message is preserved during automatic disconnect)
-- **Notes**: Implements fail-closed policy - connection is denied if API fails or is unreachable. When this error occurs, the automatic disconnect flow preserves this status message instead of showing "Disconnected"
+- **Notes**: Implements fail-closed policy - connection is denied if API fails or is unreachable. When this error occurs, the automatic disconnect flow preserves this status message instead of showing "Disconnected". Message format standardized with "Disconnected: " prefix to clearly indicate disconnect state.
 
 #### Unable to read device public key; try again
 - **Message**: `"Unable to read device public key; try again"`
