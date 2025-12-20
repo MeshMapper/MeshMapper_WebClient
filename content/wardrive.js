@@ -1044,13 +1044,11 @@ async function checkCapacity(reason) {
 
     if (!response.ok) {
       debugWarn(`Capacity check API returned error status ${response.status}`);
-      // Fail open on network errors for connect
+      // Fail closed on network errors for connect
       if (reason === "connect") {
-        debugWarn("Failing open (allowing connection) due to API error");
-        // Show network issue message briefly
-        setStatus("Network issue checking slot, proceeding anyway", STATUS_COLORS.warning);
-        await new Promise(resolve => setTimeout(resolve, 1500)); // Show message for 1.5s
-        return true;
+        debugError("Failing closed (denying connection) due to API error");
+        setStatus("WarDriving app has reached capacity or is down", STATUS_COLORS.error);
+        return false;
       }
       return true; // Always allow disconnect to proceed
     }
@@ -1063,13 +1061,11 @@ async function checkCapacity(reason) {
   } catch (error) {
     debugError(`Capacity check failed: ${error.message}`);
     
-    // Fail open on network errors for connect
+    // Fail closed on network errors for connect
     if (reason === "connect") {
-      debugWarn("Failing open (allowing connection) due to network error");
-      // Show network issue message briefly
-      setStatus("Network issue checking slot, proceeding anyway", STATUS_COLORS.warning);
-      await new Promise(resolve => setTimeout(resolve, 1500)); // Show message for 1.5s
-      return true;
+      debugError("Failing closed (denying connection) due to network error");
+      setStatus("WarDriving app has reached capacity or is down", STATUS_COLORS.error);
+      return false;
     }
     
     return true; // Always allow disconnect to proceed
