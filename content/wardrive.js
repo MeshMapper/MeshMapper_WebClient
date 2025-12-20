@@ -1044,13 +1044,11 @@ async function checkCapacity(reason) {
 
     if (!response.ok) {
       debugWarn(`Capacity check API returned error status ${response.status}`);
-      // Fail open on network errors for connect
+      // Fail closed on network errors for connect
       if (reason === "connect") {
-        debugWarn("Failing open (allowing connection) due to API error");
-        // Show network issue message briefly
-        setStatus("Network issue checking slot, proceeding anyway", STATUS_COLORS.warning);
-        await new Promise(resolve => setTimeout(resolve, 1500)); // Show message for 1.5s
-        return true;
+        debugError("Failing closed (denying connection) due to API error");
+        setStatus("WarDriving app is down", STATUS_COLORS.error);
+        return false;
       }
       return true; // Always allow disconnect to proceed
     }
@@ -1058,18 +1056,21 @@ async function checkCapacity(reason) {
     const data = await response.json();
     debugLog(`Capacity check response: allowed=${data.allowed}`);
 
+    // Handle capacity full vs. allowed cases separately
+    if (data.allowed === false && reason === "connect") {
+      setStatus("WarDriving app has reached capacity", STATUS_COLORS.error);
+    }
+    
     return data.allowed === true;
 
   } catch (error) {
     debugError(`Capacity check failed: ${error.message}`);
     
-    // Fail open on network errors for connect
+    // Fail closed on network errors for connect
     if (reason === "connect") {
-      debugWarn("Failing open (allowing connection) due to network error");
-      // Show network issue message briefly
-      setStatus("Network issue checking slot, proceeding anyway", STATUS_COLORS.warning);
-      await new Promise(resolve => setTimeout(resolve, 1500)); // Show message for 1.5s
-      return true;
+      debugError("Failing closed (denying connection) due to network error");
+      setStatus("WarDriving app is down", STATUS_COLORS.error);
+      return false;
     }
     
     return true; // Always allow disconnect to proceed
@@ -1112,7 +1113,7 @@ async function postToMeshMapperAPI(lat, lon, heardRepeats) {
         const data = await response.json();
         if (data.allowed === false) {
           debugWarn("MeshMapper API returned allowed=false, disconnecting");
-          setStatus("WarDriving app has reached capacity or is down", STATUS_COLORS.error);
+          setStatus("WarDriving app has reached capacity", STATUS_COLORS.error);
           // Disconnect after a brief delay to ensure user sees the message
           setTimeout(() => {
             disconnect().catch(err => debugError(`Disconnect after capacity denial failed: ${err.message}`));
@@ -2048,11 +2049,14 @@ async function connect() {
         const allowed = await checkCapacity("connect");
         if (!allowed) {
           debugWarn("Capacity check denied, disconnecting");
-          setStatus("WarDriving app has reached capacity or is down", STATUS_COLORS.error);
+          // Status message already set by checkCapacity()
           // Disconnect after a brief delay to ensure user sees the message
           setTimeout(() => {
             disconnect().catch(err => debugError(`Disconnect after capacity denial failed: ${err.message}`));
           }, 1500);
+        } else {
+          // Connection complete, set status to Idle
+          setStatus("Idle", STATUS_COLORS.idle);
         }
       } catch (e) {
         debugError(`Channel setup failed: ${e.message}`, e);

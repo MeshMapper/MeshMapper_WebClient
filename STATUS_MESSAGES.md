@@ -89,13 +89,23 @@ Status messages follow these consistent conventions:
 - **Context**: When connecting to device and checking if a wardriving slot is available
 - **Minimum Visibility**: 500ms minimum enforced (or until API response received)
 
-#### WarDriving app has reached capacity or is down
-- **Message**: `"WarDriving app has reached capacity or is down"`
+#### WarDriving app has reached capacity
+- **Message**: `"WarDriving app has reached capacity"`
 - **Color**: Red (error)
 - **Used in**: `checkCapacity()`, `postToMeshMapperAPI()`
-- **Source**: `content/wardrive.js:2051`, `content/wardrive.js:1115`
-- **Context**: Capacity check API denies slot on connect, or wardriving API returns allowed=false during active session
+- **Source**: `content/wardrive.js:1061`, `content/wardrive.js:1116`
+- **Context**: Capacity check API denies slot on connect (returns allowed=false), or wardriving API returns allowed=false during active session
 - **Minimum Visibility**: N/A (error state persists until disconnect)
+- **Notes**: Displayed when the API successfully responds but indicates capacity is full
+
+#### WarDriving app is down
+- **Message**: `"WarDriving app is down"`
+- **Color**: Red (error)
+- **Used in**: `checkCapacity()`
+- **Source**: `content/wardrive.js:1050`, `content/wardrive.js:1072`
+- **Context**: Capacity check API returns error status or network is unreachable during connect
+- **Minimum Visibility**: N/A (error state persists until disconnect)
+- **Notes**: Implements fail-closed policy - connection is denied if API fails or is unreachable
 
 #### Unable to read device public key; try again
 - **Message**: `"Unable to read device public key; try again"`
@@ -106,13 +116,12 @@ Status messages follow these consistent conventions:
 - **Minimum Visibility**: N/A (error state persists until disconnect)
 
 #### Network issue checking slot, proceeding anyway
-- **Message**: `"Network issue checking slot, proceeding anyway"`
+- **Message**: `"Network issue checking slot, proceeding anyway"` (DEPRECATED - no longer used)
 - **Color**: Amber (warning)
-- **Used in**: `checkCapacity()`
-- **Source**: `content/wardrive.js:1051`, `content/wardrive.js:1070`
-- **Context**: Capacity check API is unreachable or returns error during connect (fail-open behavior)
-- **Minimum Visibility**: 1500ms enforced (brief warning before continuing)
-- **Notes**: Implements fail-open policy - allows connection to proceed despite API failure
+- **Used in**: N/A (removed)
+- **Source**: Previously `content/wardrive.js:1051`, `content/wardrive.js:1070`
+- **Context**: This message is no longer shown. Network issues now result in connection denial (fail-closed)
+- **Notes**: Replaced by fail-closed policy - connection is now denied on network errors
 
 ---
 
@@ -268,9 +277,9 @@ These messages use a hybrid approach: **first display respects 500ms minimum**, 
 #### Idle
 - **Message**: `"Idle"`
 - **Color**: Slate (idle)
-- **Used in**: `postApiAndRefreshMap()`
-- **Source**: `content/wardrive.js:1091`
-- **Context**: Manual mode, after API post completes
+- **Used in**: `connect()`, `postApiAndRefreshMap()`
+- **Source**: `content/wardrive.js:2060`, `content/wardrive.js:1091`
+- **Context**: Initial connection complete after capacity check succeeds, or manual mode after API post completes
 - **Minimum Visibility**: 500ms minimum enforced
 
 ---
@@ -360,9 +369,9 @@ Result:     "Message A" (visible 500ms) → "Message C"
 
 ## Summary
 
-**Total Status Messages**: 29 unique message patterns
+**Total Status Messages**: 30 unique message patterns
 - **Connection**: 7 messages
-- **Capacity Check**: 4 messages
+- **Capacity Check**: 4 messages (1 deprecated)
 - **Ping Operation**: 6 messages (consolidated "Ping sent" for both manual and auto)
 - **GPS**: 2 messages
 - **Countdown Timers**: 6 message patterns (with dynamic countdown values)
