@@ -1058,7 +1058,6 @@ async function checkCapacity(reason) {
       // Fail closed on network errors for connect
       if (reason === "connect") {
         debugError("Failing closed (denying connection) due to API error");
-        setStatus("Disconnected: WarDriving app is down", STATUS_COLORS.error);
         state.disconnectReason = "app_down"; // Track disconnect reason
         return false;
       }
@@ -1070,7 +1069,6 @@ async function checkCapacity(reason) {
 
     // Handle capacity full vs. allowed cases separately
     if (data.allowed === false && reason === "connect") {
-      setStatus("Disconnected: WarDriving app has reached capacity", STATUS_COLORS.error);
       state.disconnectReason = "capacity_full"; // Track disconnect reason
     }
     
@@ -1082,7 +1080,6 @@ async function checkCapacity(reason) {
     // Fail closed on network errors for connect
     if (reason === "connect") {
       debugError("Failing closed (denying connection) due to network error");
-      setStatus("Disconnected: WarDriving app is down", STATUS_COLORS.error);
       state.disconnectReason = "app_down"; // Track disconnect reason
       return false;
     }
@@ -2075,9 +2072,9 @@ async function connect() {
         const allowed = await checkCapacity("connect");
         if (!allowed) {
           debugWarn("Capacity check denied, disconnecting");
-          // Status message already set by checkCapacity()
           // disconnectReason already set by checkCapacity()
-          // Disconnect after a brief delay to ensure user sees the message
+          // Status message will be set by disconnected event handler based on disconnectReason
+          // Disconnect after a brief delay to ensure "Acquiring wardriving slot" is visible
           setTimeout(() => {
             disconnect().catch(err => debugError(`Disconnect after capacity denial failed: ${err.message}`));
           }, 1500);
@@ -2109,16 +2106,23 @@ async function connect() {
     conn.on("disconnected", () => {
       debugLog("BLE disconnected event fired");
       
-      // Only set "Disconnected" status for normal disconnections
-      // Preserve error messages (app_down, capacity_full, error, slot_revoked) instead of overwriting
-      if (state.disconnectReason === "normal" || state.disconnectReason === null || state.disconnectReason === undefined) {
-        setStatus("Disconnected", STATUS_COLORS.error);
+      // Set appropriate status message based on disconnect reason
+      if (state.disconnectReason === "capacity_full") {
+        setStatus("Disconnected: WarDriving app has reached capacity", STATUS_COLORS.error);
+        debugLog("Setting terminal status for capacity full");
+      } else if (state.disconnectReason === "app_down") {
+        setStatus("Disconnected: WarDriving app is down", STATUS_COLORS.error);
+        debugLog("Setting terminal status for app down");
       } else if (state.disconnectReason === "slot_revoked") {
         // For slot revocation, set the terminal status message
         setStatus("Disconnected: WarDriving slot has been revoked", STATUS_COLORS.error);
         debugLog("Setting terminal status for slot revocation");
+      } else if (state.disconnectReason === "normal" || state.disconnectReason === null || state.disconnectReason === undefined) {
+        setStatus("Disconnected", STATUS_COLORS.error);
       } else {
+        // For "error" or any other disconnect reason, preserve the current status or show generic disconnected
         debugLog(`Preserving disconnect status for reason: ${state.disconnectReason}`);
+        setStatus("Disconnected", STATUS_COLORS.error);
       }
       
       setConnectButton(false);
