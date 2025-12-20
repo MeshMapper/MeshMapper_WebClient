@@ -66,7 +66,7 @@
 
 ### Detailed Connection Steps
 
-See `content/wardrive.js` lines 2002-2118 for the main `connect()` function.
+See `content/wardrive.js` lines 2020-2150 for the main `connect()` function.
 
 **Key Entry Point:**
 ```javascript
@@ -85,12 +85,14 @@ connectBtn.addEventListener("click", async () => {
    - Checks `navigator.bluetooth` exists
    - Alerts user if not supported
    - Fails fast if unavailable
+   - **Status**: N/A (alert shown)
 
 2. **Open BLE Connection**
    - Calls `WebBleConnection.open()` (web_ble_connection.js:15-41)
    - Shows browser's native device picker
    - Filters for MeshCore BLE service UUID
    - User selects device or cancels
+   - **Status**: `"Connecting"` (blue)
 
 3. **Initialize BLE**
    - Connects to GATT server
@@ -98,10 +100,12 @@ connectBtn.addEventListener("click", async () => {
    - Starts notifications on TX characteristic
    - Sets up frame listener for incoming data
    - Fires "connected" event
+   - **Status**: `"Connecting"` (blue, maintained)
 
 4. **Device Query**
    - Sends protocol version query
    - Non-critical, errors ignored
+   - **Status**: `"Connecting"` (blue, maintained)
 
 5. **Get Device Info**
    - Retrieves device name, public key (32 bytes), settings
@@ -110,13 +114,16 @@ connectBtn.addEventListener("click", async () => {
    - Stores in `state.devicePublicKey`
    - Updates UI with device name
    - Changes button to "Disconnect" (red)
+   - **Status**: `"Connecting"` (blue, maintained)
 
 6. **Sync Device Time**
    - Sends current Unix timestamp
    - Device updates its clock
    - Optional, errors ignored
+   - **Status**: `"Connecting"` (blue, maintained)
 
 7. **Check Capacity**
+   - **Status**: `"Acquiring wardriving slot"` (blue)
    - POSTs to MeshMapper API:
      ```json
      {
@@ -128,17 +135,27 @@ connectBtn.addEventListener("click", async () => {
      ```
    - If `allowed: false` → disconnects with error
    - If API error → disconnects (fail-closed)
+   - On success → **Status**: `"Acquired wardriving slot"` (green)
 
 8. **Setup Channel**
+   - **Status**: `"Looking for #wardriving channel"` (blue)
    - Searches for existing `#wardriving` channel
-   - If not found, creates new channel:
-     - Finds empty channel slot
-     - Derives channel key: `SHA-256(#wardriving).slice(0, 16)`
-     - Sends setChannel command
-   - Stores channel object in `state.channel`
-   - Updates UI: "#wardriving (CH:X)"
+   - If found:
+     - **Status**: `"Channel #wardriving found"` (green)
+     - Stores channel object in `state.channel`
+     - Updates UI: "#wardriving (CH:X)"
+   - If not found:
+     - **Status**: `"Channel #wardriving not found"` (blue)
+     - Creates new channel:
+       - Finds empty channel slot
+       - Derives channel key: `SHA-256(#wardriving).slice(0, 16)`
+       - Sends setChannel command
+     - **Status**: `"Created #wardriving"` (green)
+     - Stores channel object in `state.channel`
+     - Updates UI: "#wardriving (CH:X)"
 
 9. **Initialize GPS**
+   - **Status**: `"Priming GPS"` (blue)
    - Requests location permission
    - Gets initial GPS position (30s timeout)
    - Starts continuous GPS watch
@@ -148,7 +165,7 @@ connectBtn.addEventListener("click", async () => {
    - Refreshes coverage map if accuracy < 100m
 
 10. **Connection Complete**
-    - Sets status to "Connected" (green)
+    - **Status**: `"Connected"` (green)
     - Enables all UI controls
     - Ready for wardriving operations
 
@@ -186,6 +203,7 @@ See `content/wardrive.js` lines 2119-2179 for the main `disconnect()` function.
    - "capacity_full" - MeshMapper full
    - "app_down" - API unavailable
    - "error" - validation/setup failure
+   - "slot_revoked" - slot revoked during active session
 
 3. **Update Status**
    - Sets status to "Disconnecting" (blue)
@@ -236,6 +254,51 @@ See `content/wardrive.js` lines 2119-2179 for the main `disconnect()` function.
     - Status: "Disconnected" (red) or error message
     - All resources released
     - Ready for new connection
+
+### Slot Revocation Workflow
+
+When a wardriving slot is revoked during an active session (detected during API posting), a special disconnect sequence occurs:
+
+**Revocation Detection:**
+- Occurs during `postToMeshMapperAPI()` call (after every ping)
+- API response contains `allowed: false`
+- This indicates the backend has revoked the device's slot
+
+**Revocation Sequence:**
+
+1. **Detection**
+   - During "Posting to API" operation
+   - API returns `{"allowed": false, ...}`
+   - Detected in `postToMeshMapperAPI()` response handler
+
+2. **Initial Status**
+   - **Status**: `"Error: Posting to API (Revoked)"` (red)
+   - Sets `state.disconnectReason = "slot_revoked"`
+   - Visible for 1.5 seconds
+
+3. **Disconnect Initiated**
+   - Calls `disconnect()` after 1.5s delay
+   - **Status**: `"Disconnecting"` (blue)
+   - Proceeds with normal disconnect cleanup
+
+4. **Terminal Status**
+   - Disconnect event handler detects `slot_revoked` reason
+   - **Status**: `"Disconnected: WarDriving slot has been revoked"` (red)
+   - This is the final terminal status (does NOT revert to "Idle")
+
+**Complete Revocation Flow:**
+```
+"Posting to API" (blue)
+  → "Error: Posting to API (Revoked)" (red, 1.5s)
+  → "Disconnecting" (blue)
+  → "Disconnected: WarDriving slot has been revoked" (red, terminal)
+```
+
+**Key Differences from Normal Disconnect:**
+- Normal disconnect: ends with "Disconnected" (red)
+- Revocation: ends with "Disconnected: WarDriving slot has been revoked" (red)
+- Revocation shows intermediate "Error: Posting to API (Revoked)" state
+- Terminal status is preserved and does not loop to "Idle"
 
 ## Workflow Diagrams
 
