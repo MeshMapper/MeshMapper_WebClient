@@ -129,7 +129,9 @@ const state = {
   distanceUpdateTimer: null, // Timer for updating distance display
   capturedPingCoords: null, // { lat, lon, accuracy } captured at ping time, used for API post after 7s delay
   devicePublicKey: null, // Hex string of device's public key (used for capacity check)
-  disconnectReason: null, // Tracks the reason for disconnection (e.g., "app_down", "capacity_full", "error", "normal")
+  disconnectReason: null, // Tracks the reason for disconnection (e.g., "app_down", "capacity_full", "public_key_error", "channel_setup_error", "ble_disconnect_error", "normal")
+  channelSetupErrorMessage: null, // Error message from channel setup failure
+  bleDisconnectErrorMessage: null, // Error message from BLE disconnect failure
   repeaterTracking: {
     isListening: false,           // Whether we're currently listening for echoes
     sentTimestamp: null,          // Timestamp when the ping was sent
@@ -2046,9 +2048,8 @@ async function connect() {
       // Validate and store public key
       if (!selfInfo?.publicKey || selfInfo.publicKey.length !== 32) {
         debugError("Missing or invalid public key from device", selfInfo?.publicKey);
-        setStatus("Unable to read device public key; try again", STATUS_COLORS.error);
-        state.disconnectReason = "error"; // Mark as error disconnect
-        // Disconnect after a brief delay to ensure user sees the error message
+        state.disconnectReason = "public_key_error"; // Mark specific disconnect reason
+        // Disconnect after a brief delay to ensure "Acquiring wardriving slot" is visible
         setTimeout(() => {
           disconnect().catch(err => debugError(`Disconnect after public key error failed: ${err.message}`));
         }, 1500);
@@ -2098,8 +2099,8 @@ async function connect() {
         debugLog("Full connection process completed successfully");
       } catch (e) {
         debugError(`Channel setup failed: ${e.message}`, e);
-        setStatus(e.message || "Channel setup failed", STATUS_COLORS.error);
-        state.disconnectReason = "error"; // Mark as error disconnect
+        state.disconnectReason = "channel_setup_error"; // Mark specific disconnect reason
+        state.channelSetupErrorMessage = e.message || "Channel setup failed"; // Store error message
       }
     });
 
@@ -2118,17 +2119,32 @@ async function connect() {
         debugLog("Setting terminal status for app down");
       } else if (state.disconnectReason === "slot_revoked") {
         debugLog("Branch: slot_revoked");
-        // For slot revocation, set the terminal status message
         setStatus("Disconnected: WarDriving slot has been revoked", STATUS_COLORS.error);
         debugLog("Setting terminal status for slot revocation");
+      } else if (state.disconnectReason === "public_key_error") {
+        debugLog("Branch: public_key_error");
+        setStatus("Disconnected: Unable to read device public key", STATUS_COLORS.error);
+        debugLog("Setting terminal status for public key error");
+      } else if (state.disconnectReason === "channel_setup_error") {
+        debugLog("Branch: channel_setup_error");
+        const errorMsg = state.channelSetupErrorMessage || "Channel setup failed";
+        setStatus(`Disconnected: ${errorMsg}`, STATUS_COLORS.error);
+        debugLog("Setting terminal status for channel setup error");
+        state.channelSetupErrorMessage = null; // Clear after use
+      } else if (state.disconnectReason === "ble_disconnect_error") {
+        debugLog("Branch: ble_disconnect_error");
+        const errorMsg = state.bleDisconnectErrorMessage || "BLE disconnect failed";
+        setStatus(`Disconnected: ${errorMsg}`, STATUS_COLORS.error);
+        debugLog("Setting terminal status for BLE disconnect error");
+        state.bleDisconnectErrorMessage = null; // Clear after use
       } else if (state.disconnectReason === "normal" || state.disconnectReason === null || state.disconnectReason === undefined) {
         debugLog("Branch: normal/null/undefined");
         setStatus("Disconnected", STATUS_COLORS.error);
       } else {
         debugLog(`Branch: else (unknown reason: ${state.disconnectReason})`);
-        // For unknown disconnect reasons (including "error"), preserve the existing status message
-        // Do NOT call setStatus here to avoid overwriting the message
-        debugLog(`Preserving existing status for disconnect reason: ${state.disconnectReason}`);
+        // For unknown disconnect reasons, show generic disconnected message
+        debugLog(`Showing generic disconnected message for unknown reason: ${state.disconnectReason}`);
+        setStatus("Disconnected", STATUS_COLORS.error);
       }
       
       setConnectButton(false);
@@ -2137,6 +2153,8 @@ async function connect() {
       state.channel = null;
       state.devicePublicKey = null; // Clear public key
       state.disconnectReason = null; // Reset disconnect reason
+      state.channelSetupErrorMessage = null; // Clear error message
+      state.bleDisconnectErrorMessage = null; // Clear error message
       stopAutoPing(true); // Ignore cooldown check on disconnect
       enableControls(false);
       updateAutoButton();
@@ -2217,8 +2235,8 @@ async function disconnect() {
     }
   } catch (e) {
     debugError(`BLE disconnect failed: ${e.message}`, e);
-    setStatus(e.message || "Disconnect failed", STATUS_COLORS.error);
-    state.disconnectReason = "error"; // Mark as error disconnect
+    state.disconnectReason = "ble_disconnect_error"; // Mark specific disconnect reason
+    state.bleDisconnectErrorMessage = e.message || "Disconnect failed"; // Store error message
   } finally {
     connectBtn.disabled = false;
   }
