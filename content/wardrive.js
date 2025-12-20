@@ -2072,9 +2072,9 @@ async function connect() {
         const allowed = await checkCapacity("connect");
         if (!allowed) {
           debugWarn("Capacity check denied, disconnecting");
-          // Status message already set by checkCapacity()
           // disconnectReason already set by checkCapacity()
-          // Disconnect after a brief delay to ensure user sees the message
+          // Status message will be set by disconnected event handler based on disconnectReason
+          // Disconnect after a brief delay to ensure "Acquiring wardriving slot" is visible
           setTimeout(() => {
             disconnect().catch(err => debugError(`Disconnect after capacity denial failed: ${err.message}`));
           }, 1500);
