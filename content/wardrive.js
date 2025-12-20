@@ -2126,8 +2126,8 @@ async function connect() {
         setStatus("Disconnected", STATUS_COLORS.error);
       } else {
         debugLog(`Branch: else (unknown reason: ${state.disconnectReason})`);
-        // For "error" disconnect reason, preserve the existing error status message
-        // Do NOT call setStatus here to avoid overwriting the error message
+        // For unknown disconnect reasons (including "error"), preserve the existing status message
+        // Do NOT call setStatus here to avoid overwriting the message
         debugLog(`Preserving existing status for disconnect reason: ${state.disconnectReason}`);
       }
       
