@@ -142,21 +142,23 @@
           src="https://yow.meshmapper.net/embed.php?cov_grid=1&fail_grid=1&pings=0&repeaters=1&rep_coverage=0&grid_lines=0&lat=45.42150&lon=-75.69720&meters=10000">
         </iframe>
         
-        <!-- Map Overlays -->
-        <!-- GPS Accuracy - Bottom Left -->
-        <div class="absolute bottom-2 left-2 bg-slate-900/80 backdrop-blur-sm border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300">
-          <span id="mapAccuracy">±-</span>
-        </div>
-        
-        <!-- GPS Coordinates - Bottom Center -->
-        <div class="absolute bottom-2 left-1/2 transform -translate-x-1/2 bg-slate-900/80 backdrop-blur-sm border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300 text-center">
-          <div id="mapCoordinates">-</div>
-          <div id="mapGpsAge" class="text-slate-500 mt-0.5">-</div>
-        </div>
-        
-        <!-- Distance from Last Ping - Bottom Right -->
-        <div class="absolute bottom-2 right-2 bg-slate-900/80 backdrop-blur-sm border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300">
-          <span id="mapDistance">-</span>
+        <!-- Map Overlays - Horizontal Layout -->
+        <div class="absolute bottom-2 left-2 right-2 flex gap-2 justify-between items-end">
+          <!-- GPS Accuracy - Left -->
+          <div class="bg-slate-900/80 backdrop-blur-sm border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300 whitespace-nowrap">
+            <span id="mapAccuracy">±-</span>
+          </div>
+          
+          <!-- GPS Coordinates - Center (flexible) -->
+          <div class="bg-slate-900/80 backdrop-blur-sm border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300 text-center flex-1">
+            <div id="mapCoordinates">-</div>
+            <div id="mapGpsAge" class="text-slate-500 mt-0.5">-</div>
+          </div>
+          
+          <!-- Distance from Last Ping - Right -->
+          <div class="bg-slate-900/80 backdrop-blur-sm border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300 whitespace-nowrap">
+            <span id="mapDistance">-</span>
+          </div>
         </div>
       </section>
 
