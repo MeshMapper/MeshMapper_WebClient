@@ -121,6 +121,7 @@ const state = {
   lastSuccessfulPingLocation: null, // { lat, lon } of the last successful ping (Mesh + API)
   distanceUpdateTimer: null, // Timer for updating distance display
   capturedPingCoords: null, // { lat, lon, accuracy } captured at ping time, used for API post after 7s delay
+  disconnectErrorStatus: null, // Stores error status message and color during disconnect failures
   repeaterTracking: {
     isListening: false,           // Whether we're currently listening for echoes
     sentTimestamp: null,          // Timestamp when the ping was sent
@@ -1947,7 +1948,18 @@ async function connect() {
 
     conn.on("disconnected", () => {
       debugLog("BLE disconnected event fired");
-      setStatus("Disconnected", STATUS_COLORS.error);
+      
+      // Check if there's an error status to preserve (from disconnect failure)
+      if (state.disconnectErrorStatus) {
+        debugLog(`Preserving disconnect error status: "${state.disconnectErrorStatus.message}"`);
+        setStatus(state.disconnectErrorStatus.message, state.disconnectErrorStatus.color);
+        state.disconnectErrorStatus = null; // Clear after using
+      } else {
+        // Normal disconnect - show "Disconnected"
+        debugLog("Normal disconnect - showing 'Disconnected' status");
+        setStatus("Disconnected", STATUS_COLORS.error);
+      }
+      
       setConnectButton(false);
       deviceInfoEl.textContent = "—";
       state.connection = null;
@@ -1968,6 +1980,10 @@ async function connect() {
       state.gpsState = "idle";
       updateGpsUi();
       updateDistanceUi();
+      
+      // Re-enable connect button after cleanup
+      connectBtn.disabled = false;
+      
       debugLog("Disconnect cleanup complete");
     });
 
@@ -1986,6 +2002,9 @@ async function disconnect() {
 
   connectBtn.disabled = true;
   setStatus("Disconnecting", STATUS_COLORS.info);
+  
+  // Clear any previous error status
+  state.disconnectErrorStatus = null;
 
   // Delete the wardriving channel before disconnecting
   try {
@@ -1998,6 +2017,44 @@ async function disconnect() {
     debugWarn(`Failed to delete channel ${CHANNEL_NAME}: ${e.message}`);
     // Don't fail disconnect if channel deletion fails
   }
+
+  // Set up a timeout to ensure status is updated even if disconnected event doesn't fire
+  const disconnectTimeout = setTimeout(() => {
+    debugWarn("Disconnect timeout - disconnected event did not fire within 3 seconds");
+    if (state.connection) {
+      // If we still have a connection reference, the disconnected event didn't fire
+      debugLog("Forcing disconnect cleanup and status update");
+      
+      // Use stored error status if available, otherwise show generic disconnect failed
+      if (state.disconnectErrorStatus) {
+        setStatus(state.disconnectErrorStatus.message, state.disconnectErrorStatus.color);
+      } else {
+        setStatus("Disconnect failed", STATUS_COLORS.error);
+      }
+      
+      // Force cleanup
+      setConnectButton(false);
+      deviceInfoEl.textContent = "—";
+      state.connection = null;
+      state.channel = null;
+      stopAutoPing(true);
+      enableControls(false);
+      updateAutoButton();
+      stopGeoWatch();
+      stopGpsAgeUpdater();
+      stopDistanceUpdater();
+      stopRepeaterTracking();
+      cleanupAllTimers();
+      state.lastFix = null;
+      state.lastSuccessfulPingLocation = null;
+      state.gpsState = "idle";
+      updateGpsUi();
+      updateDistanceUi();
+      state.disconnectErrorStatus = null;
+      connectBtn.disabled = false;
+      debugLog("Forced disconnect cleanup complete");
+    }
+  }, 3000); // 3 second timeout
 
   try {
     // WebBleConnection typically exposes one of these.
@@ -2012,12 +2069,33 @@ async function disconnect() {
       state.connection.device.gatt.disconnect();
     } else {
       debugWarn("No known disconnect method on connection object");
+      // Store error for disconnected event handler or timeout
+      state.disconnectErrorStatus = {
+        message: "Disconnect failed: no disconnect method available",
+        color: STATUS_COLORS.error
+      };
     }
+    
+    // If disconnect succeeded, clear the timeout (disconnected event will handle cleanup)
+    clearTimeout(disconnectTimeout);
+    debugLog("Disconnect initiated successfully, waiting for disconnected event");
+    
   } catch (e) {
     debugError(`BLE disconnect failed: ${e.message}`, e);
-    setStatus(e.message || "Disconnect failed", STATUS_COLORS.error);
+    
+    // Store error status for disconnected event handler (if it fires) or timeout
+    state.disconnectErrorStatus = {
+      message: e.message || "Disconnect failed",
+      color: STATUS_COLORS.error
+    };
+    
+    // Note: Don't set status here directly - let the disconnected event handler or timeout handle it
+    // This ensures consistent status updates regardless of which path executes
+    debugLog("Disconnect error stored, waiting for disconnected event or timeout");
+    
   } finally {
-    connectBtn.disabled = false;
+    // Note: Don't re-enable button here - let the disconnected event or timeout handle it
+    // This prevents race conditions where button is enabled before cleanup completes
   }
 }
 
