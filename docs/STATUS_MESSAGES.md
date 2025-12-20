@@ -25,16 +25,16 @@ Status messages follow these consistent conventions:
 - **Message**: `"Connecting"`
 - **Color**: Sky blue (info)
 - **Used in**: `connect()`
-- **Source**: `content/wardrive.js:2005`
-- **Context**: When user clicks Connect button; remains visible during entire connection process (BLE pairing, channel setup, and capacity check)
+- **Source**: `content/wardrive.js:2021`
+- **Context**: When user clicks Connect button; remains visible during entire connection process (BLE pairing, capacity check, and channel setup)
 - **Minimum Visibility**: Natural async timing during full connection process (typically 3-8 seconds including capacity check)
 
 #### Connected
 - **Message**: `"Connected"`
 - **Color**: Green (success)
 - **Used in**: `connect()`
-- **Source**: `content/wardrive.js:2060`
-- **Context**: After full connection process completes successfully (BLE paired, channel setup, and capacity check passed)
+- **Source**: `content/wardrive.js:2080`
+- **Context**: After full connection process completes successfully (BLE paired, capacity check passed, channel setup, and GPS initialized)
 - **Minimum Visibility**: Persists until user interacts with app buttons (send ping, start auto mode)
 - **Note**: This message now only appears after the complete connection handshake, not just after BLE pairing
 
@@ -87,8 +87,8 @@ Status messages follow these consistent conventions:
 - **Message**: `"Acquiring wardriving slot"`
 - **Color**: Sky blue (info)
 - **Used in**: `checkCapacity()`
-- **Source**: `content/wardrive.js:1026`
-- **Context**: When connecting to device and checking if a wardriving slot is available
+- **Source**: `content/wardrive.js:1027`
+- **Context**: When connecting to device, after time sync and before channel setup, checking if a wardriving slot is available
 - **Minimum Visibility**: 500ms minimum enforced (or until API response received)
 
 #### Disconnected: WarDriving app has reached capacity
