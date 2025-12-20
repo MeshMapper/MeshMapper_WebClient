@@ -89,12 +89,21 @@ Status messages follow these consistent conventions:
 - **Context**: When connecting to device and checking if a wardriving slot is available
 - **Minimum Visibility**: 500ms minimum enforced (or until API response received)
 
-#### WarDriving app has reached capacity or is down
-- **Message**: `"WarDriving app has reached capacity or is down"`
+#### WarDriving app has reached capacity
+- **Message**: `"WarDriving app has reached capacity"`
 - **Color**: Red (error)
 - **Used in**: `checkCapacity()`, `postToMeshMapperAPI()`
-- **Source**: `content/wardrive.js:2051`, `content/wardrive.js:1115`, `content/wardrive.js:1049`, `content/wardrive.js:1068`
-- **Context**: Capacity check API denies slot on connect, returns error status, network is unreachable, or wardriving API returns allowed=false during active session
+- **Source**: `content/wardrive.js:1060`, `content/wardrive.js:1111`
+- **Context**: Capacity check API denies slot on connect (returns allowed=false), or wardriving API returns allowed=false during active session
+- **Minimum Visibility**: N/A (error state persists until disconnect)
+- **Notes**: Displayed when the API successfully responds but indicates capacity is full
+
+#### WarDriving app is down
+- **Message**: `"WarDriving app is down"`
+- **Color**: Red (error)
+- **Used in**: `checkCapacity()`
+- **Source**: `content/wardrive.js:1050`, `content/wardrive.js:1067`
+- **Context**: Capacity check API returns error status or network is unreachable during connect
 - **Minimum Visibility**: N/A (error state persists until disconnect)
 - **Notes**: Implements fail-closed policy - connection is denied if API fails or is unreachable
 
@@ -360,9 +369,9 @@ Result:     "Message A" (visible 500ms) → "Message C"
 
 ## Summary
 
-**Total Status Messages**: 29 unique message patterns
+**Total Status Messages**: 30 unique message patterns
 - **Connection**: 7 messages
-- **Capacity Check**: 3 messages (1 deprecated)
+- **Capacity Check**: 4 messages (1 deprecated)
 - **Ping Operation**: 6 messages (consolidated "Ping sent" for both manual and auto)
 - **GPS**: 2 messages
 - **Countdown Timers**: 6 message patterns (with dynamic countdown values)

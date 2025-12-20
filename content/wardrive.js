@@ -1047,7 +1047,7 @@ async function checkCapacity(reason) {
       // Fail closed on network errors for connect
       if (reason === "connect") {
         debugError("Failing closed (denying connection) due to API error");
-        setStatus("WarDriving app has reached capacity or is down", STATUS_COLORS.error);
+        setStatus("WarDriving app is down", STATUS_COLORS.error);
         return false;
       }
       return true; // Always allow disconnect to proceed
@@ -1056,6 +1056,11 @@ async function checkCapacity(reason) {
     const data = await response.json();
     debugLog(`Capacity check response: allowed=${data.allowed}`);
 
+    // Handle capacity full vs. allowed cases separately
+    if (data.allowed === false && reason === "connect") {
+      setStatus("WarDriving app has reached capacity", STATUS_COLORS.error);
+    }
+    
     return data.allowed === true;
 
   } catch (error) {
@@ -1064,7 +1069,7 @@ async function checkCapacity(reason) {
     // Fail closed on network errors for connect
     if (reason === "connect") {
       debugError("Failing closed (denying connection) due to network error");
-      setStatus("WarDriving app has reached capacity or is down", STATUS_COLORS.error);
+      setStatus("WarDriving app is down", STATUS_COLORS.error);
       return false;
     }
     
@@ -1108,7 +1113,7 @@ async function postToMeshMapperAPI(lat, lon, heardRepeats) {
         const data = await response.json();
         if (data.allowed === false) {
           debugWarn("MeshMapper API returned allowed=false, disconnecting");
-          setStatus("WarDriving app has reached capacity or is down", STATUS_COLORS.error);
+          setStatus("WarDriving app has reached capacity", STATUS_COLORS.error);
           // Disconnect after a brief delay to ensure user sees the message
           setTimeout(() => {
             disconnect().catch(err => debugError(`Disconnect after capacity denial failed: ${err.message}`));
@@ -2044,7 +2049,7 @@ async function connect() {
         const allowed = await checkCapacity("connect");
         if (!allowed) {
           debugWarn("Capacity check denied, disconnecting");
-          setStatus("WarDriving app has reached capacity or is down", STATUS_COLORS.error);
+          // Status message already set by checkCapacity()
           // Disconnect after a brief delay to ensure user sees the message
           setTimeout(() => {
             disconnect().catch(err => debugError(`Disconnect after capacity denial failed: ${err.message}`));
