@@ -116,6 +116,8 @@ const statusMessageBox = $("statusMessageBox");
 // NEW: Map overlay elements
 const mapAccuracy = $("mapAccuracy");
 const mapDistance = $("mapDistance");
+const mapCoordinates = $("mapCoordinates");
+const mapGpsAge = $("mapGpsAge");
 
 // NEW: selectors
 const intervalSelect = $("intervalSelect"); // 15 / 30 / 60 seconds
@@ -876,7 +878,7 @@ async function getCurrentPosition() {
 }
 function updateGpsUi() {
   if (!state.lastFix) {
-    // Update map overlay
+    // Update map overlays - no GPS fix
     if (mapAccuracy) {
       if (state.gpsState === "acquiring") {
         mapAccuracy.textContent = "Acquiring...";
@@ -884,15 +886,33 @@ function updateGpsUi() {
         mapAccuracy.textContent = "±-";
       }
     }
+    if (mapCoordinates) {
+      mapCoordinates.textContent = "-";
+    }
+    if (mapGpsAge) {
+      mapGpsAge.textContent = "-";
+    }
     return;
   }
 
-  const { accM } = state.lastFix;
+  const { lat, lon, accM, tsMs } = state.lastFix;
   state.gpsState = "acquired";
   
-  // Update map overlay
+  // Calculate age of GPS fix in seconds
+  const ageMs = Date.now() - tsMs;
+  const ageSec = Math.floor(ageMs / 1000);
+  
+  // Update map overlays
   if (mapAccuracy) {
     mapAccuracy.textContent = accM ? `±${Math.round(accM)}m` : "±-";
+  }
+  
+  if (mapCoordinates) {
+    mapCoordinates.textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+  }
+  
+  if (mapGpsAge) {
+    mapGpsAge.textContent = `${ageSec}s ago`;
   }
 }
 

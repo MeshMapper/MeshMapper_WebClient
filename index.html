@@ -143,12 +143,20 @@
         </iframe>
         
         <!-- Map Overlays -->
+        <!-- GPS Accuracy - Bottom Left -->
+        <div class="absolute bottom-2 left-2 bg-slate-900/80 backdrop-blur-sm border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300">
+          <span id="mapAccuracy">±-</span>
+        </div>
+        
+        <!-- GPS Coordinates - Bottom Center -->
+        <div class="absolute bottom-2 left-1/2 transform -translate-x-1/2 bg-slate-900/80 backdrop-blur-sm border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300 text-center">
+          <div id="mapCoordinates">-</div>
+          <div id="mapGpsAge" class="text-slate-500 mt-0.5">-</div>
+        </div>
+        
+        <!-- Distance from Last Ping - Bottom Right -->
         <div class="absolute bottom-2 right-2 bg-slate-900/80 backdrop-blur-sm border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300">
-          <div class="flex items-center gap-3">
-            <span id="mapAccuracy">±-</span>
-            <span class="text-slate-500">·</span>
-            <span id="mapDistance">-</span>
-          </div>
+          <span id="mapDistance">-</span>
         </div>
       </section>
 
