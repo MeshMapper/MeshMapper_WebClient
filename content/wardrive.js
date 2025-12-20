@@ -536,35 +536,18 @@ function setConnectButton(connected) {
     pingControls.classList.toggle("hidden", !connected);
   }
   
-  // Show/hide disconnect button based on connection state
+  // Show/hide connect vs disconnect button based on connection state
   if (disconnectBtn) {
     disconnectBtn.classList.toggle("hidden", !connected);
   }
+  connectBtn.classList.toggle("hidden", connected);
   
   if (connected) {
-    connectBtn.textContent = "Disconnect";
-    connectBtn.classList.remove(
-      "bg-emerald-600",
-      "hover:bg-emerald-500"
-    );
-    connectBtn.classList.add(
-      "bg-red-600",
-      "hover:bg-red-500"
-    );
     // Hide helper text when connected
     if (connectHelperText) {
       connectHelperText.classList.add("hidden");
     }
   } else {
-    connectBtn.textContent = "Connect";
-    connectBtn.classList.remove(
-      "bg-red-600",
-      "hover:bg-red-500"
-    );
-    connectBtn.classList.add(
-      "bg-emerald-600",
-      "hover:bg-emerald-500"
-    );
     // Update connect button state (may show helper text)
     updateConnectButtonState();
   }
@@ -2412,6 +2395,19 @@ export async function onLoad() {
       setStatus(e.message || "Connection failed", STATUS_COLORS.error);
     }
   });
+  
+  // Disconnect button listener (separate button for when connected)
+  if (disconnectBtn) {
+    disconnectBtn.addEventListener("click", async () => {
+      try {
+        await disconnect();
+      } catch (e) {
+        debugError(`Disconnect button error: ${e.message}`, e);
+        setStatus(e.message || "Disconnect failed", STATUS_COLORS.error);
+      }
+    });
+  }
+  
   sendPingBtn.addEventListener("click", () => {
     debugLog("Manual ping button clicked");
     sendPing(true).catch(console.error);
