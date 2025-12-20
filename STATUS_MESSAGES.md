@@ -93,7 +93,7 @@ Status messages follow these consistent conventions:
 - **Message**: `"WarDriving app has reached capacity"`
 - **Color**: Red (error)
 - **Used in**: `checkCapacity()`, `postToMeshMapperAPI()`
-- **Source**: `content/wardrive.js:1060`, `content/wardrive.js:1111`
+- **Source**: `content/wardrive.js:1061`, `content/wardrive.js:1116`
 - **Context**: Capacity check API denies slot on connect (returns allowed=false), or wardriving API returns allowed=false during active session
 - **Minimum Visibility**: N/A (error state persists until disconnect)
 - **Notes**: Displayed when the API successfully responds but indicates capacity is full
@@ -102,7 +102,7 @@ Status messages follow these consistent conventions:
 - **Message**: `"WarDriving app is down"`
 - **Color**: Red (error)
 - **Used in**: `checkCapacity()`
-- **Source**: `content/wardrive.js:1050`, `content/wardrive.js:1067`
+- **Source**: `content/wardrive.js:1050`, `content/wardrive.js:1072`
 - **Context**: Capacity check API returns error status or network is unreachable during connect
 - **Minimum Visibility**: N/A (error state persists until disconnect)
 - **Notes**: Implements fail-closed policy - connection is denied if API fails or is unreachable
