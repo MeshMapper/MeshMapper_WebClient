@@ -110,6 +110,7 @@ const channelInfo = $("channelInfo"); // Channel status in settings
 // NEW: Status bar elements
 const statusIndicator = $("statusIndicator");
 const statusText = $("statusText");
+const statusMessage = $("statusMessage");
 
 // NEW: Map overlay elements
 const mapAccuracy = $("mapAccuracy");
@@ -240,21 +241,41 @@ function setStatus(text, color = STATUS_COLORS.idle, immediate = false) {
  * @param {string} color - Status color class
  */
 function applyStatusImmediately(text, color) {
-  // Update status bar at top
-  if (statusText) {
-    statusText.textContent = text;
-    statusText.className = `text-sm font-medium ${color}`;
-  }
+  // Determine if this is a connection status or a regular status message
+  const isConnectionStatus = text.toLowerCase().includes("connected") || text.toLowerCase().includes("disconnected");
   
-  // Update status indicator color
-  if (statusIndicator) {
-    // Determine indicator color based on status
-    if (text.toLowerCase().includes("connected") && !text.toLowerCase().includes("disconnected")) {
-      statusIndicator.style.color = "#10b981"; // green
-    } else if (text.toLowerCase().includes("disconnected")) {
-      statusIndicator.style.color = "#ef4444"; // red
-    } else {
-      statusIndicator.style.color = "#0ea5e9"; // blue for other states
+  if (isConnectionStatus) {
+    // Update main status text (Connected/Disconnected)
+    if (statusText) {
+      statusText.textContent = text;
+      statusText.className = `text-sm font-medium ${color}`;
+    }
+    
+    // Update status indicator color
+    if (statusIndicator) {
+      if (text.toLowerCase().includes("connected") && !text.toLowerCase().includes("disconnected")) {
+        statusIndicator.style.color = "#10b981"; // green
+      } else {
+        statusIndicator.style.color = "#ef4444"; // red
+      }
+    }
+    
+    // Clear status message when showing connection status
+    if (statusMessage) {
+      statusMessage.textContent = "";
+      statusMessage.classList.add("hidden");
+    }
+  } else {
+    // Show regular status messages below the connection status
+    if (statusMessage) {
+      statusMessage.textContent = text;
+      statusMessage.className = `text-xs text-center ${color}`;
+      statusMessage.classList.remove("hidden");
+    }
+    
+    // Set indicator to blue for other states
+    if (statusIndicator) {
+      statusIndicator.style.color = "#0ea5e9"; // blue
     }
   }
   
@@ -1850,9 +1871,10 @@ function logPingToUI(payload, lat, lon) {
     li.setAttribute('data-timestamp', isoStr);
     li.setAttribute('data-lat', lat.toFixed(5));
     li.setAttribute('data-lon', lon.toFixed(5));
-    sessionPingsEl.appendChild(li);
-    // Auto-scroll to bottom
-    sessionPingsEl.scrollTop = sessionPingsEl.scrollHeight;
+    // Prepend to show newest logs at top
+    sessionPingsEl.insertBefore(li, sessionPingsEl.firstChild);
+    // Scroll to top to show newest entry
+    sessionPingsEl.scrollTop = 0;
     return li;
   }
   
