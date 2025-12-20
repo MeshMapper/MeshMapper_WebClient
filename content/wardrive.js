@@ -1127,7 +1127,7 @@ async function postToMeshMapperAPI(lat, lon, heardRepeats) {
       iata: WARDIVE_IATA_CODE
     };
 
-    debugLog(`Posting to MeshMapper API: lat=${lat.toFixed(5)}, lon=${lon.toFixed(5)}, who=${payload.who}, power=${payload.power}, heard_repeats=${heardRepeats}, ver=${payload.ver}`);
+    debugLog(`Posting to MeshMapper API: lat=${lat.toFixed(5)}, lon=${lon.toFixed(5)}, who=${payload.who}, power=${payload.power}, heard_repeats=${heardRepeats}, ver=${payload.ver}, iata=${payload.iata}`);
 
     const response = await fetch(MESHMAPPER_API_URL, {
       method: "POST",
