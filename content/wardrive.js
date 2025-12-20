@@ -951,13 +951,16 @@ async function ensureChannel() {
     return state.channel;
   }
 
+  setStatus("Looking for #wardriving channel", STATUS_COLORS.info);
   debugLog(`Looking up channel: ${CHANNEL_NAME}`);
   let ch = await state.connection.findChannelByName(CHANNEL_NAME);
   
   if (!ch) {
+    setStatus("Channel #wardriving not found", STATUS_COLORS.info);
     debugLog(`Channel ${CHANNEL_NAME} not found, attempting to create it`);
     try {
       ch = await createWardriveChannel();
+      setStatus("Created #wardriving", STATUS_COLORS.success);
       debugLog(`Channel ${CHANNEL_NAME} created successfully`);
     } catch (e) {
       debugError(`Failed to create channel ${CHANNEL_NAME}: ${e.message}`);
@@ -967,6 +970,7 @@ async function ensureChannel() {
       );
     }
   } else {
+    setStatus("Channel #wardriving found", STATUS_COLORS.success);
     debugLog(`Channel found: ${CHANNEL_NAME} (index: ${ch.channelIdx})`);
   }
 
@@ -1125,9 +1129,9 @@ async function postToMeshMapperAPI(lat, lon, heardRepeats) {
       // Check if slot has been revoked
       if (data.allowed === false) {
         debugWarn("MeshMapper API returned allowed=false, WarDriving slot has been revoked, disconnecting");
-        setStatus("Disconnected: WarDriving slot has been revoked", STATUS_COLORS.error);
+        setStatus("Error: Posting to API (Revoked)", STATUS_COLORS.error);
         state.disconnectReason = "slot_revoked"; // Track disconnect reason
-        // Disconnect after a brief delay to ensure user sees the message
+        // Disconnect after a brief delay to ensure user sees the error message
         setTimeout(() => {
           disconnect().catch(err => debugError(`Disconnect after slot revocation failed: ${err.message}`));
         }, 1500);
@@ -2080,8 +2084,16 @@ async function connect() {
           return;
         }
         
-        // Capacity check passed, proceed with channel setup and GPS initialization
+        // Capacity check passed
+        setStatus("Acquired wardriving slot", STATUS_COLORS.success);
+        debugLog("Wardriving slot acquired successfully");
+        
+        // Proceed with channel setup and GPS initialization
         await ensureChannel();
+        
+        // GPS initialization
+        setStatus("Priming GPS", STATUS_COLORS.info);
+        debugLog("Starting GPS initialization");
         await primeGpsOnce();
         
         // Connection complete, show Connected status
@@ -2098,9 +2110,13 @@ async function connect() {
       debugLog("BLE disconnected event fired");
       
       // Only set "Disconnected" status for normal disconnections
-      // Preserve error messages (app_down, capacity_full, error) instead of overwriting
+      // Preserve error messages (app_down, capacity_full, error, slot_revoked) instead of overwriting
       if (state.disconnectReason === "normal" || state.disconnectReason === null || state.disconnectReason === undefined) {
         setStatus("Disconnected", STATUS_COLORS.error);
+      } else if (state.disconnectReason === "slot_revoked") {
+        // For slot revocation, set the terminal status message
+        setStatus("Disconnected: WarDriving slot has been revoked", STATUS_COLORS.error);
+        debugLog("Setting terminal status for slot revocation");
       } else {
         debugLog(`Preserving disconnect status for reason: ${state.disconnectReason}`);
       }
