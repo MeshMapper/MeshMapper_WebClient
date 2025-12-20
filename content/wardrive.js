@@ -1912,9 +1912,9 @@ function startAutoPing() {
 // ---- Disconnect Cleanup ----
 /**
  * Perform cleanup after disconnect (shared between disconnected event and timeout)
- * @param {boolean} preserveErrorStatus - Whether to preserve error status or show default "Disconnected"
+ * @param {boolean} preserveDisconnectError - Whether to preserve disconnect error status or show default "Disconnected"
  */
-function performDisconnectCleanup(preserveErrorStatus = false) {
+function performDisconnectCleanup(preserveDisconnectError = false) {
   debugLog("Performing disconnect cleanup");
   
   // Clear disconnect timeout if it exists
@@ -1926,7 +1926,7 @@ function performDisconnectCleanup(preserveErrorStatus = false) {
   }
   
   // Set appropriate status message
-  if (preserveErrorStatus && state.disconnectErrorStatus) {
+  if (preserveDisconnectError && state.disconnectErrorStatus) {
     debugLog(`Preserving disconnect error status: "${state.disconnectErrorStatus.message}"`);
     setStatus(state.disconnectErrorStatus.message, state.disconnectErrorStatus.color);
     state.disconnectErrorStatus = null; // Clear after using
