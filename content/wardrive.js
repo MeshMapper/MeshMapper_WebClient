@@ -123,6 +123,7 @@ const state = {
   distanceUpdateTimer: null, // Timer for updating distance display
   capturedPingCoords: null, // { lat, lon, accuracy } captured at ping time, used for API post after 7s delay
   devicePublicKey: null, // Hex string of device's public key (used for capacity check)
+  disconnectReason: null, // Tracks the reason for disconnection (e.g., "app_down", "capacity_full", "error", "normal")
   repeaterTracking: {
     isListening: false,           // Whether we're currently listening for echoes
     sentTimestamp: null,          // Timestamp when the ping was sent
@@ -1047,7 +1048,8 @@ async function checkCapacity(reason) {
       // Fail closed on network errors for connect
       if (reason === "connect") {
         debugError("Failing closed (denying connection) due to API error");
-        setStatus("WarDriving app is down", STATUS_COLORS.error);
+        setStatus("Disconnected: WarDriving app is down", STATUS_COLORS.error);
+        state.disconnectReason = "app_down"; // Track disconnect reason
         return false;
       }
       return true; // Always allow disconnect to proceed
@@ -1058,7 +1060,8 @@ async function checkCapacity(reason) {
 
     // Handle capacity full vs. allowed cases separately
     if (data.allowed === false && reason === "connect") {
-      setStatus("WarDriving app has reached capacity", STATUS_COLORS.error);
+      setStatus("Disconnected: WarDriving app has reached capacity", STATUS_COLORS.error);
+      state.disconnectReason = "capacity_full"; // Track disconnect reason
     }
     
     return data.allowed === true;
@@ -1069,7 +1072,8 @@ async function checkCapacity(reason) {
     // Fail closed on network errors for connect
     if (reason === "connect") {
       debugError("Failing closed (denying connection) due to network error");
-      setStatus("WarDriving app is down", STATUS_COLORS.error);
+      setStatus("Disconnected: WarDriving app is down", STATUS_COLORS.error);
+      state.disconnectReason = "app_down"; // Track disconnect reason
       return false;
     }
     
@@ -1113,7 +1117,8 @@ async function postToMeshMapperAPI(lat, lon, heardRepeats) {
         const data = await response.json();
         if (data.allowed === false) {
           debugWarn("MeshMapper API returned allowed=false, disconnecting");
-          setStatus("WarDriving app has reached capacity", STATUS_COLORS.error);
+          setStatus("Disconnected: WarDriving app has reached capacity", STATUS_COLORS.error);
+          state.disconnectReason = "capacity_full"; // Track disconnect reason
           // Disconnect after a brief delay to ensure user sees the message
           setTimeout(() => {
             disconnect().catch(err => debugError(`Disconnect after capacity denial failed: ${err.message}`));
@@ -2012,7 +2017,8 @@ async function connect() {
 
     conn.on("connected", async () => {
       debugLog("BLE connected event fired");
-      setStatus("Connected", STATUS_COLORS.success);
+      // Keep "Connecting" status visible during the full connection process
+      // Don't show "Connected" until everything is complete
       setConnectButton(true);
       connectBtn.disabled = false;
       const selfInfo = await conn.getSelfInfo();
@@ -2022,6 +2028,7 @@ async function connect() {
       if (!selfInfo?.publicKey || selfInfo.publicKey.length !== 32) {
         debugError("Missing or invalid public key from device", selfInfo?.publicKey);
         setStatus("Unable to read device public key; try again", STATUS_COLORS.error);
+        state.disconnectReason = "error"; // Mark as error disconnect
         // Disconnect after a brief delay to ensure user sees the error message
         setTimeout(() => {
           disconnect().catch(err => debugError(`Disconnect after public key error failed: ${err.message}`));
@@ -2050,28 +2057,40 @@ async function connect() {
         if (!allowed) {
           debugWarn("Capacity check denied, disconnecting");
           // Status message already set by checkCapacity()
+          // disconnectReason already set by checkCapacity()
           // Disconnect after a brief delay to ensure user sees the message
           setTimeout(() => {
             disconnect().catch(err => debugError(`Disconnect after capacity denial failed: ${err.message}`));
           }, 1500);
         } else {
-          // Connection complete, set status to Idle
-          setStatus("Idle", STATUS_COLORS.idle);
+          // Connection complete, show Connected status
+          setStatus("Connected", STATUS_COLORS.success);
+          debugLog("Full connection process completed successfully");
         }
       } catch (e) {
         debugError(`Channel setup failed: ${e.message}`, e);
         setStatus(e.message || "Channel setup failed", STATUS_COLORS.error);
+        state.disconnectReason = "error"; // Mark as error disconnect
       }
     });
 
     conn.on("disconnected", () => {
       debugLog("BLE disconnected event fired");
-      setStatus("Disconnected", STATUS_COLORS.error);
+      
+      // Only set "Disconnected" status for normal disconnections
+      // Preserve error messages (app_down, capacity_full, error) instead of overwriting
+      if (state.disconnectReason === "normal" || state.disconnectReason === null || state.disconnectReason === undefined) {
+        setStatus("Disconnected", STATUS_COLORS.error);
+      } else {
+        debugLog(`Preserving disconnect status for reason: ${state.disconnectReason}`);
+      }
+      
       setConnectButton(false);
       deviceInfoEl.textContent = "—";
       state.connection = null;
       state.channel = null;
       state.devicePublicKey = null; // Clear public key
+      state.disconnectReason = null; // Reset disconnect reason
       stopAutoPing(true); // Ignore cooldown check on disconnect
       enableControls(false);
       updateAutoButton();
@@ -2105,6 +2124,12 @@ async function disconnect() {
   }
 
   connectBtn.disabled = true;
+  
+  // Set disconnectReason to "normal" if not already set (for user-initiated disconnects)
+  if (state.disconnectReason === null || state.disconnectReason === undefined) {
+    state.disconnectReason = "normal";
+  }
+  
   setStatus("Disconnecting", STATUS_COLORS.info);
 
   // Release capacity slot if we have a public key
@@ -2147,6 +2172,7 @@ async function disconnect() {
   } catch (e) {
     debugError(`BLE disconnect failed: ${e.message}`, e);
     setStatus(e.message || "Disconnect failed", STATUS_COLORS.error);
+    state.disconnectReason = "error"; // Mark as error disconnect
   } finally {
     connectBtn.disabled = false;
   }
