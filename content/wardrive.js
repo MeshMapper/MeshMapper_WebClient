@@ -2080,8 +2080,8 @@ async function disconnect() {
       };
     }
     
-    // Note: Don't clear timeout here - let the disconnected event handler clear it
-    // This ensures timeout fires if disconnected event doesn't occur
+    // Note: Don't clear timeout here - it will be cleared by performDisconnectCleanup()
+    // when the disconnected event handler runs. This ensures timeout fires if event doesn't occur.
     debugLog("Disconnect initiated, waiting for disconnected event or timeout");
     
   } catch (e) {
@@ -2093,12 +2093,12 @@ async function disconnect() {
       color: STATUS_COLORS.error
     };
     
-    // Note: Don't set status here directly - let the disconnected event handler or timeout handle it
-    // This ensures consistent status updates regardless of which path executes
+    // Note: Don't set status here - performDisconnectCleanup() will handle it
+    // via either the disconnected event handler or timeout, ensuring consistent behavior
     debugLog("Disconnect error stored, waiting for disconnected event or timeout");
     
   } finally {
-    // Note: Don't re-enable button here - let the disconnected event or timeout handle it
+    // Note: Don't re-enable button here - performDisconnectCleanup() handles it
     // This prevents race conditions where button is enabled before cleanup completes
   }
 }
