@@ -436,6 +436,11 @@ function cleanupAllTimers() {
     state.cooldownUpdateTimer = null;
   }
   
+  if (state.disconnectTimeout) {
+    clearTimeout(state.disconnectTimeout);
+    state.disconnectTimeout = null;
+  }
+  
   // Clean up status message timer
   if (statusMessageState.pendingTimer) {
     clearTimeout(statusMessageState.pendingTimer);
@@ -2048,6 +2053,7 @@ async function disconnect() {
       debugLog("Forcing disconnect cleanup via timeout");
       
       // Clear the timeout reference before calling cleanup (timeout has already fired)
+      // This prevents performDisconnectCleanup() from trying to clear an already-fired timeout
       state.disconnectTimeout = null;
       
       // Ensure error status is set if not already present
