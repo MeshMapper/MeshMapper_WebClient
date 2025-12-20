@@ -149,10 +149,6 @@
 
         <!-- Connect/Disconnect buttons -->
         <div class="space-y-2">
-          <button id="connectBtn"
-            class="w-full px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium text-white disabled:opacity-40">
-            Connect
-          </button>
           <p id="connectHelperText" class="text-xs text-slate-400 text-center">
             Select radio power to connect
           </p>
@@ -169,10 +165,10 @@
             </button>
           </div>
 
-          <!-- Disconnect button (visible when connected) -->
-          <button id="disconnectBtn"
-            class="w-full hidden px-3 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-sm font-medium text-white disabled:opacity-40">
-            Disconnect
+          <!-- Connect/Disconnect button (always visible, changes text/color) -->
+          <button id="connectBtn"
+            class="w-full px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium text-white disabled:opacity-40">
+            Connect
           </button>
         </div>
       </section>
