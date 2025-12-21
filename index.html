@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="en">
  
@@ -13,6 +12,7 @@
   <link rel="manifest" href="content/wardrive.json">
   <link rel="icon" href="content/wardrive.png">
   <link rel="stylesheet" href="content/tailwind.css">
+  <link rel="stylesheet" href="content/style.css">
 
   <!-- Leaflet -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -32,173 +32,215 @@
 
 <body class="bg-slate-900 text-slate-100">
   <main class="min-h-screen flex items-start justify-center p-4">
-    <div class="w-full max-w-xl space-y-4">
+    <div class="w-full max-w-xl space-y-2">
 
-      <!-- Header -->
-      <header class="space-y-1">
-        <h1 class="text-2xl font-semibold flex items-center gap-2">
-         <div>
-           <h1 class="flex items-center gap-2 text-xl font-semibold"><img class="h-8 w-8" src="content/wardrive.png" />
-             MeshCore Wardrive</h1>
-         </div>
+      <!-- App Title -->
+      <header class="flex items-center justify-between gap-2">
+        <h1 class="flex items-center gap-2 text-lg sm:text-xl font-semibold truncate min-w-0">
+          <img class="h-6 w-6 sm:h-8 sm: w-8 flex-shrink-0" src="content/wardrive.png" alt="MeshCore" />
+          <span class="truncate">MeshCore Wardrive</span>
         </h1>
+        <span id="appVersion" class="text-xs text-slate-400 flex-shrink-0 whitespace-nowrap">v1.0</span>
       </header>
 
-      <!-- Status and Controls -->
-      <section class="bg-slate-800/80 border border-slate-700 rounded-xl p-4 space-y-4">
-
-      <!-- Top info block -->
-      <table class="w-full text-sm">
-        <tbody class="text-slate-200">
-          <tr>
-            <td class="pr-3 text-slate-400 whitespace-nowrap align-top">Status:</td>
-            <td id="status" class="font-semibold text-red-300">Disconnected</td>
-          </tr>
-          <tr>
-            <td class="pr-3 text-slate-400 whitespace-nowrap align-top">Device:</td>
-            <td id="deviceInfo">-</td>
-          </tr>
-          <tr>
-            <td class="pr-3 text-slate-400 whitespace-nowrap align-top">Channel:</td>
-            <td id="channelInfo">-</td>
-          </tr>
-          <tr>
-            <td class="pr-3 text-slate-400 whitespace-nowrap align-top">GPS:</td>
-            <td id="gpsInfo">-</td>
-          </tr>
-          <tr>
-            <td class="pr-3 text-slate-400 whitespace-nowrap align-top">Accuracy:</td>
-            <td id="gpsAcc">-</td>
-          </tr>
-          <tr>
-            <td class="pr-3 text-slate-400 whitespace-nowrap align-top">Distance from last ping:</td>
-            <td id="distanceInfo">-</td>
-          </tr>
-        </tbody>
-      </table>
-
-        <!-- Buttons -->
-        <div class="grid grid-cols-2 gap-2">
-          <button id="connectBtn"
-            class="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium text-white disabled:opacity-40">
-            Connect
+      <!-- Connection Status Bar with Settings Panel -->
+      <div>
+        <!-- Connection Status Bar -->
+        <div id="connectionBar" class="bg-slate-800/80 border border-slate-700 rounded-t-xl rounded-b-none px-4 py-0.5 flex items-center justify-between">
+          <div class="flex items-center gap-4 text-sm">
+            <div class="flex items-center gap-2">
+              <span id="statusIndicator" class="text-base">●</span>
+              <span id="connectionStatus" class="font-medium text-red-300">Disconnected</span>
+            </div>
+            <div class="flex items-center gap-2 text-xs text-slate-400">
+              <span>Device:</span>
+              <span id="deviceInfo" class="text-slate-300">-</span>
+            </div>
+          </div>
+          <button id="settingsGearBtn" class="p-0 text-slate-400 hover:text-slate-200 transition-colors" aria-label="Toggle settings">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+            </svg>
           </button>
+        </div>
 
-          <button id="sendPingBtn" disabled
-            class="px-3 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-sm font-medium text-white disabled:opacity-40">
+        <!-- Settings Panel (extends from connection bar) -->
+        <section id="settingsPanel" class="bg-slate-800/80 border-x border-b border-slate-700 rounded-b-xl p-4 space-y-3">
+          <div class="flex items-center justify-between mb-2">
+            <h2 class="text-sm font-medium text-slate-300 uppercase tracking-wide">Settings</h2>
+            <button id="settingsCloseBtn" class="w-8 h-8 flex items-center justify-center rounded-full text-slate-400 hover:text-slate-200 hover:bg-slate-700/50 transition-all" aria-label="Close settings">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+            </button>
+          </div>
+
+        <!-- Auto Ping Interval -->
+        <div class="space-y-2">
+          <label class="block text-xs font-medium text-slate-400 uppercase tracking-wide">Auto Ping Interval</label>
+          <div style="display: flex; gap: 0.5rem;">
+            <label style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 0.5rem 0.75rem; border-radius: 0.5rem; border: 1px solid #475569; cursor: pointer;" class="hover:bg-slate-700 has-[:checked]:bg-emerald-600 has-[:checked]:border-emerald-600">
+              <input type="radio" name="interval" value="15" class="sr-only">
+              <span class="text-sm font-medium">15s</span>
+            </label>
+            <label style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 0.5rem 0.75rem; border-radius: 0.5rem; border: 1px solid #475569; cursor: pointer;" class="hover:bg-slate-700 has-[:checked]:bg-emerald-600 has-[:checked]:border-emerald-600">
+              <input type="radio" name="interval" value="30" checked class="sr-only">
+              <span class="text-sm font-medium">30s</span>
+            </label>
+            <label style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 0.5rem 0.75rem; border-radius: 0.5rem; border: 1px solid #475569; cursor: pointer;" class="hover:bg-slate-700 has-[:checked]:bg-emerald-600 has-[:checked]:border-emerald-600">
+              <input type="radio" name="interval" value="60" class="sr-only">
+              <span class="text-sm font-medium">60s</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Radio Power -->
+        <div class="space-y-2">
+          <label class="block text-xs font-medium text-slate-400 uppercase tracking-wide">
+            Radio Power <span class="text-amber-400">⚠️ Required</span>
+          </label>
+          <div style="display: flex; gap: 0.5rem;">
+            <label style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 0.5rem 0.75rem; border-radius: 0.5rem; border: 1px solid #475569; cursor: pointer;" class="hover:bg-slate-700 has-[:checked]:bg-emerald-600 has-[:checked]:border-emerald-600">
+              <input type="radio" name="power" value="0.3w" class="sr-only">
+              <span class="text-sm font-medium">0.3w</span>
+            </label>
+            <label style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 0.5rem 0.75rem; border-radius: 0.5rem; border: 1px solid #475569; cursor: pointer;" class="hover:bg-slate-700 has-[:checked]:bg-emerald-600 has-[:checked]:border-emerald-600">
+              <input type="radio" name="power" value="0.6w" class="sr-only">
+              <span class="text-sm font-medium">0.6w</span>
+            </label>
+            <label style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 0.5rem 0.75rem; border-radius: 0.5rem; border: 1px solid #475569; cursor: pointer;" class="hover:bg-slate-700 has-[:checked]:bg-emerald-600 has-[:checked]:border-emerald-600">
+              <input type="radio" name="power" value="1.0w" class="sr-only">
+              <span class="text-sm font-medium">1.0w</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Permissions & Status -->
+        <div class="space-y-2">
+          <label class="block text-xs font-medium text-slate-400 uppercase tracking-wide">Permissions & Status</label>
+          <div class="flex flex-wrap gap-4 text-sm">
+            <div class="flex items-center gap-2">
+              <span class="text-slate-300">Bluetooth:</span>
+              <span id="permBluetooth" class="font-medium">-</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-slate-300">Location:</span>
+              <span id="permLocation" class="font-medium">-</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-slate-300">Channel:</span>
+              <span id="channelInfo" class="font-medium">-</span>
+            </div>
+          </div>
+        </div>
+      </section>
+      </div>
+
+      <!-- Status Message Box (Dynamic App Status) -->
+      <section class="bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-1.5 flex items-center">
+        <span id="status" class="text-sm font-medium text-slate-300">—</span>
+      </section>
+
+      <!-- Map Section with Overlays -->
+      <section class="relative bg-slate-800/80 border border-slate-700 rounded-xl overflow-hidden">
+        <iframe
+          id="coverageFrame"
+          title="MeshMapper Coverage Zone"
+          style="width: 100%; height: 400px; border: 0;"
+          loading="lazy"
+          referrerpolicy="no-referrer"
+          src="https://yow.meshmapper.net/embed.php?cov_grid=1&fail_grid=1&pings=0&repeaters=1&rep_coverage=0&grid_lines=0&lat=45.42150&lon=-75.69720&meters=10000">
+        </iframe>
+
+        <!-- Map Overlays -->
+        <!-- Top-right corner: GPS Accuracy and Distance stacked vertically -->
+        <div class="absolute top-2 right-2 z-10 flex flex-col gap-2 text-right">
+          <!-- GPS Accuracy -->
+          <div class="bg-slate-900/80 backdrop-blur-sm border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300">
+            <span id="gpsAcc">±-</span>
+          </div>
+          
+          <!-- Distance from Last Ping -->
+          <div class="bg-slate-900/80 backdrop-blur-sm border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300">
+            <span id="distanceInfo">∆-</span>
+          </div>
+        </div>
+        
+        <!-- Bottom: GPS Coordinates spanning full width -->
+        <div class="absolute bottom-2 left-2 right-2 z-10">
+          <div class="bg-slate-900/80 backdrop-blur-sm border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-300 text-center">
+            <div id="gpsInfo">-</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Control Buttons -->
+      <section class="bg-slate-800/80 border border-slate-700 rounded-xl p-4 space-y-2">
+        <!-- Ping controls (always visible, disabled when not connected) -->
+        <div id="pingControls" class="w-full flex gap-2">
+          <button id="sendPingBtn"
+            class="flex-1 min-w-0 px-3 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-sm font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed">
             Send Ping
           </button>
-
-          <button id="autoToggleBtn" disabled
-            class="col-span-2 px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-medium text-white disabled:opacity-40">
+          <button id="autoToggleBtn"
+            class="flex-1 min-w-0 px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-sm font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed">
             Start Auto Ping
           </button>
         </div>
 
-        <!-- Auto Ping Interval selector -->
-        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-          <span class="text-slate-300">Auto interval:</span>
-
-          <label class="flex items-center gap-1">
-            <input type="radio" name="interval" value="15">
-            <span>15s</span>
-          </label>
-
-          <label class="flex items-center gap-1">
-            <input type="radio" name="interval" value="30" checked>
-            <span>30s</span>
-          </label>
-
-          <label class="flex items-center gap-1">
-            <input type="radio" name="interval" value="60">
-            <span>60s</span>
-          </label>
-        </div>
-
-
-        <!-- Radio Power selector -->
-        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-          <span class="text-slate-300">Radio power:</span>
-
-          <label class="flex items-center gap-1">
-            <input type="radio" name="power" value="" checked>
-            <span>N/A</span>
-          </label>
-
-          <label class="flex items-center gap-1">
-            <input type="radio" name="power" value="0.3w">
-            <span>0.3w</span>
-          </label>
-
-          <label class="flex items-center gap-1">
-            <input type="radio" name="power" value="0.6w">
-            <span>0.6w</span>
-          </label>
-
-          <label class="flex items-center gap-1">
-            <input type="radio" name="power" value="1.0w">
-            <span>1.0w</span>
-          </label>
-        </div>
-
-
-        <!-- One-line note -->
-        <div class="text-xs text-slate-400">
-          Requires Bluetooth and Location permissions. Keep the app in the foreground with the screen on and unlocked.
-        </div>
-      </section>
-      
-      <!-- Coverage preview -->
-      <section class="card">
-          <iframe
-            id="coverageFrame"
-            title="MeshMapper Coverage Zone"
-            style="width: 100%; height: min(80vh, 95vw); border: 0; border-radius: 12px;"
-            loading="lazy"
-            referrerpolicy="no-referrer"
-            src="https://yow.meshmapper.net/embed.php?cov_grid=1&fail_grid=1&pings=0&repeaters=1&rep_coverage=0&grid_lines=0&lat=45.42150&lon=-75.69720&meters=10000">
-          </iframe>
-        <p class="text-xs text-slate-400 mt-2">
-          This preview recenters after each ping is sent.
-        </p>
+        <!-- Connect/Disconnect button (always visible, changes text/color) -->
+        <button id="connectBtn"
+          class="w-full px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-sm font-medium text-white disabled:opacity-40 disabled:cursor-not-allowed">
+          Connect
+        </button>
       </section>
 
-      <!-- Session ping log (separate section, placed above footer) -->
-      <section class="bg-slate-800/80 border border-slate-700 rounded-xl p-4 space-y-2" aria-labelledby="sessionPingsHeading">
-        <div class="flex items-center justify-between">
-          <h2 id="sessionPingsHeading" class="text-sm font-medium">Session Pings</h2>
+      <!-- Session Log: Unified Static Section (replaces mobile bottom sheet and desktop log) -->
+      <section class="bg-slate-800/80 border border-slate-700 rounded-xl overflow-hidden" aria-labelledby="sessionPingsHeading">
+        <!-- Log Header (collapsible toggle) -->
+        <div id="logSummaryBar" class="px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-slate-800/60 transition-colors">
+          <div class="flex items-center gap-3 text-sm min-w-0 flex-1">
+            <h2 id="sessionPingsHeading" class="text-sm font-medium text-slate-300 uppercase tracking-wide">Session Log</h2>
+            <span class="text-slate-500">|</span>
+            <span id="logCount" class="font-medium text-slate-300">0 pings</span>
+            <span id="logLastTime" class="text-slate-400 text-xs truncate hidden sm:inline">No data</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span id="logLastSnr" class="text-xs font-mono text-slate-400">—</span>
+            <svg id="logExpandArrow" class="w-4 h-4 text-slate-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+            </svg>
+          </div>
         </div>
-        <ul id="sessionPings"
-            class="text-xs text-slate-400 font-mono leading-5 max-h-48 overflow-y-auto border border-slate-700/70 rounded-lg p-2 bg-slate-900/50 list-none mt-2">
-          <!-- each ping will be appended as an <li> -->
-        </ul>
+        
+        <!-- Expandable Log Content -->
+        <div id="logBottomSheet" class="border-t border-slate-700 hidden">
+          <!-- Log entries (scrollable) -->
+          <div id="logScrollContainer" class="overflow-y-auto px-4 py-2 max-h-64" style="-webkit-overflow-scrolling: touch;">
+            <div id="sessionPings" class="space-y-2">
+              <!-- Log entries will be appended here -->
+              <div class="text-xs text-slate-500 italic text-center py-4">No pings logged yet</div>
+            </div>
+          </div>
+        </div>
       </section>
        
-      <!-- Info & Attribution Block at Bottom -->
-      <footer class="mt-8 space-y-2">
-        <div class="text-xs italic text-slate-400">
-          This project is a fork of <a class="underline" target="_blank" href="https://github.com/kallanreed/mesh-map">kallanreed/mesh-map</a>.
-        </div>
-        <div class="text-xs italic text-slate-400">
-          MrAlders0n forked this and modified it to work with the Ottawa-built
-          <a class="underline" target="_blank" href="https://meshmapper.net">meshmapper.net</a>.
-        </div>
-        <div class="text-xs italic text-slate-400">
-          Only for <a class="underline" target="_blank" href="https://ottawamesh.ca">YOW region</a>.
-          See <a class="underline" target="_blank" href="https://ottawamesh.ca/deployment/coverage/">here</a> for more info.
-        </div>
-        <div class="text-xs italic text-slate-400">
-          Sends location to <span class="font-mono">#wardriving</span> to build the
-          <a class="underline" target="_blank" href="https://ottawamesh.ca/deployment/coverage/">coverage map</a>.
-        </div>
-        <div class="text-xs italic text-slate-400">
-          <span>
-            Does not work in Safari. Use
-            <a class="underline" target="_blank"
-              href="https://apps.apple.com/us/app/bluefy-web-ble-browser/id1492822055">Bluefy on iOS</a>.
-          </span>
-        </div>
-      </footer>
+      <!-- Notes Section -->
+      <section class="bg-slate-800/80 border border-slate-700 rounded-xl p-4 space-y-2">
+        <h2 class="text-sm font-medium text-slate-300">Notes</h2>
+        <ul class="text-xs text-slate-400 space-y-1 list-disc list-inside">
+          <li>Requires Bluetooth and Location permissions</li>
+          <li>Keep app in foreground with screen on & unlocked</li>
+          <li>YOW region only</li>
+          <li>Sends location to <code class="bg-slate-900 px-1 py-0.5 rounded">#wardriving</code> for coverage map</li>
+          <li class="text-amber-400 font-medium">⚠️ Not supported in Safari — Use Bluefy on iOS</li>
+        </ul>
+        <p class="text-xs italic text-slate-500 pt-2 border-t border-slate-700">
+          Fork of <a class="underline" target="_blank" href="https://github.com/kallanreed/mesh-map">kallanreed/mesh-map</a>,
+          modified for <a class="underline" target="_blank" href="https://meshmapper.net">meshmapper.net</a>
+        </p>
+      </section>
 
     </div>
   </main>

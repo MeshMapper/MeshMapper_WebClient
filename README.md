@@ -150,6 +150,27 @@ A lightweight debugging system designed for development without impacting produc
 
 ---
 
+## 🛠️ Development
+
+### Building Tailwind CSS
+
+This project uses Tailwind CSS v4 to generate the styles. If you make changes to the HTML or need to rebuild the CSS:
+
+```bash
+# Install dependencies
+npm install
+
+# Build CSS once
+npm run build:css
+
+# Watch for changes and rebuild automatically
+npm run watch:css
+```
+
+The CSS is generated from `content/tailwind-in.css` and outputs to `content/tailwind.css`.
+
+---
+
 ## 🙏 Credits
 
 This project is a fork and adaptation:

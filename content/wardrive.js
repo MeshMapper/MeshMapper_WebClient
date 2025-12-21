@@ -88,6 +88,16 @@ const WARDIVE_IATA_CODE = "YOW";
 // For DEV builds: Contains "DEV-<EPOCH>" format (e.g., "DEV-1734652800")
 const APP_VERSION = "UNKNOWN"; // Placeholder - replaced during build
 
+// ---- UI helpers ----
+// Status colors for different states
+const STATUS_COLORS = {
+  idle: "text-slate-300",
+  success: "text-emerald-300",
+  warning: "text-amber-300",
+  error: "text-red-300",
+  info: "text-sky-300"
+};
+
 // ---- DOM refs (from index.html; unchanged except the two new selectors) ----
 const $ = (id) => document.getElementById(id);
 const statusEl       = $("status");
@@ -103,10 +113,26 @@ const distanceInfoEl = document.getElementById("distanceInfo"); // Distance from
 const sessionPingsEl = document.getElementById("sessionPings"); // optional
 const coverageFrameEl = document.getElementById("coverageFrame");
 setConnectButton(false);
+setConnStatus("Disconnected", STATUS_COLORS.error);
 
 // NEW: selectors
 const intervalSelect = $("intervalSelect"); // 15 / 30 / 60 seconds
 const powerSelect    = $("powerSelect");    // "", "0.3w", "0.6w", "1.0w"
+
+// Session Log selectors
+const logSummaryBar = $("logSummaryBar");
+const logBottomSheet = $("logBottomSheet");
+const logScrollContainer = $("logScrollContainer");
+const logCount = $("logCount");
+const logLastTime = $("logLastTime");
+const logLastSnr = $("logLastSnr");
+
+// Session log state
+const sessionLogState = {
+  entries: [],  // Array of parsed log entries
+  isExpanded: false,
+  autoScroll: true
+};
 
 // ---- State ----
 const state = {
@@ -132,7 +158,8 @@ const state = {
   distanceUpdateTimer: null, // Timer for updating distance display
   capturedPingCoords: null, // { lat, lon, accuracy } captured at ping time, used for API post after 7s delay
   devicePublicKey: null, // Hex string of device's public key (used for capacity check)
-  disconnectReason: null, // Tracks the reason for disconnection (e.g., "app_down", "capacity_full", "public_key_error", "channel_setup_error", "ble_disconnect_error", "normal")
+  wardriveSessionId: null, // Session ID from capacity check API (used for all MeshMapper API posts)
+  disconnectReason: null, // Tracks the reason for disconnection (e.g., "app_down", "capacity_full", "public_key_error", "channel_setup_error", "ble_disconnect_error", "session_id_error", "normal")
   channelSetupErrorMessage: null, // Error message from channel setup failure
   bleDisconnectErrorMessage: null, // Error message from BLE disconnect failure
   repeaterTracking: {
@@ -143,17 +170,8 @@ const state = {
     repeaters: new Map(),         // Map<repeaterId, {snr, seenCount}>
     listenTimeout: null,          // Timeout handle for 7-second window
     rxLogHandler: null,           // Handler function for rx_log events
+    currentLogEntry: null,        // Current log entry being updated (for incremental UI updates)
   }
-};
-
-// ---- UI helpers ----
-// Status colors for different states
-const STATUS_COLORS = {
-  idle: "text-slate-300",
-  success: "text-emerald-300",
-  warning: "text-amber-300",
-  error: "text-red-300",
-  info: "text-sky-300"
 };
 
 // Status message management with minimum visibility duration
@@ -228,7 +246,7 @@ function setStatus(text, color = STATUS_COLORS.idle, immediate = false) {
  */
 function applyStatusImmediately(text, color) {
   statusEl.textContent = text;
-  statusEl.className = `font-semibold ${color}`;
+  statusEl.className = `text-sm font-medium ${color}`;
   statusMessageState.lastSetTime = Date.now();
   statusMessageState.currentText = text;
   statusMessageState.currentColor = color;
@@ -244,9 +262,9 @@ function applyStatusImmediately(text, color) {
 function applyCountdownStatus(result, defaultColor, immediate = true) {
   if (!result) return;
   if (typeof result === 'string') {
-    setStatus(result, defaultColor, immediate);
+    setDynamicStatus(result, defaultColor, immediate);
   } else {
-    setStatus(result.message, result.color || defaultColor, immediate);
+    setDynamicStatus(result.message, result.color || defaultColor, immediate);
   }
 }
 
@@ -391,6 +409,28 @@ function resumeAutoCountdown() {
   return false;
 }
 
+/**
+ * Handle manual ping blocked during auto mode by resuming the paused countdown
+ * This ensures the UI returns to showing the auto countdown instead of staying stuck on the skip message
+ * 
+ * When a manual ping is blocked during auto mode (GPS unavailable, outside geofence, or too close), this function:
+ * 1. Attempts to resume the paused auto countdown timer with remaining time
+ * 2. If no paused countdown exists, schedules a new auto ping
+ * 3. Does nothing if auto mode is not running
+ * 
+ * @returns {void}
+ */
+function handleManualPingBlockedDuringAutoMode() {
+  if (state.running) {
+    debugLog("Manual ping blocked during auto mode - resuming auto countdown");
+    const resumed = resumeAutoCountdown();
+    if (!resumed) {
+      debugLog("No paused countdown to resume, scheduling new auto ping");
+      scheduleNextAutoPing();
+    }
+  }
+}
+
 function startRxListeningCountdown(delayMs) {
   debugLog(`Starting RX listening countdown: ${delayMs}ms`);
   state.rxListeningEndTime = Date.now() + delayMs;
@@ -482,12 +522,19 @@ function cleanupAllTimers() {
   
   // Clear device public key
   state.devicePublicKey = null;
+  
+  // Clear wardrive session ID
+  state.wardriveSessionId = null;
 }
 
 function enableControls(connected) {
   connectBtn.disabled     = false;
   channelInfoEl.textContent = CHANNEL_NAME;
   updateControlsForCooldown();
+  
+  // Keep ping controls always visible but disable when not connected
+  // This is handled by updateControlsForCooldown() which sets disabled state
+  // No need to show/hide the controls anymore
 }
 function updateAutoButton() {
   if (state.running) {
@@ -540,6 +587,64 @@ function setConnectButton(connected) {
       "hover:bg-emerald-500"
     );
   }
+}
+
+/**
+ * Set connection status bar message
+ * Updates the #connectionStatus element with one of four fixed states:
+ * - "Connected" - Device ready for wardriving after full connection (green)
+ * - "Connecting" - Connection process in progress (blue)
+ * - "Disconnected" - No device connected (red)
+ * - "Disconnecting" - Disconnection process in progress (blue)
+ * 
+ * @param {string} text - Connection status text (one of the four states above)
+ * @param {string} color - Status color class from STATUS_COLORS
+ */
+function setConnStatus(text, color) {
+  const connectionStatusEl = document.getElementById("connectionStatus");
+  const statusIndicatorEl = document.getElementById("statusIndicator");
+  
+  if (!connectionStatusEl) return;
+  
+  debugLog(`Connection status: "${text}"`);
+  connectionStatusEl.textContent = text;
+  connectionStatusEl.className = `font-medium ${color}`;
+  
+  // Update status indicator dot color to match
+  if (statusIndicatorEl) {
+    statusIndicatorEl.className = `text-lg ${color}`;
+  }
+}
+
+/**
+ * Set dynamic status bar message
+ * Updates the #status element with non-connection status messages.
+ * Uses 500ms minimum visibility for first display, immediate for countdown updates.
+ * 
+ * Connection status words (Connected/Connecting/Disconnecting/Disconnected) are blocked
+ * and replaced with em dash (—) placeholder.
+ * 
+ * @param {string} text - Status message text (null/empty shows "—")
+ * @param {string} color - Status color class from STATUS_COLORS
+ * @param {boolean} immediate - If true, bypass minimum visibility (for countdown timers)
+ */
+function setDynamicStatus(text, color = STATUS_COLORS.idle, immediate = false) {
+  // Normalize empty/null/whitespace to em dash
+  if (!text || text.trim() === '') {
+    text = '—';
+    color = STATUS_COLORS.idle;
+  }
+  
+  // Block connection words from dynamic bar
+  const connectionWords = ['Connected', 'Connecting', 'Disconnecting', 'Disconnected'];
+  if (connectionWords.includes(text)) {
+    debugWarn(`Attempted to show connection word "${text}" in dynamic status bar - blocked, showing em dash instead`);
+    text = '—';
+    color = STATUS_COLORS.idle;
+  }
+  
+  // Reuse existing setStatus implementation with minimum visibility
+  setStatus(text, color, immediate);
 }
 
 
@@ -690,7 +795,7 @@ function updateDistanceUi() {
   if (distance === null) {
     distanceInfoEl.textContent = "-";
   } else {
-    distanceInfoEl.textContent = `${Math.round(distance)} m`;
+    distanceInfoEl.textContent = `∆${Math.round(distance)}m`;
   }
 }
 
@@ -741,7 +846,8 @@ function updateGpsUi() {
       gpsInfoEl.textContent = "Acquiring GPS fix...";
       gpsAccEl.textContent = "Please wait";
     } else if (state.gpsState === "error") {
-      gpsInfoEl.textContent = "GPS error - check permissions";
+      // GPS errors are now shown in Dynamic Status Bar, not in GPS block
+      gpsInfoEl.textContent = "-";
       gpsAccEl.textContent = "-";
     } else {
       gpsInfoEl.textContent = "-";
@@ -755,7 +861,7 @@ function updateGpsUi() {
 
   state.gpsState = "acquired";
   gpsInfoEl.textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)} (${ageSec}s ago)`;
-  gpsAccEl.textContent = accM ? `±${Math.round(accM)} m` : "-";
+  gpsAccEl.textContent = accM ? `±${Math.round(accM)}m` : "-";
 }
 
 // Start continuous GPS age display updates
@@ -805,6 +911,8 @@ function startGeoWatch() {
     (err) => {
       debugError(`GPS watch error: ${err.code} - ${err.message}`);
       state.gpsState = "error";
+      // Display GPS error in Dynamic Status Bar
+      setDynamicStatus("GPS error - check permissions", STATUS_COLORS.error);
       // Keep UI honest if it fails
       updateGpsUi();
     },
@@ -862,6 +970,8 @@ async function primeGpsOnce() {
   } catch (e) {
     debugError(`primeGpsOnce failed: ${e.message}`);
     state.gpsState = "error";
+    // Display GPS error in Dynamic Status Bar
+    setDynamicStatus("GPS error - check permissions", STATUS_COLORS.error);
     updateGpsUi();
   }
 }
@@ -970,16 +1080,16 @@ async function ensureChannel() {
     return state.channel;
   }
 
-  setStatus("Looking for #wardriving channel", STATUS_COLORS.info);
+  setDynamicStatus("Looking for #wardriving channel", STATUS_COLORS.info);
   debugLog(`Looking up channel: ${CHANNEL_NAME}`);
   let ch = await state.connection.findChannelByName(CHANNEL_NAME);
   
   if (!ch) {
-    setStatus("Channel #wardriving not found", STATUS_COLORS.info);
+    setDynamicStatus("Channel #wardriving not found", STATUS_COLORS.info);
     debugLog(`Channel ${CHANNEL_NAME} not found, attempting to create it`);
     try {
       ch = await createWardriveChannel();
-      setStatus("Created #wardriving", STATUS_COLORS.success);
+      setDynamicStatus("Created #wardriving", STATUS_COLORS.success);
       debugLog(`Channel ${CHANNEL_NAME} created successfully`);
     } catch (e) {
       debugError(`Failed to create channel ${CHANNEL_NAME}: ${e.message}`);
@@ -989,7 +1099,7 @@ async function ensureChannel() {
       );
     }
   } else {
-    setStatus("Channel #wardriving found", STATUS_COLORS.success);
+    setDynamicStatus("Channel #wardriving found", STATUS_COLORS.success);
     debugLog(`Channel found: ${CHANNEL_NAME} (index: ${ch.channelIdx})`);
   }
 
@@ -1053,7 +1163,7 @@ async function checkCapacity(reason) {
 
   // Set status for connect requests
   if (reason === "connect") {
-    setStatus("Acquiring wardriving slot", STATUS_COLORS.info);
+    setDynamicStatus("Acquiring wardriving slot", STATUS_COLORS.info);
   }
 
   try {
@@ -1084,11 +1194,33 @@ async function checkCapacity(reason) {
     }
 
     const data = await response.json();
-    debugLog(`Capacity check response: allowed=${data.allowed}`);
+    debugLog(`Capacity check response: allowed=${data.allowed}, session_id=${data.session_id || 'missing'}`);
 
     // Handle capacity full vs. allowed cases separately
     if (data.allowed === false && reason === "connect") {
       state.disconnectReason = "capacity_full"; // Track disconnect reason
+      return false;
+    }
+    
+    // For connect requests, validate session_id is present when allowed === true
+    if (reason === "connect" && data.allowed === true) {
+      if (!data.session_id) {
+        debugError("Capacity check returned allowed=true but session_id is missing");
+        state.disconnectReason = "session_id_error"; // Track disconnect reason
+        return false;
+      }
+      
+      // Store the session_id for use in MeshMapper API posts
+      state.wardriveSessionId = data.session_id;
+      debugLog(`Wardrive session ID received and stored: ${state.wardriveSessionId}`);
+    }
+    
+    // For disconnect requests, clear the session_id
+    if (reason === "disconnect") {
+      if (state.wardriveSessionId) {
+        debugLog(`Clearing wardrive session ID on disconnect: ${state.wardriveSessionId}`);
+        state.wardriveSessionId = null;
+      }
     }
     
     return data.allowed === true;
@@ -1115,6 +1247,18 @@ async function checkCapacity(reason) {
  */
 async function postToMeshMapperAPI(lat, lon, heardRepeats) {
   try {
+    // Validate session_id exists before posting
+    if (!state.wardriveSessionId) {
+      debugError("Cannot post to MeshMapper API: no session_id available");
+      setDynamicStatus("Error: No session ID for API post", STATUS_COLORS.error);
+      state.disconnectReason = "session_id_error"; // Track disconnect reason
+      // Disconnect after a brief delay to ensure user sees the error message
+      setTimeout(() => {
+        disconnect().catch(err => debugError(`Disconnect after missing session_id failed: ${err.message}`));
+      }, 1500);
+      return; // Exit early
+    }
+    
     const payload = {
       key: MESHMAPPER_API_KEY,
       lat,
@@ -1124,10 +1268,11 @@ async function postToMeshMapperAPI(lat, lon, heardRepeats) {
       heard_repeats: heardRepeats,
       ver: APP_VERSION,
       test: 0,
-      iata: WARDIVE_IATA_CODE
+      iata: WARDIVE_IATA_CODE,
+      session_id: state.wardriveSessionId
     };
 
-    debugLog(`Posting to MeshMapper API: lat=${lat.toFixed(5)}, lon=${lon.toFixed(5)}, who=${payload.who}, power=${payload.power}, heard_repeats=${heardRepeats}, ver=${payload.ver}, iata=${payload.iata}`);
+    debugLog(`Posting to MeshMapper API: lat=${lat.toFixed(5)}, lon=${lon.toFixed(5)}, who=${payload.who}, power=${payload.power}, heard_repeats=${heardRepeats}, ver=${payload.ver}, iata=${payload.iata}, session_id=${payload.session_id}`);
 
     const response = await fetch(MESHMAPPER_API_URL, {
       method: "POST",
@@ -1146,7 +1291,7 @@ async function postToMeshMapperAPI(lat, lon, heardRepeats) {
       // Check if slot has been revoked
       if (data.allowed === false) {
         debugWarn("MeshMapper API returned allowed=false, WarDriving slot has been revoked, disconnecting");
-        setStatus("Error: Posting to API (Revoked)", STATUS_COLORS.error);
+        setDynamicStatus("Error: Posting to API (Revoked)", STATUS_COLORS.error);
         state.disconnectReason = "slot_revoked"; // Track disconnect reason
         // Disconnect after a brief delay to ensure user sees the error message
         setTimeout(() => {
@@ -1185,7 +1330,7 @@ async function postToMeshMapperAPI(lat, lon, heardRepeats) {
 async function postApiAndRefreshMap(lat, lon, accuracy, heardRepeats) {
   debugLog(`postApiAndRefreshMap called with heard_repeats="${heardRepeats}"`);
   
-  setStatus("Posting to API", STATUS_COLORS.info);
+  setDynamicStatus("Posting to API", STATUS_COLORS.info);
   
   // Hidden 3-second delay before API POST (user sees "Posting to API" status during this time)
   await new Promise(resolve => setTimeout(resolve, 3000));
@@ -1223,8 +1368,8 @@ async function postApiAndRefreshMap(lat, lon, accuracy, heardRepeats) {
           debugLog("Resumed auto countdown after manual ping");
         }
       } else {
-        debugLog("Setting status to idle");
-        setStatus("Idle", STATUS_COLORS.idle);
+        debugLog("Setting dynamic status to em dash");
+        setDynamicStatus("Idle");
       }
     }
   }, MAP_REFRESH_DELAY_MS);
@@ -1523,6 +1668,9 @@ async function handleRxLogEvent(data, originalPayload, channelIdx, expectedChann
           snr: data.lastSnr,
           seenCount: existing.seenCount + 1
         });
+        
+        // Trigger incremental UI update since SNR changed
+        updateCurrentLogEntryWithLiveRepeaters();
       } else {
         debugLog(`Deduplication decision: keeping existing SNR for path ${pathHex} (existing ${existing.snr} >= new ${data.lastSnr})`);
         // Still increment seen count
@@ -1535,6 +1683,9 @@ async function handleRxLogEvent(data, originalPayload, channelIdx, expectedChann
         snr: data.lastSnr,
         seenCount: 1
       });
+      
+      // Trigger incremental UI update for the new repeater
+      updateCurrentLogEntryWithLiveRepeaters();
     }
   } catch (error) {
     debugError(`Error processing rx_log entry: ${error.message}`, error);
@@ -1581,6 +1732,7 @@ function stopRepeaterTracking() {
   state.repeaterTracking.sentPayload = null;
   state.repeaterTracking.repeaters.clear();
   state.repeaterTracking.rxLogHandler = null;
+  state.repeaterTracking.currentLogEntry = null;
   
   return repeaters;
 }
@@ -1598,6 +1750,255 @@ function formatRepeaterTelemetry(repeaters) {
   // Format as: path(snr), path(snr), ...
   // Display exact SNR values as received
   return repeaters.map(r => `${r.repeaterId}(${r.snr})`).join(',');
+}
+
+// ---- Mobile Session Log Bottom Sheet ----
+
+/**
+ * Parse log entry string into structured data
+ * @param {string} logLine - Log line in format "timestamp | lat,lon | events"
+ * @returns {Object} Parsed log entry with timestamp, coords, and events
+ */
+function parseLogEntry(logLine) {
+  const parts = logLine.split(' | ');
+  if (parts.length !== 3) {
+    return null;
+  }
+  
+  const [timestamp, coords, eventsStr] = parts;
+  const [lat, lon] = coords.split(',').map(s => s.trim());
+  
+  // Parse events: "4e(12),b7(0)" or "None"
+  const events = [];
+  if (eventsStr && eventsStr !== 'None' && eventsStr !== '...') {
+    const eventTokens = eventsStr.split(',');
+    for (const token of eventTokens) {
+      const match = token.match(/^([a-f0-9]+)\(([^)]+)\)$/i);
+      if (match) {
+        events.push({
+          type: match[1],
+          value: parseFloat(match[2])
+        });
+      }
+    }
+  }
+  
+  return {
+    timestamp,
+    lat,
+    lon,
+    events
+  };
+}
+
+/**
+ * Get SNR severity class based on value
+ * Red: -12 to -1
+ * Orange: 0 to 5
+ * Green: 6 to 13+
+ * @param {number} snr - SNR value
+ * @returns {string} CSS class name
+ */
+function getSnrSeverityClass(snr) {
+  if (snr <= -1) {
+    return 'snr-red';
+  } else if (snr <= 5) {
+    return 'snr-orange';
+  } else {
+    return 'snr-green';
+  }
+}
+
+/**
+ * Create chip element for a heard repeat
+ * @param {string} type - Event type (repeater ID)
+ * @param {number} value - SNR value
+ * @returns {HTMLElement} Chip element
+ */
+function createChipElement(type, value) {
+  const chip = document.createElement('span');
+  chip.className = `chip ${getSnrSeverityClass(value)}`;
+  
+  const idSpan = document.createElement('span');
+  idSpan.className = 'chipId';
+  idSpan.textContent = type;
+  
+  const snrSpan = document.createElement('span');
+  snrSpan.className = 'chipSnr';
+  snrSpan.textContent = `${value.toFixed(2)} dB`;
+  
+  chip.appendChild(idSpan);
+  chip.appendChild(snrSpan);
+  
+  return chip;
+}
+
+/**
+ * Create log entry element for mobile view
+ * @param {Object} entry - Parsed log entry
+ * @returns {HTMLElement} Log entry element
+ */
+function createLogEntryElement(entry) {
+  debugLog(`Creating log entry element for timestamp: ${entry.timestamp}`);
+  const logEntry = document.createElement('div');
+  logEntry.className = 'logEntry';
+  
+  // Top row: time + coords
+  const topRow = document.createElement('div');
+  topRow.className = 'logRowTop';
+  
+  const time = document.createElement('span');
+  time.className = 'logTime';
+  // Format timestamp to show only time (HH:MM:SS)
+  const date = new Date(entry.timestamp);
+  time.textContent = date.toLocaleTimeString();
+  
+  const coords = document.createElement('span');
+  coords.className = 'logCoords';
+  coords.textContent = `${entry.lat},${entry.lon}`;
+  
+  topRow.appendChild(time);
+  topRow.appendChild(coords);
+  
+  // Chips row: heard repeats
+  const chipsRow = document.createElement('div');
+  chipsRow.className = 'heardChips';
+  
+  if (entry.events.length === 0) {
+    const noneSpan = document.createElement('span');
+    noneSpan.className = 'text-xs text-slate-500 italic';
+    noneSpan.textContent = 'No repeats heard';
+    chipsRow.appendChild(noneSpan);
+    debugLog(`Log entry has no events (no repeats heard)`);
+  } else {
+    debugLog(`Log entry has ${entry.events.length} event(s)`);
+    entry.events.forEach(event => {
+      const chip = createChipElement(event.type, event.value);
+      chipsRow.appendChild(chip);
+      debugLog(`Added chip for repeater ${event.type} with SNR ${event.value} dB`);
+    });
+  }
+  
+  logEntry.appendChild(topRow);
+  logEntry.appendChild(chipsRow);
+  
+  debugLog(`Log entry element created successfully with class: ${logEntry.className}`);
+  return logEntry;
+}
+
+/**
+ * Update summary bar with latest log data
+ */
+function updateLogSummary() {
+  if (!logCount || !logLastTime || !logLastSnr) return;
+  
+  const count = sessionLogState.entries.length;
+  logCount.textContent = count === 1 ? '1 ping' : `${count} pings`;
+  
+  if (count === 0) {
+    logLastTime.textContent = 'No data';
+    logLastSnr.textContent = '—';
+    debugLog('Session log summary updated: no entries');
+    return;
+  }
+  
+  const lastEntry = sessionLogState.entries[count - 1];
+  const date = new Date(lastEntry.timestamp);
+  logLastTime.textContent = date.toLocaleTimeString();
+  
+  // Count total heard repeats in the latest ping
+  const heardCount = lastEntry.events.length;
+  debugLog(`Session log summary updated: ${count} total pings, latest ping heard ${heardCount} repeats`);
+  
+  if (heardCount > 0) {
+    logLastSnr.textContent = heardCount === 1 ? '1 Repeat' : `${heardCount} Repeats`;
+    logLastSnr.className = 'text-xs font-mono text-slate-300';
+  } else {
+    logLastSnr.textContent = '0 Repeats';
+    logLastSnr.className = 'text-xs font-mono text-slate-500';
+  }
+}
+
+/**
+ * Render all log entries to the session log
+ */
+function renderLogEntries() {
+  if (!sessionPingsEl) return;
+  
+  debugLog(`Rendering ${sessionLogState.entries.length} log entries`);
+  sessionPingsEl.innerHTML = '';
+  
+  if (sessionLogState.entries.length === 0) {
+    // Show placeholder when no entries
+    const placeholder = document.createElement('div');
+    placeholder.className = 'text-xs text-slate-500 italic text-center py-4';
+    placeholder.textContent = 'No pings logged yet';
+    sessionPingsEl.appendChild(placeholder);
+    debugLog(`Rendered placeholder (no entries)`);
+    return;
+  }
+  
+  // Render newest first
+  const entries = [...sessionLogState.entries].reverse();
+  
+  entries.forEach((entry, index) => {
+    const element = createLogEntryElement(entry);
+    sessionPingsEl.appendChild(element);
+    debugLog(`Appended log entry ${index + 1}/${entries.length} to sessionPingsEl`);
+  });
+  
+  // Auto-scroll to top (newest)
+  if (sessionLogState.autoScroll && logScrollContainer) {
+    logScrollContainer.scrollTop = 0;
+    debugLog(`Auto-scrolled to top of log container`);
+  }
+  
+  debugLog(`Finished rendering all log entries`);
+}
+
+/**
+ * Toggle session log expanded/collapsed
+ */
+function toggleBottomSheet() {
+  sessionLogState.isExpanded = !sessionLogState.isExpanded;
+  
+  if (logBottomSheet) {
+    if (sessionLogState.isExpanded) {
+      logBottomSheet.classList.add('open');
+      logBottomSheet.classList.remove('hidden');
+    } else {
+      logBottomSheet.classList.remove('open');
+      logBottomSheet.classList.add('hidden');
+    }
+  }
+  
+  // Toggle arrow rotation
+  const logExpandArrow = document.getElementById('logExpandArrow');
+  if (logExpandArrow) {
+    if (sessionLogState.isExpanded) {
+      logExpandArrow.classList.add('expanded');
+    } else {
+      logExpandArrow.classList.remove('expanded');
+    }
+  }
+}
+
+/**
+ * Add entry to session log
+ * @param {string} timestamp - ISO timestamp
+ * @param {string} lat - Latitude
+ * @param {string} lon - Longitude
+ * @param {string} eventsStr - Events string (e.g., "4e(12),b7(0)" or "None")
+ */
+function addLogEntry(timestamp, lat, lon, eventsStr) {
+  const logLine = `${timestamp} | ${lat},${lon} | ${eventsStr}`;
+  const entry = parseLogEntry(logLine);
+  
+  if (entry) {
+    sessionLogState.entries.push(entry);
+    renderLogEntries();
+    updateLogSummary();
+  }
 }
 
 // ---- Ping ----
@@ -1636,7 +2037,7 @@ async function getGpsCoordinatesForPing(isAutoMode) {
     // Auto mode: validate GPS freshness before sending
     if (!state.lastFix) {
       debugWarn("Auto ping skipped: no GPS fix available yet");
-      setStatus("Waiting for GPS fix", STATUS_COLORS.warning);
+      setDynamicStatus("Waiting for GPS fix", STATUS_COLORS.warning);
       return null;
     }
     
@@ -1647,7 +2048,7 @@ async function getGpsCoordinatesForPing(isAutoMode) {
     
     if (ageMs >= maxAge) {
       debugLog(`GPS data too old for auto ping (${ageMs}ms), attempting to refresh`);
-      setStatus("GPS data too old, requesting fresh position", STATUS_COLORS.warning);
+      setDynamicStatus("GPS data too old, requesting fresh position", STATUS_COLORS.warning);
       
       try {
         return await acquireFreshGpsPosition();
@@ -1700,7 +2101,7 @@ async function getGpsCoordinatesForPing(isAutoMode) {
     
     // Data exists but is too old
     debugLog(`GPS data too old (${ageMs}ms), requesting fresh position`);
-    setStatus("GPS data too old, requesting fresh position", STATUS_COLORS.warning);
+    setDynamicStatus("GPS data too old, requesting fresh position", STATUS_COLORS.warning);
   }
   
   // Get fresh GPS coordinates for manual ping
@@ -1720,7 +2121,7 @@ async function getGpsCoordinatesForPing(isAutoMode) {
  * @param {string} payload - The ping message
  * @param {number} lat - Latitude
  * @param {number} lon - Longitude
- * @returns {HTMLElement|null} The list item element for later updates, or null
+ * @returns {Object|null} The log entry object for later updates, or null
  */
 function logPingToUI(payload, lat, lon) {
   // Use ISO format for data storage but user-friendly format for display
@@ -1731,41 +2132,75 @@ function logPingToUI(payload, lat, lon) {
     lastPingEl.textContent = `${now.toLocaleString()} — ${payload}`;
   }
 
-  if (sessionPingsEl) {
-    // Create log entry with placeholder for repeater data
-    // Format: timestamp | lat,lon | repeaters (using ISO for consistency with requirements)
-    const line = `${isoStr} | ${lat.toFixed(5)},${lon.toFixed(5)} | ...`;
-    const li = document.createElement('li');
-    li.textContent = line;
-    li.setAttribute('data-timestamp', isoStr);
-    li.setAttribute('data-lat', lat.toFixed(5));
-    li.setAttribute('data-lon', lon.toFixed(5));
-    sessionPingsEl.appendChild(li);
-    // Auto-scroll to bottom
-    sessionPingsEl.scrollTop = sessionPingsEl.scrollHeight;
-    return li;
-  }
+  // Create log entry with placeholder for repeater data
+  const logData = {
+    timestamp: isoStr,
+    lat: lat.toFixed(5),
+    lon: lon.toFixed(5),
+    eventsStr: '...'
+  };
   
-  return null;
+  // Add to session log (this will handle both mobile and desktop)
+  addLogEntry(logData.timestamp, logData.lat, logData.lon, logData.eventsStr);
+  
+  return logData;
 }
 
 /**
  * Update a ping log entry with repeater telemetry
- * @param {HTMLElement|null} logEntry - The log entry element to update
+ * @param {Object|null} logData - The log data object to update
  * @param {Array<{repeaterId: string, snr: number}>} repeaters - Array of repeater telemetry
  */
-function updatePingLogWithRepeaters(logEntry, repeaters) {
-  if (!logEntry) return;
+function updatePingLogWithRepeaters(logData, repeaters) {
+  if (!logData) return;
   
-  const timestamp = logEntry.getAttribute('data-timestamp');
-  const lat = logEntry.getAttribute('data-lat');
-  const lon = logEntry.getAttribute('data-lon');
   const repeaterStr = formatRepeaterTelemetry(repeaters);
   
-  // Update the log entry with final repeater data
-  logEntry.textContent = `${timestamp} | ${lat},${lon} | ${repeaterStr}`;
+  // Find and update the entry in sessionLogState
+  const entryIndex = sessionLogState.entries.findIndex(
+    e => e.timestamp === logData.timestamp && e.lat === logData.lat && e.lon === logData.lon
+  );
+  
+  if (entryIndex !== -1) {
+    // Update the entry
+    const logLine = `${logData.timestamp} | ${logData.lat},${logData.lon} | ${repeaterStr}`;
+    const updatedEntry = parseLogEntry(logLine);
+    
+    if (updatedEntry) {
+      sessionLogState.entries[entryIndex] = updatedEntry;
+      renderLogEntries();
+      updateLogSummary();
+    }
+  }
   
   debugLog(`Updated ping log entry with repeater telemetry: ${repeaterStr}`);
+}
+
+/**
+ * Incrementally update the current ping log entry as repeaters are detected
+ * This provides real-time updates during the RX listening window
+ */
+function updateCurrentLogEntryWithLiveRepeaters() {
+  // Only update if we're actively listening and have a current log entry
+  if (!state.repeaterTracking.isListening || !state.repeaterTracking.currentLogEntry) {
+    return;
+  }
+  
+  const logData = state.repeaterTracking.currentLogEntry;
+  
+  // Convert current repeaters Map to array format
+  const repeaters = Array.from(state.repeaterTracking.repeaters.entries()).map(([id, data]) => ({
+    repeaterId: id,
+    snr: data.snr
+  }));
+  
+  // Sort by repeater ID for deterministic output
+  repeaters.sort((a, b) => a.repeaterId.localeCompare(b.repeaterId));
+  
+  // Reuse the existing updatePingLogWithRepeaters function
+  updatePingLogWithRepeaters(logData, repeaters);
+  
+  debugLog(`Incrementally updated ping log entry: ${repeaters.length} repeater(s) detected so far`);
 }
 
 /**
@@ -1779,7 +2214,7 @@ async function sendPing(manual = false) {
     if (manual && isInCooldown()) {
       const remainingSec = getRemainingCooldownSeconds();
       debugLog(`Manual ping blocked by cooldown (${remainingSec}s remaining)`);
-      setStatus(`Wait ${remainingSec}s before sending another ping`, STATUS_COLORS.warning);
+      setDynamicStatus(`Wait ${remainingSec}s before sending another ping`, STATUS_COLORS.warning);
       return;
     }
 
@@ -1788,14 +2223,14 @@ async function sendPing(manual = false) {
       // Manual ping during auto mode: pause the auto countdown
       debugLog("Manual ping during auto mode - pausing auto countdown");
       pauseAutoCountdown();
-      setStatus("Sending manual ping", STATUS_COLORS.info);
+      setDynamicStatus("Sending manual ping", STATUS_COLORS.info);
     } else if (!manual && state.running) {
       // Auto ping: stop the countdown timer to avoid status conflicts
       stopAutoCountdown();
-      setStatus("Sending auto ping", STATUS_COLORS.info);
+      setDynamicStatus("Sending auto ping", STATUS_COLORS.info);
     } else if (manual) {
       // Manual ping when auto is not running
-      setStatus("Sending manual ping", STATUS_COLORS.info);
+      setDynamicStatus("Sending manual ping", STATUS_COLORS.info);
     }
 
     // Get GPS coordinates
@@ -1805,6 +2240,10 @@ async function sendPing(manual = false) {
       // For auto mode, schedule next attempt
       if (!manual && state.running) {
         scheduleNextAutoPing();
+      }
+      // For manual ping during auto mode, resume the paused countdown
+      if (manual) {
+        handleManualPingBlockedDuringAutoMode();
       }
       return;
     }
@@ -1821,7 +2260,9 @@ async function sendPing(manual = false) {
       
       if (manual) {
         // Manual ping: show skip message that persists
-        setStatus("Ping skipped, outside of geofenced region", STATUS_COLORS.warning);
+        setDynamicStatus("Ping skipped, outside of geofenced region", STATUS_COLORS.warning);
+        // If auto mode is running, resume the paused countdown
+        handleManualPingBlockedDuringAutoMode();
       } else if (state.running) {
         // Auto ping: schedule next ping and show countdown with skip message
         scheduleNextAutoPing();
@@ -1841,7 +2282,9 @@ async function sendPing(manual = false) {
       
       if (manual) {
         // Manual ping: show skip message that persists
-        setStatus("Ping skipped, too close to last ping", STATUS_COLORS.warning);
+        setDynamicStatus("Ping skipped, too close to last ping", STATUS_COLORS.warning);
+        // If auto mode is running, resume the paused countdown
+        handleManualPingBlockedDuringAutoMode();
       } else if (state.running) {
         // Auto ping: schedule next ping and show countdown with skip message
         scheduleNextAutoPing();
@@ -1887,10 +2330,13 @@ async function sendPing(manual = false) {
     startCooldown();
 
     // Update status after ping is sent
-    setStatus("Ping sent", STATUS_COLORS.success);
+    setDynamicStatus("Ping sent", STATUS_COLORS.success);
     
     // Create UI log entry with placeholder for repeater data
     const logEntry = logPingToUI(payload, lat, lon);
+    
+    // Store log entry in repeater tracking state for incremental updates
+    state.repeaterTracking.currentLogEntry = logEntry;
     
     // Start RX listening countdown
     // The minimum 500ms visibility of "Ping sent" is enforced by setStatus()
@@ -1901,6 +2347,8 @@ async function sendPing(manual = false) {
     
     // Schedule the sequence: listen for 7s, THEN finalize repeats and post to API
     // This timeout is stored in meshMapperTimer for cleanup purposes
+    // Capture coordinates locally to prevent race conditions with concurrent pings
+    const capturedCoords = state.capturedPingCoords;
     state.meshMapperTimer = setTimeout(async () => {
       debugLog(`RX listening window completed after ${RX_LOG_LISTEN_WINDOW_MS}ms`);
       
@@ -1919,8 +2367,8 @@ async function sendPing(manual = false) {
       debugLog(`Formatted heard_repeats for API: "${heardRepeatsStr}"`);
       
       // Use captured coordinates for API post (not current GPS position)
-      if (state.capturedPingCoords) {
-        const { lat: apiLat, lon: apiLon, accuracy: apiAccuracy } = state.capturedPingCoords;
+      if (capturedCoords) {
+        const { lat: apiLat, lon: apiLon, accuracy: apiAccuracy } = capturedCoords;
         debugLog(`Using captured ping coordinates for API post: lat=${apiLat.toFixed(5)}, lon=${apiLon.toFixed(5)}, accuracy=${apiAccuracy}m`);
         
         // Post to API with heard repeats data
@@ -1932,11 +2380,13 @@ async function sendPing(manual = false) {
         
         // Unlock ping controls since API post is being skipped
         unlockPingControls("after skipping API post due to missing coordinates");
+        
+        // Fix 2: Schedule next auto ping if in auto mode to prevent getting stuck
+        if (state.running && !state.autoTimerId) {
+          debugLog("Scheduling next auto ping after skipped API post");
+          scheduleNextAutoPing();
+        }
       }
-      
-      // Clear captured coordinates after API post completes (always, regardless of path)
-      state.capturedPingCoords = null;
-      debugLog(`Cleared captured ping coordinates after API post`);
       
       // Clear timer reference
       state.meshMapperTimer = null;
@@ -1946,7 +2396,7 @@ async function sendPing(manual = false) {
     updateDistanceUi();
   } catch (e) {
     debugError(`Ping operation failed: ${e.message}`, e);
-    setStatus(e.message || "Ping failed", STATUS_COLORS.error);
+    setDynamicStatus(e.message || "Ping failed", STATUS_COLORS.error);
     
     // Unlock ping controls on error
     unlockPingControls("after error");
@@ -1960,7 +2410,7 @@ function stopAutoPing(stopGps = false) {
   if (!stopGps && isInCooldown()) {
     const remainingSec = getRemainingCooldownSeconds();
     debugLog(`Auto ping stop blocked by cooldown (${remainingSec}s remaining)`);
-    setStatus(`Wait ${remainingSec}s before toggling auto mode`, STATUS_COLORS.warning);
+    setDynamicStatus(`Wait ${remainingSec}s before toggling auto mode`, STATUS_COLORS.warning);
     return;
   }
   
@@ -2020,7 +2470,7 @@ function startAutoPing() {
   if (isInCooldown()) {
     const remainingSec = getRemainingCooldownSeconds();
     debugLog(`Auto ping start blocked by cooldown (${remainingSec}s remaining)`);
-    setStatus(`Wait ${remainingSec}s before toggling auto mode`, STATUS_COLORS.warning);
+    setDynamicStatus(`Wait ${remainingSec}s before toggling auto mode`, STATUS_COLORS.warning);
     return;
   }
   
@@ -2060,10 +2510,14 @@ async function connect() {
     return;
   }
   connectBtn.disabled = true;
-  setStatus("Connecting", STATUS_COLORS.info);
+  
+  // Set connection bar to "Connecting" - will remain until GPS init completes
+  setConnStatus("Connecting", STATUS_COLORS.info);
+  setDynamicStatus("Idle"); // Clear dynamic status
 
   try {
     debugLog("Opening BLE connection...");
+    setDynamicStatus("BLE Connection Started", STATUS_COLORS.info); // Show BLE connection start
     const conn = await WebBleConnection.open();
     state.connection = conn;
     debugLog("BLE connection object created");
@@ -2116,19 +2570,20 @@ async function connect() {
         }
         
         // Capacity check passed
-        setStatus("Acquired wardriving slot", STATUS_COLORS.success);
+        setDynamicStatus("Acquired wardriving slot", STATUS_COLORS.success);
         debugLog("Wardriving slot acquired successfully");
         
         // Proceed with channel setup and GPS initialization
         await ensureChannel();
         
         // GPS initialization
-        setStatus("Priming GPS", STATUS_COLORS.info);
+        setDynamicStatus("Priming GPS", STATUS_COLORS.info);
         debugLog("Starting GPS initialization");
         await primeGpsOnce();
         
-        // Connection complete, show Connected status
-        setStatus("Connected", STATUS_COLORS.success);
+        // Connection complete, show Connected status in connection bar
+        setConnStatus("Connected", STATUS_COLORS.success);
+        setDynamicStatus("Idle"); // Clear dynamic status to em dash
         debugLog("Full connection process completed successfully");
       } catch (e) {
         debugError(`Channel setup failed: ${e.message}`, e);
@@ -2141,43 +2596,50 @@ async function connect() {
       debugLog("BLE disconnected event fired");
       debugLog(`Disconnect reason: ${state.disconnectReason}`);
       
-      // Set appropriate status message based on disconnect reason
+      // Always set connection bar to "Disconnected"
+      setConnStatus("Disconnected", STATUS_COLORS.error);
+      
+      // Set dynamic status based on disconnect reason (WITHOUT "Disconnected:" prefix)
       if (state.disconnectReason === "capacity_full") {
         debugLog("Branch: capacity_full");
-        setStatus("Disconnected: WarDriving app has reached capacity", STATUS_COLORS.error, true);
+        setDynamicStatus("WarDriving app has reached capacity", STATUS_COLORS.error, true);
         debugLog("Setting terminal status for capacity full");
       } else if (state.disconnectReason === "app_down") {
         debugLog("Branch: app_down");
-        setStatus("Disconnected: WarDriving app is down", STATUS_COLORS.error, true);
+        setDynamicStatus("WarDriving app is down", STATUS_COLORS.error, true);
         debugLog("Setting terminal status for app down");
       } else if (state.disconnectReason === "slot_revoked") {
         debugLog("Branch: slot_revoked");
-        setStatus("Disconnected: WarDriving slot has been revoked", STATUS_COLORS.error, true);
+        setDynamicStatus("WarDriving slot has been revoked", STATUS_COLORS.error, true);
         debugLog("Setting terminal status for slot revocation");
+      } else if (state.disconnectReason === "session_id_error") {
+        debugLog("Branch: session_id_error");
+        setDynamicStatus("Session ID error; try reconnecting", STATUS_COLORS.error, true);
+        debugLog("Setting terminal status for session_id error");
       } else if (state.disconnectReason === "public_key_error") {
         debugLog("Branch: public_key_error");
-        setStatus("Disconnected: Unable to read device public key", STATUS_COLORS.error, true);
+        setDynamicStatus("Unable to read device public key; try again", STATUS_COLORS.error, true);
         debugLog("Setting terminal status for public key error");
       } else if (state.disconnectReason === "channel_setup_error") {
         debugLog("Branch: channel_setup_error");
         const errorMsg = state.channelSetupErrorMessage || "Channel setup failed";
-        setStatus(`Disconnected: ${errorMsg}`, STATUS_COLORS.error, true);
+        setDynamicStatus(errorMsg, STATUS_COLORS.error, true);
         debugLog("Setting terminal status for channel setup error");
         state.channelSetupErrorMessage = null; // Clear after use (also cleared in cleanup as safety net)
       } else if (state.disconnectReason === "ble_disconnect_error") {
         debugLog("Branch: ble_disconnect_error");
         const errorMsg = state.bleDisconnectErrorMessage || "BLE disconnect failed";
-        setStatus(`Disconnected: ${errorMsg}`, STATUS_COLORS.error, true);
+        setDynamicStatus(errorMsg, STATUS_COLORS.error, true);
         debugLog("Setting terminal status for BLE disconnect error");
         state.bleDisconnectErrorMessage = null; // Clear after use (also cleared in cleanup as safety net)
       } else if (state.disconnectReason === "normal" || state.disconnectReason === null || state.disconnectReason === undefined) {
         debugLog("Branch: normal/null/undefined");
-        setStatus("Disconnected", STATUS_COLORS.error, true);
+        setDynamicStatus("Idle"); // Show em dash for normal disconnect
       } else {
         debugLog(`Branch: else (unknown reason: ${state.disconnectReason})`);
-        // For unknown disconnect reasons, show generic disconnected message
-        debugLog(`Showing generic disconnected message for unknown reason: ${state.disconnectReason}`);
-        setStatus("Disconnected", STATUS_COLORS.error, true);
+        // For unknown disconnect reasons, show em dash
+        debugLog(`Showing em dash for unknown reason: ${state.disconnectReason}`);
+        setDynamicStatus("Idle");
       }
       
       setConnectButton(false);
@@ -2185,6 +2647,7 @@ async function connect() {
       state.connection = null;
       state.channel = null;
       state.devicePublicKey = null; // Clear public key
+      state.wardriveSessionId = null; // Clear wardrive session ID
       state.disconnectReason = null; // Reset disconnect reason
       state.channelSetupErrorMessage = null; // Clear error message
       state.bleDisconnectErrorMessage = null; // Clear error message
@@ -2209,7 +2672,8 @@ async function connect() {
 
   } catch (e) {
     debugError(`BLE connection failed: ${e.message}`, e);
-    setStatus("Connection failed", STATUS_COLORS.error);
+    setConnStatus("Disconnected", STATUS_COLORS.error);
+    setDynamicStatus("Connection failed", STATUS_COLORS.error);
     connectBtn.disabled = false;
   }
 }
@@ -2227,7 +2691,9 @@ async function disconnect() {
     state.disconnectReason = "normal";
   }
   
-  setStatus("Disconnecting", STATUS_COLORS.info);
+  // Set connection bar to "Disconnecting" - will remain until cleanup completes
+  setConnStatus("Disconnecting", STATUS_COLORS.info);
+  setDynamicStatus("Idle"); // Clear dynamic status
 
   // Release capacity slot if we have a public key
   if (state.devicePublicKey) {
@@ -2283,7 +2749,7 @@ document.addEventListener("visibilitychange", async () => {
     if (state.running) {
       debugLog("Stopping auto ping due to page hidden");
       stopAutoPing(true); // Ignore cooldown check when page is hidden
-      setStatus("Lost focus, auto mode stopped", STATUS_COLORS.warning);
+      setDynamicStatus("Lost focus, auto mode stopped", STATUS_COLORS.warning);
     } else {
       debugLog("Releasing wake lock due to page hidden");
       releaseWakeLock();
@@ -2294,12 +2760,37 @@ document.addEventListener("visibilitychange", async () => {
   }
 });
 
+/**
+ * Update Connect button state based on radio power selection
+ */
+function updateConnectButtonState() {
+  const radioPowerSelected = getCurrentPowerSetting() !== "";
+  const isConnected = !!state.connection;
+  
+  if (!isConnected) {
+    // Only enable Connect if radio power is selected
+    connectBtn.disabled = !radioPowerSelected;
+    
+    // Update dynamic status based on power selection
+    if (!radioPowerSelected) {
+      debugLog("Radio power not selected - showing message in status bar");
+      setDynamicStatus("Select radio power to connect", STATUS_COLORS.warning);
+    } else {
+      debugLog("Radio power selected - clearing message from status bar");
+      setDynamicStatus("Idle");
+    }
+  }
+}
+
 // ---- Bind UI & init ----
 export async function onLoad() {
   debugLog("wardrive.js onLoad() called - initializing");
-  setStatus("Disconnected", STATUS_COLORS.error);
+  setConnStatus("Disconnected", STATUS_COLORS.error);
   enableControls(false);
   updateAutoButton();
+  
+  // Initialize Connect button state based on radio power
+  updateConnectButtonState();
 
   connectBtn.addEventListener("click", async () => {
     try {
@@ -2310,7 +2801,7 @@ export async function onLoad() {
       }
     } catch (e) {
       debugError(`Connection button error: ${e.message}`, e);
-      setStatus(e.message || "Connection failed", STATUS_COLORS.error);
+      setDynamicStatus(e.message || "Connection failed", STATUS_COLORS.error);
     }
   });
   sendPingBtn.addEventListener("click", () => {
@@ -2321,11 +2812,63 @@ export async function onLoad() {
     debugLog("Auto toggle button clicked");
     if (state.running) {
       stopAutoPing();
-      setStatus("Auto mode stopped", STATUS_COLORS.idle);
+      setDynamicStatus("Auto mode stopped", STATUS_COLORS.idle);
     } else {
       startAutoPing();
     }
   });
+
+  // Settings panel toggle (for modernized UI)
+  const settingsGearBtn = document.getElementById("settingsGearBtn");
+  const settingsPanel = document.getElementById("settingsPanel");
+  const settingsCloseBtn = document.getElementById("settingsCloseBtn");
+  const connectionBar = document.getElementById("connectionBar");
+  
+  if (settingsGearBtn && settingsPanel && connectionBar) {
+    settingsGearBtn.addEventListener("click", () => {
+      debugLog("Settings gear button clicked");
+      const isHidden = settingsPanel.classList.contains("hidden");
+      settingsPanel.classList.toggle("hidden");
+      
+      // Update connection bar border radius based on settings panel state
+      if (isHidden) {
+        // Settings panel is opening - remove bottom rounded corners from connection bar
+        connectionBar.classList.remove("rounded-xl", "rounded-b-xl");
+        connectionBar.classList. add("rounded-t-xl", "rounded-b-none");
+      } else {
+        // Settings panel is closing - restore full rounded corners to connection bar
+        connectionBar. classList.remove("rounded-t-xl", "rounded-b-none");
+        connectionBar.classList. add("rounded-xl");
+      }
+    });
+  }
+
+  if (settingsCloseBtn && settingsPanel && connectionBar) {
+    settingsCloseBtn.addEventListener("click", () => {
+      debugLog("Settings close button clicked");
+      settingsPanel.classList. add("hidden");
+      // Restore full rounded corners to connection bar
+      connectionBar.classList.remove("rounded-t-xl", "rounded-b-none");
+      connectionBar.classList.add("rounded-xl");
+    });
+  }
+
+  // Add event listeners to radio power options to update Connect button state
+  const powerRadios = document.querySelectorAll('input[name="power"]');
+  powerRadios.forEach(radio => {
+    radio.addEventListener("change", () => {
+      debugLog(`Radio power changed to: ${getCurrentPowerSetting()}`);
+      updateConnectButtonState();
+    });
+  });
+
+  // Session Log event listener
+  if (logSummaryBar) {
+    logSummaryBar.addEventListener("click", () => {
+      debugLog("Log summary bar clicked - toggling session log");
+      toggleBottomSheet();
+    });
+  }
 
   // Prompt location permission early (optional)
   debugLog("Requesting initial location permission");
