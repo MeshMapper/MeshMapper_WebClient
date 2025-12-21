@@ -2380,10 +2380,10 @@ function updateConnectButtonState() {
     
     // Update dynamic status based on power selection
     if (!radioPowerSelected) {
-      debugLog("Radio power not selected - showing warning in status bar");
-      setDynamicStatus("Select radio power to connect", STATUS_COLORS.error);
+      debugLog("Radio power not selected - showing message in status bar");
+      setDynamicStatus("Select radio power to connect", STATUS_COLORS.idle);
     } else {
-      debugLog("Radio power selected - clearing warning from status bar");
+      debugLog("Radio power selected - clearing message from status bar");
       setDynamicStatus("Idle");
     }
   }
