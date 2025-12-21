@@ -488,6 +488,19 @@ function enableControls(connected) {
   connectBtn.disabled     = false;
   channelInfoEl.textContent = CHANNEL_NAME;
   updateControlsForCooldown();
+  
+  // Show/hide ping controls based on connection state
+  const pingControls = document.getElementById("pingControls");
+  const connectHelperText = document.getElementById("connectHelperText");
+  if (pingControls && connectHelperText) {
+    if (connected) {
+      pingControls.classList.remove("hidden");
+      connectHelperText.classList.add("hidden");
+    } else {
+      pingControls.classList.add("hidden");
+      connectHelperText.classList.remove("hidden");
+    }
+  }
 }
 function updateAutoButton() {
   if (state.running) {
@@ -2326,6 +2339,25 @@ export async function onLoad() {
       startAutoPing();
     }
   });
+
+  // Settings panel toggle (for modernized UI)
+  const settingsGearBtn = document.getElementById("settingsGearBtn");
+  const settingsPanel = document.getElementById("settingsPanel");
+  const settingsCloseBtn = document.getElementById("settingsCloseBtn");
+  
+  if (settingsGearBtn && settingsPanel) {
+    settingsGearBtn.addEventListener("click", () => {
+      debugLog("Settings gear button clicked");
+      settingsPanel.classList.toggle("hidden");
+    });
+  }
+  
+  if (settingsCloseBtn && settingsPanel) {
+    settingsCloseBtn.addEventListener("click", () => {
+      debugLog("Settings close button clicked");
+      settingsPanel.classList.add("hidden");
+    });
+  }
 
   // Prompt location permission early (optional)
   debugLog("Requesting initial location permission");
