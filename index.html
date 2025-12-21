@@ -44,18 +44,19 @@
 
       <!-- Status Bar -->
       <div class="bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-2 flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <span id="statusIndicator" class="text-xl">●</span>
-          <span id="status" class="text-sm font-medium text-red-300">Disconnected</span>
+        <div class="flex flex-col gap-1">
+          <div class="flex items-center gap-2">
+            <span id="statusIndicator" class="text-xl">●</span>
+            <span id="status" class="text-sm font-medium text-red-300">Disconnected</span>
+          </div>
+          <div class="flex items-center gap-2 text-xs text-slate-400">
+            <span>Device:</span>
+            <span id="deviceInfo" class="text-slate-300">-</span>
+          </div>
         </div>
         <button id="settingsGearBtn" class="text-2xl text-slate-400 hover:text-slate-200 p-1" aria-label="Toggle settings">
           ⚙️
         </button>
-      </div>
-
-      <!-- Hidden Device Info (preserved for JS compatibility) -->
-      <div style="display: none;">
-        <span id="deviceInfo">-</span>
       </div>
 
       <!-- Status Messages Box -->
