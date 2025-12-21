@@ -103,6 +103,7 @@ const distanceInfoEl = document.getElementById("distanceInfo"); // Distance from
 const sessionPingsEl = document.getElementById("sessionPings"); // optional
 const coverageFrameEl = document.getElementById("coverageFrame");
 setConnectButton(false);
+setConnectionStatus(false);
 
 // NEW: selectors
 const intervalSelect = $("intervalSelect"); // 15 / 30 / 60 seconds
@@ -552,6 +553,22 @@ function setConnectButton(connected) {
       "bg-emerald-600",
       "hover:bg-emerald-500"
     );
+  }
+}
+
+// Update connection status bar (separate from dynamic app status)
+function setConnectionStatus(connected) {
+  const connectionStatusEl = document.getElementById("connectionStatus");
+  const statusIndicatorEl = document.getElementById("statusIndicator");
+  
+  if (!connectionStatusEl || !statusIndicatorEl) return;
+  
+  if (connected) {
+    connectionStatusEl.textContent = "Connected";
+    connectionStatusEl.className = "font-medium text-emerald-300";
+  } else {
+    connectionStatusEl.textContent = "Disconnected";
+    connectionStatusEl.className = "font-medium text-red-300";
   }
 }
 
@@ -2086,6 +2103,7 @@ async function connect() {
       // Keep "Connecting" status visible during the full connection process
       // Don't show "Connected" until everything is complete
       setConnectButton(true);
+      setConnectionStatus(true);
       connectBtn.disabled = false;
       const selfInfo = await conn.getSelfInfo();
       debugLog(`Device info: ${selfInfo?.name || "[No device]"}`);
@@ -2194,6 +2212,7 @@ async function connect() {
       }
       
       setConnectButton(false);
+      setConnectionStatus(false);
       deviceInfoEl.textContent = "—";
       state.connection = null;
       state.channel = null;

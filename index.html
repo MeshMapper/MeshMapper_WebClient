@@ -42,15 +42,12 @@
         <span id="appVersion" class="text-xs text-slate-400">v1.0</span>
       </header>
 
-      <!-- Status Bar -->
+      <!-- Connection Status Bar -->
       <div class="bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-2 flex items-center justify-between">
-        <div class="flex flex-col gap-1">
-          <div class="flex items-center gap-2 text-xs text-slate-400">
-            <span>Status:</span>
-            <div class="flex items-center gap-2">
-              <span id="statusIndicator" class="text-lg">●</span>
-              <span id="status" class="text-sm font-medium text-red-300">Disconnected</span>
-            </div>
+        <div class="flex items-center gap-4 text-sm">
+          <div class="flex items-center gap-2">
+            <span id="statusIndicator" class="text-lg">●</span>
+            <span id="connectionStatus" class="font-medium text-red-300">Disconnected</span>
           </div>
           <div class="flex items-center gap-2 text-xs text-slate-400">
             <span>Device:</span>
@@ -62,11 +59,11 @@
         </button>
       </div>
 
-      <!-- Status Messages Box -->
-      <section id="statusMessageBox" class="hidden bg-slate-800/80 border border-slate-700 rounded-xl p-3">
-        <div class="text-xs text-slate-400">
-          <span class="font-medium text-slate-300">Status:</span>
-          <span id="statusMessage" class="ml-2"><!-- Status messages will appear here --></span>
+      <!-- Status Message Box (Dynamic App Status) -->
+      <section class="bg-slate-800/80 border border-slate-700 rounded-xl px-4 py-2">
+        <div class="flex items-center gap-2 text-sm">
+          <span class="text-slate-400">Status:</span>
+          <span id="status" class="font-medium text-slate-300">Idle</span>
         </div>
       </section>
 
