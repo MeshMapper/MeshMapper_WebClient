@@ -393,17 +393,17 @@ function resumeAutoCountdown() {
 }
 
 /**
- * Handle manual ping failure during auto mode by resuming the paused countdown
+ * Handle manual ping blocked during auto mode by resuming the paused countdown
  * This ensures the UI returns to showing the auto countdown instead of staying stuck on the skip message
  * 
- * When a manual ping is blocked during auto mode, this function:
+ * When a manual ping is blocked during auto mode (GPS unavailable, outside geofence, or too close), this function:
  * 1. Attempts to resume the paused auto countdown timer with remaining time
  * 2. If no paused countdown exists, schedules a new auto ping
  * 3. Does nothing if auto mode is not running
  * 
  * @returns {void}
  */
-function handleManualPingFailureDuringAutoMode() {
+function handleManualPingBlockedDuringAutoMode() {
   if (state.running) {
     debugLog("Manual ping blocked during auto mode - resuming auto countdown");
     const resumed = resumeAutoCountdown();
@@ -1898,7 +1898,7 @@ async function sendPing(manual = false) {
       }
       // For manual ping during auto mode, resume the paused countdown
       if (manual) {
-        handleManualPingFailureDuringAutoMode();
+        handleManualPingBlockedDuringAutoMode();
       }
       return;
     }
@@ -1917,7 +1917,7 @@ async function sendPing(manual = false) {
         // Manual ping: show skip message that persists
         setDynamicStatus("Ping skipped, outside of geofenced region", STATUS_COLORS.warning);
         // If auto mode is running, resume the paused countdown
-        handleManualPingFailureDuringAutoMode();
+        handleManualPingBlockedDuringAutoMode();
       } else if (state.running) {
         // Auto ping: schedule next ping and show countdown with skip message
         scheduleNextAutoPing();
@@ -1939,7 +1939,7 @@ async function sendPing(manual = false) {
         // Manual ping: show skip message that persists
         setDynamicStatus("Ping skipped, too close to last ping", STATUS_COLORS.warning);
         // If auto mode is running, resume the paused countdown
-        handleManualPingFailureDuringAutoMode();
+        handleManualPingBlockedDuringAutoMode();
       } else if (state.running) {
         // Auto ping: schedule next ping and show countdown with skip message
         scheduleNextAutoPing();
