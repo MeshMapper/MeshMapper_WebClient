@@ -2446,22 +2446,22 @@ export async function onLoad() {
       // Update connection bar border radius based on settings panel state
       if (isHidden) {
         // Settings panel is opening - remove bottom rounded corners from connection bar
-        connectionBar.classList.remove("rounded-xl");
-        connectionBar.classList.add("rounded-t-xl");
+        connectionBar.classList.remove("rounded-xl", "rounded-b-xl");
+        connectionBar.classList. add("rounded-t-xl", "rounded-b-none");
       } else {
         // Settings panel is closing - restore full rounded corners to connection bar
-        connectionBar.classList.remove("rounded-t-xl");
-        connectionBar.classList.add("rounded-xl");
+        connectionBar. classList.remove("rounded-t-xl", "rounded-b-none");
+        connectionBar.classList. add("rounded-xl");
       }
     });
   }
-  
+
   if (settingsCloseBtn && settingsPanel && connectionBar) {
     settingsCloseBtn.addEventListener("click", () => {
       debugLog("Settings close button clicked");
-      settingsPanel.classList.add("hidden");
+      settingsPanel.classList. add("hidden");
       // Restore full rounded corners to connection bar
-      connectionBar.classList.remove("rounded-t-xl");
+      connectionBar.classList.remove("rounded-t-xl", "rounded-b-none");
       connectionBar.classList.add("rounded-xl");
     });
   }
