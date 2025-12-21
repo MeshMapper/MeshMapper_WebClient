@@ -395,6 +395,13 @@ function resumeAutoCountdown() {
 /**
  * Handle manual ping failure during auto mode by resuming the paused countdown
  * This ensures the UI returns to showing the auto countdown instead of staying stuck on the skip message
+ * 
+ * When a manual ping is blocked during auto mode, this function:
+ * 1. Attempts to resume the paused auto countdown timer with remaining time
+ * 2. If no paused countdown exists, schedules a new auto ping
+ * 3. Does nothing if auto mode is not running
+ * 
+ * @returns {void}
  */
 function handleManualPingFailureDuringAutoMode() {
   if (state.running) {
