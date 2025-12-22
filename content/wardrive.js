@@ -1800,7 +1800,7 @@ async function handlePassiveRxLogEvent(data) {
     
     debugLog(`[PASSIVE RX] Header validation passed: 0x${packet.header.toString(16).padStart(2, '0')}`);
     
-    // VALIDATION STEP 2: Verify this message is for our wardriving channel
+    // VALIDATION STEP 2: Check payload length
     if (packet.payload.length < 3) {
       debugLog(`[PASSIVE RX] Ignoring: payload too short`);
       return;
