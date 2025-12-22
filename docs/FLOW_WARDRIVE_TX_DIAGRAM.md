@@ -1,3 +1,6 @@
+# TX Wardrive Flow
+
+```mermaid
 flowchart TD
     subgraph TRIGGER["🎯 TRIGGER"]
         A[/"User Clicks 'Send Ping'<br/>OR Auto Timer Fires"/]
@@ -62,3 +65,4 @@ flowchart TD
     style RX_WINDOW fill:#fce4ec
     style FINALIZE fill:#e0f2f1
     style NEXT fill:#f5f5f5
+```

@@ -1,3 +1,6 @@
+# RX Wardrive Flow
+
+```mermaid
 flowchart TD
     subgraph INIT["🔌 ON CONNECT"]
         A[BLE Connection Established] --> B[Start Unified RX Listening<br/>Register LogRxData handler]
@@ -128,3 +131,4 @@ flowchart TD
     style FLUSH_PROCESS fill:#e8eaf6
     style LOOP fill:#eceff1
     style CLEANUP fill:#ffebee
+```
