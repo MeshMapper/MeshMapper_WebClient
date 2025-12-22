@@ -1267,7 +1267,7 @@ async function postToMeshMapperAPI(lat, lon, heardRepeats) {
       lat,
       lon,
       who: getDeviceIdentifier(),
-      power: getCurrentPowerSetting() || "N/A",
+      power: getCurrentPowerSetting(),
       heard_repeats: heardRepeats,
       ver: APP_VERSION,
       test: 0,
