@@ -45,7 +45,7 @@ const MAP_REFRESH_DELAY_MS = 1000;             // Delay after API post to ensure
 const MIN_PAUSE_THRESHOLD_MS = 1000;           // Minimum timer value (1 second) to pause
 const MAX_REASONABLE_TIMER_MS = 5 * 60 * 1000; // Maximum reasonable timer value (5 minutes) to handle clock skew
 const RX_LOG_LISTEN_WINDOW_MS = 6000;         // Listen window for repeater echoes (6 seconds)
-const CHANNEL_GROUP_TEXT_HEADER = 0x15;       // Header byte for channel GroupText packets - used exclusively for Session Log echo detection
+const CHANNEL_GROUP_TEXT_HEADER = 0x15;       // Header byte for Meshtastic GroupText packets (0x15) - used exclusively for Session Log echo detection
 
 // Pre-computed channel hash and key for the wardriving channel
 // These will be computed once at startup and used for message correlation and decryption
@@ -1807,7 +1807,7 @@ async function handleUnifiedRxLogEvent(data) {
     debugLog(`[UNIFIED RX] Packet header: 0x${packet.header.toString(16).padStart(2, '0')}`);
     
     // DELEGATION: If Session Log is actively tracking, delegate to it first
-    // Session Log requires header validation (CHANNEL_GROUP_TEXT_HEADER = 0x15 for GroupText packets) and will handle validation internally
+    // Session Log requires header validation (CHANNEL_GROUP_TEXT_HEADER) and will handle validation internally
     if (state.repeaterTracking.isListening) {
       debugLog(`[UNIFIED RX] Session Log is tracking - delegating to Session Log handler`);
       const wasTracked = await handleSessionLogTracking(packet, data);
