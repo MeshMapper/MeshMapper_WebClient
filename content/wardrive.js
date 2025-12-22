@@ -1614,7 +1614,16 @@ async function handleSessionLogTracking(packet, data) {
   try {
     debugLog(`[SESSION LOG] Processing rx_log entry: SNR=${data.lastSnr}, RSSI=${data.lastRssi}`);
     
-    // VALIDATION STEP 1: Payload type already validated by unified handler
+    // VALIDATION STEP 1: Header validation for Session Log (echo detection)
+    // Expected header for channel GroupText packets: 0x15
+    const EXPECTED_HEADER = 0x15;
+    if (packet.header !== EXPECTED_HEADER) {
+      debugLog(`[SESSION LOG] Ignoring: header validation failed (header=0x${packet.header.toString(16).padStart(2, '0')})`);
+      return false;
+    }
+    
+    debugLog(`[SESSION LOG] Header validation passed: 0x${packet.header.toString(16).padStart(2, '0')}`);
+    
     // VALIDATION STEP 2: Validate this message is for our channel by comparing channel hash
     // Channel message payload structure: [1 byte channel_hash][2 bytes MAC][encrypted message]
     if (packet.payload.length < 3) {
@@ -1794,23 +1803,11 @@ async function handleUnifiedRxLogEvent(data) {
     // Parse the packet from raw data (once for both handlers)
     const packet = Packet.fromBytes(data.raw);
     
-    // VALIDATION STEP 1: Header validation
-    // Expected header for channel GroupText packets: 0x15
-    const EXPECTED_HEADER = 0x15;
-    if (packet.header !== EXPECTED_HEADER) {
-      debugLog(`[UNIFIED RX] Ignoring: header validation failed (header=0x${packet.header.toString(16).padStart(2, '0')})`);
-      return;
-    }
-    
-    debugLog(`[UNIFIED RX] Header validation passed: 0x${packet.header.toString(16).padStart(2, '0')}`);
-    
-    // VALIDATION STEP 2: Check payload length
-    if (packet.payload.length < 3) {
-      debugLog(`[UNIFIED RX] Ignoring: payload too short`);
-      return;
-    }
+    // Log header for debugging (informational only for passive RX)
+    debugLog(`[UNIFIED RX] Packet header: 0x${packet.header.toString(16).padStart(2, '0')}`);
     
     // DELEGATION: If Session Log is actively tracking, delegate to it first
+    // Session Log requires header validation (0x15) and will handle validation internally
     if (state.repeaterTracking.isListening) {
       debugLog(`[UNIFIED RX] Session Log is tracking - delegating to Session Log handler`);
       const wasTracked = await handleSessionLogTracking(packet, data);
@@ -1824,6 +1821,7 @@ async function handleUnifiedRxLogEvent(data) {
     }
     
     // DELEGATION: Handle passive RX logging for all other cases
+    // Passive RX accepts any packet regardless of header type
     await handlePassiveRxLogging(packet, data);
     
   } catch (error) {
@@ -1841,18 +1839,8 @@ async function handlePassiveRxLogging(packet, data) {
   try {
     debugLog(`[PASSIVE RX] Processing packet for passive logging`);
     
-    // Check if this packet is on the wardriving channel (informational only)
-    const packetChannelHash = packet.payload[0];
-    const isWardrivingChannel = WARDRIVING_CHANNEL_HASH !== null && packetChannelHash === WARDRIVING_CHANNEL_HASH;
-    
-    if (isWardrivingChannel) {
-      debugLog(`[PASSIVE RX] Packet is on wardriving channel (hash=0x${packetChannelHash.toString(16).padStart(2, '0')})`);
-      debugLog(`[PASSIVE RX] Not an echo - message is from another user or source`);
-    } else {
-      debugLog(`[PASSIVE RX] Packet is on a different channel or channel hash unavailable - logging it`);
-    }
-    
     // VALIDATION: Check path length (need at least one hop)
+    // Packets with no path are direct transmissions and not useful for RX coverage mapping
     if (packet.path.length === 0) {
       debugLog(`[PASSIVE RX] Ignoring: no path (direct transmission, not via repeater)`);
       return;
