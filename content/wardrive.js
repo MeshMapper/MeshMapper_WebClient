@@ -174,7 +174,6 @@ const state = {
   skipReason: null, // Reason for skipping a ping - internal value only (e.g., "gps too old")
   pausedAutoTimerRemainingMs: null, // Remaining time when auto ping timer was paused by manual ping
   lastSuccessfulPingLocation: null, // { lat, lon } of the last successful ping (Mesh + API)
-  distanceUpdateTimer: null, // Timer for updating distance display
   capturedPingCoords: null, // { lat, lon, accuracy } captured at ping time, used for API post after 7s delay
   devicePublicKey: null, // Hex string of device's public key (used for capacity check)
   wardriveSessionId: null, // Session ID from capacity check API (used for all MeshMapper API posts)
@@ -823,25 +822,7 @@ function updateDistanceUi() {
   }
 }
 
-/**
- * Start continuous distance display updates
- */
-function startDistanceUpdater() {
-  if (state.distanceUpdateTimer) return;
-  state.distanceUpdateTimer = setInterval(() => {
-    updateDistanceUi();
-  }, 3000); // Update every 3 seconds as fallback (main updates happen on GPS position changes)
-}
 
-/**
- * Stop distance display updates
- */
-function stopDistanceUpdater() {
-  if (state.distanceUpdateTimer) {
-    clearInterval(state.distanceUpdateTimer);
-    state.distanceUpdateTimer = null;
-  }
-}
 
 // ---- Geolocation ----
 async function getCurrentPosition() {
@@ -917,7 +898,6 @@ function startGeoWatch() {
   state.gpsState = "acquiring";
   updateGpsUi();
   startGpsAgeUpdater(); // Start the age counter
-  startDistanceUpdater(); // Start the distance updater
 
   state.geoWatchId = navigator.geolocation.watchPosition(
     (pos) => {
@@ -956,7 +936,6 @@ function stopGeoWatch() {
   navigator.geolocation.clearWatch(state.geoWatchId);
   state.geoWatchId = null;
   stopGpsAgeUpdater(); // Stop the age counter
-  stopDistanceUpdater(); // Stop the distance updater
 }
 async function primeGpsOnce() {
   debugLog("Priming GPS with initial position request");
@@ -2992,7 +2971,6 @@ async function connect() {
       updateAutoButton();
       stopGeoWatch();
       stopGpsAgeUpdater(); // Ensure age updater stops
-      stopDistanceUpdater(); // Ensure distance updater stops
       stopRepeaterTracking(); // Stop repeater echo tracking
       stopPassiveRxListening(); // Stop passive RX listening
       
