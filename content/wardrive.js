@@ -1808,6 +1808,13 @@ async function handlePassiveRxLogEvent(data) {
     }
     
     // VALIDATION STEP 3: Echo filtering for wardriving channel
+    // OPTIMIZATION: Skip processing if Session Log handler is actively tracking
+    // This avoids double-decryption during the 7-second echo window
+    if (state.repeaterTracking.isListening) {
+      debugLog(`[PASSIVE RX] ⊘ SKIP: Session Log is actively tracking echoes (7-second window) - avoiding double processing`);
+      return;
+    }
+    
     // Check if this packet is on the wardriving channel
     const packetChannelHash = packet.payload[0];
     const isWardrivingChannel = WARDRIVING_CHANNEL_HASH !== null && packetChannelHash === WARDRIVING_CHANNEL_HASH;
@@ -1815,35 +1822,10 @@ async function handlePassiveRxLogEvent(data) {
     if (isWardrivingChannel) {
       debugLog(`[PASSIVE RX] Packet is on wardriving channel (hash=0x${packetChannelHash.toString(16).padStart(2, '0')})`);
       
-      // Check if we have a recently-sent payload to compare against
-      if (state.repeaterTracking.sentPayload && WARDRIVING_CHANNEL_KEY) {
-        debugLog(`[PASSIVE RX] Checking if this is an echo of our own ping...`);
-        
-        // Decrypt the message to compare with our sent payload
-        const decryptedMessage = await decryptGroupTextPayload(packet.payload, WARDRIVING_CHANNEL_KEY);
-        
-        if (decryptedMessage !== null) {
-          debugLog(`[PASSIVE RX] Decrypted message: "${decryptedMessage}"`);
-          debugLog(`[PASSIVE RX] Our sent payload: "${state.repeaterTracking.sentPayload}"`);
-          
-          // Check if this is an echo of our own ping
-          // The decrypted message may include sender prefix: "SenderName: Message"
-          // So check for both exact match and containment
-          const isOurEcho = decryptedMessage === state.repeaterTracking.sentPayload || 
-                           decryptedMessage.includes(state.repeaterTracking.sentPayload);
-          
-          if (isOurEcho) {
-            debugLog(`[PASSIVE RX] ⊘ SKIP: This is an echo of our own ping - already tracked in Session Log`);
-            return;
-          }
-          
-          debugLog(`[PASSIVE RX] This is NOT an echo (different message on same channel)`);
-        } else {
-          debugLog(`[PASSIVE RX] Failed to decrypt message, cannot verify if echo`);
-        }
-      } else {
-        debugLog(`[PASSIVE RX] No sent payload to compare (not currently tracking echoes)`);
-      }
+      // Note: We don't need to check sentPayload here anymore since we skip entirely
+      // during active tracking window. Any messages on wardriving channel after the
+      // tracking window ends are from other users and should be logged.
+      debugLog(`[PASSIVE RX] Not in tracking window - message is from another user or source`);
     } else {
       debugLog(`[PASSIVE RX] Packet is on a different channel or channel hash unavailable - logging it`);
     }
