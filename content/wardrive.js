@@ -1806,13 +1806,15 @@ async function handlePassiveRxLogEvent(data) {
       return;
     }
     
-    const packetChannelHash = packet.payload[0];
-    if (WARDRIVING_CHANNEL_HASH !== null && packetChannelHash !== WARDRIVING_CHANNEL_HASH) {
-      debugLog(`[PASSIVE RX] Ignoring: channel hash mismatch (packet=0x${packetChannelHash.toString(16).padStart(2, '0')}, expected=0x${WARDRIVING_CHANNEL_HASH.toString(16).padStart(2, '0')})`);
-      return;
-    }
-    
-    debugLog(`[PASSIVE RX] Channel hash match confirmed`);
+    // NOTE: Channel hash filter disabled to track ALL RX messages regardless of channel
+    // Uncomment to restore filtering to wardriving channel only
+    // const packetChannelHash = packet.payload[0];
+    // if (WARDRIVING_CHANNEL_HASH !== null && packetChannelHash !== WARDRIVING_CHANNEL_HASH) {
+    //   debugLog(`[PASSIVE RX] Ignoring: channel hash mismatch (packet=0x${packetChannelHash.toString(16).padStart(2, '0')}, expected=0x${WARDRIVING_CHANNEL_HASH.toString(16).padStart(2, '0')})`);
+    //   return;
+    // }
+    // 
+    // debugLog(`[PASSIVE RX] Channel hash match confirmed`);
     
     // VALIDATION STEP 3: Check path length (need at least one hop)
     if (packet.path.length === 0) {
