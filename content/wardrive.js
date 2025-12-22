@@ -45,6 +45,7 @@ const MAP_REFRESH_DELAY_MS = 1000;             // Delay after API post to ensure
 const MIN_PAUSE_THRESHOLD_MS = 1000;           // Minimum timer value (1 second) to pause
 const MAX_REASONABLE_TIMER_MS = 5 * 60 * 1000; // Maximum reasonable timer value (5 minutes) to handle clock skew
 const RX_LOG_LISTEN_WINDOW_MS = 6000;         // Listen window for repeater echoes (6 seconds)
+const CHANNEL_GROUP_TEXT_HEADER = 0x15;       // Header byte for channel GroupText packets (used for echo detection)
 
 // Pre-computed channel hash and key for the wardriving channel
 // These will be computed once at startup and used for message correlation and decryption
@@ -1616,8 +1617,7 @@ async function handleSessionLogTracking(packet, data) {
     
     // VALIDATION STEP 1: Header validation for Session Log (echo detection)
     // Expected header for channel GroupText packets: 0x15
-    const EXPECTED_HEADER = 0x15;
-    if (packet.header !== EXPECTED_HEADER) {
+    if (packet.header !== CHANNEL_GROUP_TEXT_HEADER) {
       debugLog(`[SESSION LOG] Ignoring: header validation failed (header=0x${packet.header.toString(16).padStart(2, '0')})`);
       return false;
     }
@@ -1840,7 +1840,9 @@ async function handlePassiveRxLogging(packet, data) {
     debugLog(`[PASSIVE RX] Processing packet for passive logging`);
     
     // VALIDATION: Check path length (need at least one hop)
-    // Packets with no path are direct transmissions and not useful for RX coverage mapping
+    // A packet's path array contains the sequence of repeater IDs that forwarded the message.
+    // Packets with no path are direct transmissions (node-to-node) and don't provide
+    // information about repeater coverage, so we skip them for RX wardriving purposes.
     if (packet.path.length === 0) {
       debugLog(`[PASSIVE RX] Ignoring: no path (direct transmission, not via repeater)`);
       return;
