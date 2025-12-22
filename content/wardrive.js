@@ -84,7 +84,7 @@ const MESHMAPPER_API_URL = "https://yow.meshmapper.net/wardriving-api.php";
 const MESHMAPPER_CAPACITY_CHECK_URL = "https://yow.meshmapper.net/capacitycheck.php";
 const MESHMAPPER_API_KEY = "59C7754DABDF5C11CA5F5D8368F89";
 const MESHMAPPER_DEFAULT_WHO = "GOME-WarDriver"; // Default identifier
-const MESHMAPPER_RX_LOG_API_URL = null;  // TODO: Set when API endpoint is ready
+const MESHMAPPER_RX_LOG_API_URL = "https://yow.meshmapper.net/wardriving-api.php";  // TODO: Set when API endpoint is ready
 
 // Static for now; will be made dynamic later.
 const WARDIVE_IATA_CODE = "YOW";
