@@ -4,17 +4,17 @@ Coverage blocks are used to classify mesh network signal quality during wardrivi
 
 ---
 
-## BIDIRECTIONAL (BIDIR)
+## BIDIRECTIONAL (BIDIR) - Green
 Heard repeats from the mesh **AND** successfully routed through it.  Full bidirectional communication confirmed.
 
-## TRANSMIT (TX)
+## TRANSMIT (TX) - Orange
 Successfully routed through the mesh, but did **NOT** hear any repeats back.  Outbound path confirmed, inbound uncertain. 
 
-## RECEIVE (RX)
+## RECEIVE (RX) - Orange
 Heard mesh traffic while wardriving, but did **NOT** transmit.  Passive reception only. 
 
-## DEAD
+## DEAD - Grey
 A repeater heard the transmission, but either did nothing with it or when it repeated, no other radio received it. Message never made it through the mesh. 
 
-## DROP
+## DROP - Red
 No repeats heard **AND** no successful route through the mesh. No communication in either direction. 
