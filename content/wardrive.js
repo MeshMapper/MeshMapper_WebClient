@@ -2184,8 +2184,9 @@ function queueApiPost(entry) {
   }
   
   // Build unified API payload (TX-style)
-  // Format heard_repeats as "repeater_id(snr_avg)" - e.g., "4e(12)"
-  const heardRepeats = `${entry.repeater_id}(${Math.round(entry.snr_avg)})`;
+  // Format heard_repeats as "repeater_id(snr_avg)" - e.g., "4e(12.0)"
+  // Use absolute value and format with one decimal place
+  const heardRepeats = `${entry.repeater_id}(${Math.abs(entry.snr_avg).toFixed(1)})`;
   
   const payload = {
     key: MESHMAPPER_API_KEY,

@@ -188,7 +188,7 @@
 ║   │    BUILD UNIFIED API PAYLOAD                                          │   ║
 ║   │                                                                       │   ║
 ║   │  Format heard_repeats as "repeater_id(snr_avg)"                       │   ║
-║   │  Example: "92(12)" (rounded to integer)                               │   ║
+║   │  Example: "92(12.0)" (absolute value with 1 decimal)                  │   ║
 ║   │                                                                       │   ║
 ║   │  {                                                                    │   ║
 ║   │    "key": "API_KEY",                                                  │   ║
@@ -196,7 +196,7 @@
 ║   │    "lon": -75.69720,                                                  │   ║
 ║   │    "who": "DeviceName",                                               │   ║
 ║   │    "power": "0.6w",                                                   │   ║
-║   │    "heard_repeats": "92(12)",                                         │   ║
+║   │    "heard_repeats": "92(12.0)",                                       │   ║
 ║   │    "ver": "DEV-1703257800",                                           │   ║
 ║   │    "session_id": "abc123",                                            │   ║
 ║   │    "iata": "YOW",                                                     │   ║
