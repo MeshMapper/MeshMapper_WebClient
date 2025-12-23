@@ -209,16 +209,18 @@ connectBtn.addEventListener("click", async () => {
 
 1. **Disconnect Trigger** → User clicks "Disconnect" or error occurs
 2. **Status Update** → Connection Status shows "Disconnecting", Dynamic Status cleared to em dash
-3. **Capacity Release** → Returns API slot to MeshMapper
-4. **Channel Deletion** → Removes #wardriving channel from device
-5. **BLE Disconnect** → Closes GATT connection
-6. **Cleanup** → Stops timers, GPS, wake locks
-7. **State Reset** → Clears all connection state
-8. **Disconnected** → Connection Status shows "Disconnected", Dynamic Status shows em dash or error message
+3. **API Queue Flush** → **CRITICAL: Flush pending messages BEFORE capacity release (session_id still valid)**
+4. **Stop Flush Timers** → Stop periodic and TX flush timers
+5. **Capacity Release** → Returns API slot to MeshMapper
+6. **Channel Deletion** → Removes #wardriving channel from device
+7. **BLE Disconnect** → Closes GATT connection
+8. **Cleanup** → Stops timers, GPS, wake locks, clears queue
+9. **State Reset** → Clears all connection state
+10. **Disconnected** → Connection Status shows "Disconnected", Dynamic Status shows em dash or error message
 
 ### Detailed Disconnection Steps
 
-See `content/wardrive.js` lines 2119-2179 for the main `disconnect()` function.
+See `content/wardrive.js` for the main `disconnect()` function.
 
 **Disconnect Triggers:**
 - User clicks "Disconnect" button
@@ -226,6 +228,7 @@ See `content/wardrive.js` lines 2119-2179 for the main `disconnect()` function.
 - Public key validation failure
 - Channel setup failure
 - BLE connection lost (device out of range)
+- Slot revocation during active session
 
 **Disconnection Sequence:**
 
@@ -243,21 +246,34 @@ See `content/wardrive.js` lines 2119-2179 for the main `disconnect()` function.
    - **Connection Status**: `"Disconnecting"` (blue) - remains until cleanup completes
    - **Dynamic Status**: `"—"` (em dash - cleared)
 
-4. **Release Capacity**
+4. **Flush API Queue (CRITICAL - NEW)**
+   - **Connection Status**: `"Disconnecting"` (maintained)
+   - **Dynamic Status**: `"Posting X to API"` (if messages pending)
+   - Flushes all pending TX and RX messages in queue
+   - **Must occur BEFORE capacity release** (session_id still valid)
+   - Waits for flush to complete (async operation)
+   - Debug: `[API QUEUE] Flushing N queued messages before disconnect`
+
+5. **Stop Flush Timers**
+   - Stops 30-second periodic flush timer
+   - Stops TX-triggered 3-second flush timer
+   - Debug: `[API QUEUE] Stopping all flush timers`
+
+6. **Release Capacity**
    - POSTs to MeshMapper API with `reason: "disconnect"`
    - **Fail-open**: errors ignored, always proceeds
 
-5. **Delete Channel**
+7. **Delete Channel**
    - Sends `setChannel(idx, "", zeros)` to clear slot
    - **Fail-open**: errors ignored, always proceeds
 
-6. **Close BLE**
+8. **Close BLE**
    - Tries `connection.close()`
    - Falls back to `connection.disconnect()`
    - Last resort: `device.gatt.disconnect()`
    - Triggers "gattserverdisconnected" event
 
-7. **Disconnected Event Handler**
+9. **Disconnected Event Handler**
    - Fires on BLE disconnect
    - **Connection Status**: `"Disconnected"` (red) - ALWAYS set regardless of reason
    - **Dynamic Status**: Set based on `state.disconnectReason` (WITHOUT "Disconnected:" prefix):
@@ -276,26 +292,27 @@ See `content/wardrive.js` lines 2119-2179 for the main `disconnect()` function.
      - Stops distance updater
      - Stops repeater tracking
      - **Stops passive RX listening** (unregisters LogRxData handler)
+     - **Clears API queue messages** (timers already stopped)
      - Clears all timers (see `cleanupAllTimers()`)
      - Releases wake lock
      - Clears connection state
      - Clears device public key
 
-8. **UI Cleanup**
-   - Disables all controls except "Connect"
-   - Clears device info display
-   - Clears GPS display
-   - Clears distance display
-   - Changes button to "Connect" (green)
+10. **UI Cleanup**
+    - Disables all controls except "Connect"
+    - Clears device info display
+    - Clears GPS display
+    - Clears distance display
+    - Changes button to "Connect" (green)
 
-9. **State Reset**
-   - `state.connection = null`
-   - `state.channel = null`
-   - `state.lastFix = null`
-   - `state.lastSuccessfulPingLocation = null`
-   - `state.gpsState = "idle"`
+11. **State Reset**
+    - `state.connection = null`
+    - `state.channel = null`
+    - `state.lastFix = null`
+    - `state.lastSuccessfulPingLocation = null`
+    - `state.gpsState = "idle"`
 
-10. **Disconnected Complete**
+12. **Disconnected Complete**
     - **Connection Status**: `"Disconnected"` (red)
     - **Dynamic Status**: `"—"` (em dash) or error message based on disconnect reason
     - All resources released
@@ -804,6 +821,129 @@ Both handlers listen to the same `LogRxData` event simultaneously:
 - **Passive handler**: Processes all messages, extracts last hop
 - No conflicts - they serve different purposes and operate independently
 - Event system supports multiple handlers on the same event
+
+## API Batch Queue System
+
+### Overview
+
+The batch queue system optimizes network efficiency by batching multiple API messages into a single POST request. The MeshMapper API accepts arrays of up to 50 messages (both TX and RX types) in a single request.
+
+**Key Benefits:**
+- Reduces network overhead (fewer HTTP requests)
+- Optimizes bandwidth usage
+- Supports mixed TX/RX batches
+- Maintains data integrity with proper flush sequencing
+
+### Queue Configuration
+
+**Constants:**
+```javascript
+const API_BATCH_MAX_SIZE = 50;              // Maximum messages per batch POST
+const API_BATCH_FLUSH_INTERVAL_MS = 30000;  // Flush every 30 seconds
+const API_TX_FLUSH_DELAY_MS = 3000;         // Flush 3 seconds after TX ping
+```
+
+**Queue State:**
+```javascript
+const apiQueue = {
+  messages: [],           // Array of pending payloads
+  flushTimerId: null,     // Timer ID for periodic flush (30s)
+  txFlushTimerId: null,   // Timer ID for TX-triggered flush (3s)
+  isProcessing: false     // Lock to prevent concurrent flush operations
+};
+```
+
+### Flush Triggers
+
+The queue flushes when ANY of these conditions are met:
+
+1. **TX Ping Queued** → Starts/resets 3-second timer, flushes when timer fires
+2. **30 Seconds Elapsed** → Periodic flush of any pending messages
+3. **Queue Size Reaches 50** → Immediate flush (prevents exceeding API limit)
+4. **Disconnect Called** → Flushes before releasing capacity slot
+
+### Message Flow
+
+**TX Messages (Active Pings):**
+1. User sends ping via `sendPing()`
+2. After RX listening window, `postApiAndRefreshMap()` called
+3. Builds payload and calls `queueApiMessage(payload, "TX")`
+4. Starts/resets TX flush timer (3 seconds)
+5. Status shows: `"Queued (X/50)"`
+
+**RX Messages (Passive Observations):**
+1. Passive RX listener detects repeater
+2. Batch aggregation logic processes observation
+3. Calls `queueApiPost(entry)` which calls `queueApiMessage(payload, "RX")`
+4. Rides along with TX flushes or 30-second periodic flush
+5. Status shows: `"Queued (X/50)"`
+
+**Batch Flush:**
+1. Flush trigger fires (TX timer, periodic, size limit, or disconnect)
+2. `flushApiQueue()` takes all messages from queue
+3. Prevents concurrent flushes with `isProcessing` lock
+4. POSTs entire batch as JSON array to API
+5. Logs TX/RX counts: `[API QUEUE] Batch composition: X TX, Y RX`
+6. Checks for slot revocation in response
+7. Status shows: `"Posting X to API"`
+
+### Implementation Functions
+
+**Core Functions:**
+- `queueApiMessage(payload, wardriveType)` - Add message to queue
+- `scheduleTxFlush()` - Schedule 3-second flush after TX
+- `startFlushTimer()` - Start 30-second periodic timer
+- `stopFlushTimers()` - Stop all flush timers
+- `flushApiQueue()` - Flush all queued messages
+- `getQueueStatus()` - Get queue status for debugging
+
+**Integration Points:**
+- `postApiAndRefreshMap()` - Queues TX messages (replaces direct POST)
+- `queueApiPost()` - Queues RX messages (replaces direct POST)
+- `disconnect()` - Flushes queue BEFORE capacity release
+- `cleanupAllTimers()` - Stops flush timers
+- Disconnected event handler - Clears queue messages
+
+### Error Handling
+
+**Session ID Validation:**
+- Queue functions validate `state.wardriveSessionId` before operations
+- Missing session_id triggers error and disconnect
+
+**Slot Revocation:**
+- API response checked for `allowed: false`
+- If revoked, triggers disconnect sequence
+- Status: `"Error: Posting to API (Revoked)"`
+
+**Network Errors:**
+- Flush failures logged but don't crash app
+- Status: `"Error: API batch post failed"`
+- Queue continues accepting new messages
+
+### Debug Logging
+
+All queue operations use `[API QUEUE]` prefix:
+- `[API QUEUE] Queueing TX message`
+- `[API QUEUE] Queue size: X/50`
+- `[API QUEUE] Scheduling TX flush in 3000ms`
+- `[API QUEUE] Batch composition: X TX, Y RX`
+- `[API QUEUE] Batch post successful: X TX, Y RX`
+
+Enable debug mode with URL parameter: `?debug=true`
+
+### Critical Disconnect Sequence
+
+**Order matters for data integrity:**
+
+1. **Flush queue** (session_id still valid) ← CRITICAL FIRST STEP
+2. Stop flush timers
+3. Release capacity slot
+4. Delete channel
+5. Close BLE
+6. Clear queue messages
+7. Cleanup and reset
+
+This ensures all pending messages are posted before the session becomes invalid.
 
 ## Summary
 

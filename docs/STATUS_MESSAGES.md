@@ -324,20 +324,41 @@ These messages use a hybrid approach: **first display respects 500ms minimum**, 
 
 #### 6. API and Map Update Messages
 
-##### Posting to API (DEPRECATED - No longer shown)
+##### Queued (X/50)
+- **Message**: `"Queued (X/50)"` (X is current queue size)
+- **Color**: Sky blue (info)
+- **When**: After TX or RX message is added to the batch queue
+- **Notes**: Shows queue depth to indicate messages waiting for batch posting. Queue automatically flushes at 50 messages, after 3 seconds for TX, or after 30 seconds for any pending messages.
+- **Source**: `content/wardrive.js:queueApiMessage()`
+
+##### Posting X to API
+- **Message**: `"Posting X to API"` (X is batch size)
+- **Color**: Sky blue (info)
+- **When**: Batch queue is being flushed to MeshMapper API
+- **Timing**: Visible during batch POST operation
+- **Notes**: Batch can contain mixed TX and RX messages (up to 50 total). Debug logs show TX/RX breakdown.
+- **Source**: `content/wardrive.js:flushApiQueue()`
+
+##### Posting to API (DEPRECATED - Replaced by Queued/Batch system)
 - **Message**: `"Posting to API"`
 - **Color**: Sky blue (info)
-- **When**: ~~After RX listening window, posting ping data to MeshMapper API~~ **NO LONGER SHOWN**
-- **Timing**: ~~Visible during API POST operation (3-second hidden delay + API call time, typically ~3.5-4.5s total)~~ **SUPPRESSED**
-- **Notes**: As of the ping/repeat listener refactoring, API posting now runs in the background without showing status messages. Success is silent; only errors are displayed.
-- **Source**: ~~`content/wardrive.js:postApiAndRefreshMap()`~~ Replaced by `postApiInBackground()`
+- **When**: ~~After RX listening window, posting ping data to MeshMapper API~~ **REPLACED BY BATCH QUEUE**
+- **Notes**: As of the batch queue implementation, individual API posts have been replaced by batched posts. Messages are queued and flushed in batches.
+- **Source**: ~~`content/wardrive.js:postApiAndRefreshMap()`~~ Replaced by batch queue system
 
-##### Error: API post failed
+##### Error: API batch post failed
+- **Message**: `"Error: API batch post failed"`
+- **Color**: Red (error)
+- **When**: Batch API POST fails during flush operation
+- **Notes**: Batch posting failed, but queue system will continue accepting new messages.
+- **Source**: `content/wardrive.js:flushApiQueue()` error handler
+
+##### Error: API post failed (DEPRECATED)
 - **Message**: `"Error: API post failed"`
 - **Color**: Red (error)
-- **When**: Background API POST fails during asynchronous posting (after RX listening window completes)
-- **Notes**: This is the only API-related message now shown to users during normal ping operations. Success is silent.
-- **Source**: `content/wardrive.js:postApiInBackground()` error handler
+- **When**: ~~Background API POST fails during asynchronous posting~~ **REPLACED BY BATCH QUEUE**
+- **Notes**: Replaced by "Error: API batch post failed" in batch queue system.
+- **Source**: ~~`content/wardrive.js:postApiInBackground()`~~ Replaced by batch queue system
 
 ##### — (em dash)
 - **Message**: `"—"` (em dash character)
