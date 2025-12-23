@@ -3857,8 +3857,8 @@ async function connect() {
         // Proceed with channel setup and GPS initialization
         await ensureChannel();
         
-        // Start passive RX listening after channel setup
-        startPassiveRxListening();
+        // Start unified RX listening after channel setup
+        startUnifiedRxListening();
         
         // GPS initialization
         setDynamicStatus("Priming GPS", STATUS_COLORS.info);
@@ -3947,7 +3947,7 @@ async function connect() {
       stopGeoWatch();
       stopGpsAgeUpdater(); // Ensure age updater stops
       stopRepeaterTracking(); // Stop repeater echo tracking
-      stopPassiveRxListening(); // Stop passive RX listening
+      stopUnifiedRxListening(); // Stop unified RX listening
       
       // Flush all pending RX batch data before cleanup
       flushAllBatches('disconnect');
