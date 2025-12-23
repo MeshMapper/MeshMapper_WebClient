@@ -2572,80 +2572,169 @@ function updateLogSummary() {
 }
 
 /**
+ * Generic log entry renderer helper function
+ * @param {Object} config - Configuration object
+ * @param {HTMLElement} config.containerElement - Container element to render entries into
+ * @param {Array} config.entries - Array of log entries
+ * @param {Function} config.createElementFn - Function to create DOM element for each entry
+ * @param {string} config.placeholderText - Text to show when no entries exist
+ * @param {boolean} config.fullRender - If true, re-render all entries. If false, only render new entries.
+ * @param {string} config.logTag - Debug log tag (e.g., 'UI', 'PASSIVE RX UI')
+ * @param {HTMLElement} config.scrollContainer - Optional scroll container for auto-scroll
+ * @param {Object} config.state - State object with autoScroll property
+ */
+function renderLogEntriesGeneric(config) {
+  const { 
+    containerElement, 
+    entries, 
+    createElementFn, 
+    placeholderText, 
+    fullRender = true,
+    logTag, 
+    scrollContainer, 
+    state 
+  } = config;
+  
+  if (!containerElement) return;
+  
+  if (fullRender) {
+    debugLog(`[${logTag}] Full render of ${entries.length} log entries`);
+    containerElement.innerHTML = '';
+    
+    if (entries.length === 0) {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'text-xs text-slate-500 italic text-center py-4';
+      placeholder.textContent = placeholderText;
+      containerElement.appendChild(placeholder);
+      debugLog(`[${logTag}] Rendered placeholder (no entries)`);
+      return;
+    }
+    
+    // Render newest first
+    const reversedEntries = [...entries].reverse();
+    
+    reversedEntries.forEach((entry, index) => {
+      const element = createElementFn(entry);
+      containerElement.appendChild(element);
+    });
+    
+    debugLog(`[${logTag}] Full render complete: ${entries.length} entries`);
+  } else {
+    // Incremental render: only add the newest entry
+    if (entries.length === 0) {
+      debugLog(`[${logTag}] No entries to render incrementally`);
+      return;
+    }
+    
+    // Remove placeholder if it exists
+    const placeholder = containerElement.querySelector('.text-xs.text-slate-500.italic');
+    if (placeholder) {
+      placeholder.remove();
+    }
+    
+    // Get the newest entry (last in array) and prepend it (newest first display)
+    const newestEntry = entries[entries.length - 1];
+    const element = createElementFn(newestEntry);
+    containerElement.insertBefore(element, containerElement.firstChild);
+    
+    debugLog(`[${logTag}] Appended entry ${entries.length}/${entries.length}`);
+  }
+  
+  // Auto-scroll to top (newest)
+  if (state && state.autoScroll && scrollContainer) {
+    scrollContainer.scrollTop = 0;
+    debugLog(`[${logTag}] Auto-scrolled to top`);
+  }
+}
+
+/**
  * Render all log entries to the session log
  */
 function renderLogEntries() {
-  if (!sessionPingsEl) return;
-  
-  debugLog(`[UI] Rendering ${sessionLogState.entries.length} log entries`);
-  sessionPingsEl.innerHTML = '';
-  
-  if (sessionLogState.entries.length === 0) {
-    // Show placeholder when no entries
-    const placeholder = document.createElement('div');
-    placeholder.className = 'text-xs text-slate-500 italic text-center py-4';
-    placeholder.textContent = 'No pings logged yet';
-    sessionPingsEl.appendChild(placeholder);
-    debugLog(`[UI] Rendered placeholder (no entries)`);
-    return;
-  }
-  
-  // Render newest first
-  const entries = [...sessionLogState.entries].reverse();
-  
-  entries.forEach((entry, index) => {
-    const element = createLogEntryElement(entry);
-    sessionPingsEl.appendChild(element);
-    debugLog(`[UI] Appended log entry ${index + 1}/${entries.length} to sessionPingsEl`);
+  renderLogEntriesGeneric({
+    containerElement: sessionPingsEl,
+    entries: sessionLogState.entries,
+    createElementFn: createLogEntryElement,
+    placeholderText: 'No pings logged yet',
+    fullRender: true,
+    logTag: 'UI',
+    scrollContainer: logScrollContainer,
+    state: sessionLogState
   });
+}
+
+/**
+ * Generic bottom sheet toggle helper function
+ * @param {Object} config - Configuration object
+ * @param {Object} config.state - State object with isExpanded property
+ * @param {HTMLElement} config.sheetElement - Bottom sheet element
+ * @param {HTMLElement} config.arrowElement - Arrow element for rotation
+ * @param {HTMLElement} config.copyButton - Copy button element
+ * @param {Array<HTMLElement>} config.statusElements - Array of status elements to toggle
+ * @param {string} config.logTag - Debug log tag (e.g., 'SESSION LOG', 'PASSIVE RX UI')
+ * @param {Function} config.onExpand - Optional callback when expanded
+ */
+function toggleLogBottomSheet(config) {
+  const { state, sheetElement, arrowElement, copyButton, statusElements, logTag, onExpand } = config;
   
-  // Auto-scroll to top (newest)
-  if (sessionLogState.autoScroll && logScrollContainer) {
-    logScrollContainer.scrollTop = 0;
-    debugLog(`[UI] Auto-scrolled to top of log container`);
+  // Toggle state
+  state.isExpanded = !state.isExpanded;
+  
+  // Toggle sheet visibility
+  if (sheetElement) {
+    if (state.isExpanded) {
+      sheetElement.classList.add('open');
+      sheetElement.classList.remove('hidden');
+    } else {
+      sheetElement.classList.remove('open');
+      sheetElement.classList.add('hidden');
+    }
   }
   
-  debugLog(`[UI] Finished rendering all log entries`);
+  // Toggle arrow rotation
+  if (arrowElement) {
+    if (state.isExpanded) {
+      arrowElement.classList.add('expanded');
+    } else {
+      arrowElement.classList.remove('expanded');
+    }
+  }
+  
+  // Toggle copy button and status visibility
+  if (state.isExpanded) {
+    // Hide status elements, show copy button
+    statusElements.forEach(el => {
+      if (el) el.classList.add('hidden');
+    });
+    if (copyButton) copyButton.classList.remove('hidden');
+    debugLog(`[${logTag}] Expanded - showing copy button, hiding status`);
+    
+    // Execute optional callback
+    if (onExpand) onExpand();
+  } else {
+    // Show status elements, hide copy button
+    statusElements.forEach(el => {
+      if (el) el.classList.remove('hidden');
+    });
+    if (copyButton) copyButton.classList.add('hidden');
+    debugLog(`[${logTag}] Collapsed - hiding copy button, showing status`);
+  }
 }
 
 /**
  * Toggle session log expanded/collapsed
  */
 function toggleBottomSheet() {
-  sessionLogState.isExpanded = !sessionLogState.isExpanded;
-  
-  if (logBottomSheet) {
-    if (sessionLogState.isExpanded) {
-      logBottomSheet.classList.add('open');
-      logBottomSheet.classList.remove('hidden');
-    } else {
-      logBottomSheet.classList.remove('open');
-      logBottomSheet.classList.add('hidden');
-    }
-  }
-  
-  // Toggle arrow rotation
   const logExpandArrow = document.getElementById('logExpandArrow');
-  if (logExpandArrow) {
-    if (sessionLogState.isExpanded) {
-      logExpandArrow.classList.add('expanded');
-    } else {
-      logExpandArrow.classList.remove('expanded');
-    }
-  }
   
-  // Toggle copy button and status visibility
-  if (sessionLogState.isExpanded) {
-    // Hide status elements, show copy button
-    if (logLastSnr) logLastSnr.classList.add('hidden');
-    if (sessionLogCopyBtn) sessionLogCopyBtn.classList.remove('hidden');
-    debugLog('[SESSION LOG] Expanded - showing copy button, hiding status');
-  } else {
-    // Show status elements, hide copy button
-    if (logLastSnr) logLastSnr.classList.remove('hidden');
-    if (sessionLogCopyBtn) sessionLogCopyBtn.classList.add('hidden');
-    debugLog('[SESSION LOG] Collapsed - hiding copy button, showing status');
-  }
+  toggleLogBottomSheet({
+    state: sessionLogState,
+    sheetElement: logBottomSheet,
+    arrowElement: logExpandArrow,
+    copyButton: sessionLogCopyBtn,
+    statusElements: [logLastSnr],
+    logTag: 'SESSION LOG'
+  });
 }
 
 /**
@@ -2774,99 +2863,37 @@ function updateRxLogSummary() {
  * @param {boolean} fullRender - If true, re-render all entries. If false, only render new entries.
  */
 function renderRxLogEntries(fullRender = false) {
-  if (!rxLogEntries) return;
-  
-  if (fullRender) {
-    debugLog(`[PASSIVE RX UI] Full render of ${rxLogState.entries.length} RX log entries`);
-    rxLogEntries.innerHTML = '';
-    
-    if (rxLogState.entries.length === 0) {
-      const placeholder = document.createElement('div');
-      placeholder.className = 'text-xs text-slate-500 italic text-center py-4';
-      placeholder.textContent = 'No RX observations yet';
-      rxLogEntries.appendChild(placeholder);
-      debugLog(`[PASSIVE RX UI] Rendered placeholder (no entries)`);
-      return;
-    }
-    
-    // Render newest first
-    const entries = [...rxLogState.entries].reverse();
-    
-    entries.forEach((entry, index) => {
-      const element = createRxLogEntryElement(entry);
-      rxLogEntries.appendChild(element);
-    });
-    
-    debugLog(`[PASSIVE RX UI] Full render complete: ${entries.length} entries`);
-  } else {
-    // Incremental render: only add the newest entry
-    if (rxLogState.entries.length === 0) {
-      debugLog(`[PASSIVE RX UI] No entries to render incrementally`);
-      return;
-    }
-    
-    // Remove placeholder if it exists
-    const placeholder = rxLogEntries.querySelector('.text-xs.text-slate-500.italic');
-    if (placeholder) {
-      placeholder.remove();
-    }
-    
-    // Get the newest entry (last in array) and prepend it (newest first display)
-    const newestEntry = rxLogState.entries[rxLogState.entries.length - 1];
-    const element = createRxLogEntryElement(newestEntry);
-    rxLogEntries.insertBefore(element, rxLogEntries.firstChild);
-    
-    debugLog(`[PASSIVE RX UI] Appended entry ${rxLogState.entries.length}/${rxLogState.entries.length}`);
-  }
-  
-  // Auto-scroll to top (newest)
-  if (rxLogState.autoScroll && rxLogScrollContainer) {
-    rxLogScrollContainer.scrollTop = 0;
-    debugLog(`[PASSIVE RX UI] Auto-scrolled to top`);
-  }
+  renderLogEntriesGeneric({
+    containerElement: rxLogEntries,
+    entries: rxLogState.entries,
+    createElementFn: createRxLogEntryElement,
+    placeholderText: 'No RX observations yet',
+    fullRender: fullRender,
+    logTag: 'PASSIVE RX UI',
+    scrollContainer: rxLogScrollContainer,
+    state: rxLogState
+  });
 }
 
 /**
  * Toggle RX log expanded/collapsed
  */
 function toggleRxLogBottomSheet() {
-  rxLogState.isExpanded = !rxLogState.isExpanded;
-  
-  if (rxLogBottomSheet) {
-    if (rxLogState.isExpanded) {
-      rxLogBottomSheet.classList.add('open');
-      rxLogBottomSheet.classList.remove('hidden');
-    } else {
-      rxLogBottomSheet.classList.remove('open');
-      rxLogBottomSheet.classList.add('hidden');
+  toggleLogBottomSheet({
+    state: rxLogState,
+    sheetElement: rxLogBottomSheet,
+    arrowElement: rxLogExpandArrow,
+    copyButton: rxLogCopyBtn,
+    statusElements: [rxLogLastRepeater, rxLogSnrChip],
+    logTag: 'PASSIVE RX UI',
+    onExpand: () => {
+      // Special handling for RX log: only hide SNR chip if there are entries
+      // When collapsed, only show SNR chip if there are entries
+      if (!rxLogState.isExpanded && rxLogSnrChip && rxLogState.entries.length > 0) {
+        rxLogSnrChip.classList.remove('hidden');
+      }
     }
-  }
-  
-  // Toggle arrow rotation
-  if (rxLogExpandArrow) {
-    if (rxLogState.isExpanded) {
-      rxLogExpandArrow.classList.add('expanded');
-    } else {
-      rxLogExpandArrow.classList.remove('expanded');
-    }
-  }
-  
-  // Toggle copy button and status visibility
-  if (rxLogState.isExpanded) {
-    // Hide status, show copy button
-    if (rxLogLastRepeater) rxLogLastRepeater.classList.add('hidden');
-    if (rxLogSnrChip) rxLogSnrChip.classList.add('hidden');
-    if (rxLogCopyBtn) rxLogCopyBtn.classList.remove('hidden');
-    debugLog('[PASSIVE RX UI] Expanded - showing copy button, hiding status');
-  } else {
-    // Show status, hide copy button
-    if (rxLogLastRepeater) rxLogLastRepeater.classList.remove('hidden');
-    if (rxLogSnrChip && rxLogState.entries.length > 0) {
-      rxLogSnrChip.classList.remove('hidden');
-    }
-    if (rxLogCopyBtn) rxLogCopyBtn.classList.add('hidden');
-    debugLog('[PASSIVE RX UI] Collapsed - hiding copy button, showing status');
-  }
+  });
 }
 
 /**
@@ -2990,95 +3017,30 @@ function updateErrorLogSummary() {
  * @param {boolean} fullRender - If true, re-render all entries. If false, only render new entries.
  */
 function renderErrorLogEntries(fullRender = false) {
-  if (!errorLogEntries) return;
-  
-  if (fullRender) {
-    debugLog(`[ERROR LOG] Full render of ${errorLogState.entries.length} error log entries`);
-    errorLogEntries.innerHTML = '';
-    
-    if (errorLogState.entries.length === 0) {
-      const placeholder = document.createElement('div');
-      placeholder.className = 'text-xs text-slate-500 italic text-center py-4';
-      placeholder.textContent = 'No errors logged';
-      errorLogEntries.appendChild(placeholder);
-      debugLog(`[ERROR LOG] Rendered placeholder (no entries)`);
-      return;
-    }
-    
-    // Render newest first
-    const entries = [...errorLogState.entries].reverse();
-    
-    entries.forEach((entry, index) => {
-      const element = createErrorLogEntryElement(entry);
-      errorLogEntries.appendChild(element);
-    });
-    
-    debugLog(`[ERROR LOG] Full render complete: ${entries.length} entries`);
-  } else {
-    // Incremental render: only add the newest entry
-    if (errorLogState.entries.length === 0) {
-      debugLog(`[ERROR LOG] No entries to render incrementally`);
-      return;
-    }
-    
-    // Remove placeholder if it exists
-    const placeholder = errorLogEntries.querySelector('.text-xs.text-slate-500.italic');
-    if (placeholder) {
-      placeholder.remove();
-    }
-    
-    // Get the newest entry (last in array) and prepend it (newest first display)
-    const newestEntry = errorLogState.entries[errorLogState.entries.length - 1];
-    const element = createErrorLogEntryElement(newestEntry);
-    errorLogEntries.insertBefore(element, errorLogEntries.firstChild);
-    
-    debugLog(`[ERROR LOG] Appended entry ${errorLogState.entries.length}/${errorLogState.entries.length}`);
-  }
-  
-  // Auto-scroll to top (newest)
-  if (errorLogState.autoScroll && errorLogScrollContainer) {
-    errorLogScrollContainer.scrollTop = 0;
-    debugLog(`[ERROR LOG] Auto-scrolled to top`);
-  }
+  renderLogEntriesGeneric({
+    containerElement: errorLogEntries,
+    entries: errorLogState.entries,
+    createElementFn: createErrorLogEntryElement,
+    placeholderText: 'No errors logged',
+    fullRender: fullRender,
+    logTag: 'ERROR LOG',
+    scrollContainer: errorLogScrollContainer,
+    state: errorLogState
+  });
 }
 
 /**
  * Toggle Error log expanded/collapsed
  */
 function toggleErrorLogBottomSheet() {
-  errorLogState.isExpanded = !errorLogState.isExpanded;
-  
-  if (errorLogBottomSheet) {
-    if (errorLogState.isExpanded) {
-      errorLogBottomSheet.classList.add('open');
-      errorLogBottomSheet.classList.remove('hidden');
-    } else {
-      errorLogBottomSheet.classList.remove('open');
-      errorLogBottomSheet.classList.add('hidden');
-    }
-  }
-  
-  // Toggle arrow rotation
-  if (errorLogExpandArrow) {
-    if (errorLogState.isExpanded) {
-      errorLogExpandArrow.classList.add('expanded');
-    } else {
-      errorLogExpandArrow.classList.remove('expanded');
-    }
-  }
-  
-  // Toggle copy button and status visibility
-  if (errorLogState.isExpanded) {
-    // Hide status, show copy button
-    if (errorLogLastError) errorLogLastError.classList.add('hidden');
-    if (errorLogCopyBtn) errorLogCopyBtn.classList.remove('hidden');
-    debugLog('[ERROR LOG] Expanded - showing copy button, hiding status');
-  } else {
-    // Show status, hide copy button
-    if (errorLogLastError) errorLogLastError.classList.remove('hidden');
-    if (errorLogCopyBtn) errorLogCopyBtn.classList.add('hidden');
-    debugLog('[ERROR LOG] Collapsed - hiding copy button, showing status');
-  }
+  toggleLogBottomSheet({
+    state: errorLogState,
+    sheetElement: errorLogBottomSheet,
+    arrowElement: errorLogExpandArrow,
+    copyButton: errorLogCopyBtn,
+    statusElements: [errorLogLastError],
+    logTag: 'ERROR LOG'
+  });
 }
 
 /**
@@ -3114,42 +3076,66 @@ function addErrorLogEntry(message, source = null) {
 // ---- CSV Export Functions ----
 
 /**
- * Convert Session Log to CSV format
- * Columns: Timestamp,Latitude,Longitude,Repeater1_ID,Repeater1_SNR,Repeater2_ID,Repeater2_SNR,...
+ * Generic CSV generator helper function
+ * @param {Array} entries - Array of log entries to convert
+ * @param {Array} columns - Column configuration array with {header, getValue} objects
+ * @param {string} logTag - Debug log tag (e.g., 'SESSION LOG', 'PASSIVE RX UI')
+ * @param {string} emptyHeader - Header to return when no entries exist
  * @returns {string} CSV formatted string
  */
-function sessionLogToCSV() {
-  debugLog('[SESSION LOG] Converting session log to CSV format');
+function generateCSV(entries, columns, logTag, emptyHeader) {
+  debugLog(`[${logTag}] Converting log to CSV format`);
   
-  if (sessionLogState.entries.length === 0) {
-    debugWarn('[SESSION LOG] No session log entries to export');
-    return 'Timestamp,Latitude,Longitude,Repeats\n';
+  if (entries.length === 0) {
+    debugWarn(`[${logTag}] No log entries to export`);
+    return emptyHeader;
   }
   
-  // Fixed 4-column header
-  const header = 'Timestamp,Latitude,Longitude,Repeats\n';
+  // Build header from column definitions
+  const header = columns.map(col => col.header).join(',') + '\n';
   
-  // Build CSV rows
-  const rows = sessionLogState.entries.map(entry => {
-    let row = `${entry.timestamp},${entry.lat},${entry.lon}`;
-    
-    // Combine all repeater data into single Repeats column
-    // Format: repeaterID(snr)|repeaterID(snr)|...
-    if (entry.events.length > 0) {
-      const repeats = entry.events.map(event => {
-        return `${event.type}(${event.value.toFixed(2)})`;
-      }).join('|');
-      row += `,${repeats}`;
-    } else {
-      row += ',';
-    }
-    
-    return row;
+  // Build CSV rows using column value extractors
+  const rows = entries.map(entry => {
+    const values = columns.map(col => col.getValue(entry));
+    return values.join(',');
   });
   
   const csv = header + rows.join('\n');
-  debugLog(`[SESSION LOG] CSV export complete: ${sessionLogState.entries.length} entries`);
+  debugLog(`[${logTag}] CSV export complete: ${entries.length} entries`);
   return csv;
+}
+
+/**
+ * Convert Session Log to CSV format
+ * Columns: Timestamp,Latitude,Longitude,Repeats
+ * @returns {string} CSV formatted string
+ */
+function sessionLogToCSV() {
+  const columns = [
+    { header: 'Timestamp', getValue: entry => entry.timestamp },
+    { header: 'Latitude', getValue: entry => entry.lat },
+    { header: 'Longitude', getValue: entry => entry.lon },
+    { 
+      header: 'Repeats', 
+      getValue: entry => {
+        // Combine all repeater data into single Repeats column
+        // Format: repeaterID(snr)|repeaterID(snr)|...
+        if (entry.events.length > 0) {
+          return entry.events.map(event => 
+            `${event.type}(${event.value.toFixed(2)})`
+          ).join('|');
+        }
+        return '';
+      }
+    }
+  ];
+  
+  return generateCSV(
+    sessionLogState.entries,
+    columns,
+    'SESSION LOG',
+    'Timestamp,Latitude,Longitude,Repeats\n'
+  );
 }
 
 /**
@@ -3158,26 +3144,29 @@ function sessionLogToCSV() {
  * @returns {string} CSV formatted string
  */
 function rxLogToCSV() {
-  debugLog('[PASSIVE RX UI] Converting RX log to CSV format');
+  const columns = [
+    { header: 'Timestamp', getValue: entry => entry.timestamp },
+    { header: 'RepeaterID', getValue: entry => entry.repeaterId },
+    { 
+      header: 'SNR', 
+      getValue: entry => entry.snr !== undefined ? entry.snr.toFixed(2) : ''
+    },
+    { 
+      header: 'RSSI', 
+      getValue: entry => entry.rssi !== undefined ? entry.rssi : ''
+    },
+    { 
+      header: 'PathLength', 
+      getValue: entry => entry.pathLength !== undefined ? entry.pathLength : ''
+    }
+  ];
   
-  if (rxLogState.entries.length === 0) {
-    debugWarn('[PASSIVE RX UI] No RX log entries to export');
-    return 'Timestamp,RepeaterID,SNR,RSSI,PathLength\n';
-  }
-  
-  const header = 'Timestamp,RepeaterID,SNR,RSSI,PathLength\n';
-  
-  const rows = rxLogState.entries.map(entry => {
-    // Handle potentially missing fields from old entries
-    const snr = entry.snr !== undefined ? entry.snr.toFixed(2) : '';
-    const rssi = entry.rssi !== undefined ? entry.rssi : '';
-    const pathLength = entry.pathLength !== undefined ? entry.pathLength : '';
-    return `${entry.timestamp},${entry.repeaterId},${snr},${rssi},${pathLength}`;
-  });
-  
-  const csv = header + rows.join('\n');
-  debugLog(`[PASSIVE RX UI] CSV export complete: ${rxLogState.entries.length} entries`);
-  return csv;
+  return generateCSV(
+    rxLogState.entries,
+    columns,
+    'PASSIVE RX UI',
+    'Timestamp,RepeaterID,SNR,RSSI,PathLength\n'
+  );
 }
 
 /**
@@ -3186,25 +3175,30 @@ function rxLogToCSV() {
  * @returns {string} CSV formatted string
  */
 function errorLogToCSV() {
-  debugLog('[ERROR LOG] Converting error log to CSV format');
+  const columns = [
+    { header: 'Timestamp', getValue: entry => entry.timestamp },
+    { 
+      header: 'ErrorType', 
+      getValue: entry => {
+        const source = (entry.source || 'ERROR').replace(/"/g, '""');
+        return `"${source}"`;
+      }
+    },
+    { 
+      header: 'Message', 
+      getValue: entry => {
+        const message = entry.message.replace(/"/g, '""');
+        return `"${message}"`;
+      }
+    }
+  ];
   
-  if (errorLogState.entries.length === 0) {
-    debugWarn('[ERROR LOG] No error log entries to export');
-    return 'Timestamp,ErrorType,Message\n';
-  }
-  
-  const header = 'Timestamp,ErrorType,Message\n';
-  
-  const rows = errorLogState.entries.map(entry => {
-    // Escape quotes in both source and message fields
-    const source = (entry.source || 'ERROR').replace(/"/g, '""');
-    const message = entry.message.replace(/"/g, '""');
-    return `${entry.timestamp},"${source}","${message}"`;
-  });
-  
-  const csv = header + rows.join('\n');
-  debugLog(`[ERROR LOG] CSV export complete: ${errorLogState.entries.length} entries`);
-  return csv;
+  return generateCSV(
+    errorLogState.entries,
+    columns,
+    'ERROR LOG',
+    'Timestamp,ErrorType,Message\n'
+  );
 }
 
 /**
