@@ -1269,7 +1269,7 @@ async function checkCapacity(reason) {
     });
 
     if (!response.ok) {
-      debugWarn(`[CAPACITY] Capacity check API returned error status ${response.status}`);
+      debugError(`[CAPACITY] Capacity check API returned error status ${response.status}`);
       // Fail closed on network errors for connect
       if (reason === "connect") {
         debugError("[CAPACITY] Failing closed (denying connection) due to API error");
@@ -1342,7 +1342,7 @@ async function postToMeshMapperAPI(lat, lon, heardRepeats) {
     // Validate session_id exists before posting
     if (!state.wardriveSessionId) {
       debugError("[API QUEUE] Cannot post to MeshMapper API: no session_id available");
-      setDynamicStatus("Error: No session ID for API post", STATUS_COLORS.error);
+      setDynamicStatus("Missing session ID", STATUS_COLORS.error);
       state.disconnectReason = "session_id_error"; // Track disconnect reason
       // Disconnect after a brief delay to ensure user sees the error message
       setTimeout(() => {
@@ -1383,8 +1383,8 @@ async function postToMeshMapperAPI(lat, lon, heardRepeats) {
       
       // Check if slot has been revoked
       if (data.allowed === false) {
-        debugWarn("[API QUEUE] MeshMapper API returned allowed=false, WarDriving slot has been revoked, disconnecting");
-        setDynamicStatus("Error: Posting to API (Revoked)", STATUS_COLORS.error);
+        debugError("[API QUEUE] MeshMapper slot has been revoked");
+        setDynamicStatus("API post failed (revoked)", STATUS_COLORS.error);
         state.disconnectReason = "slot_revoked"; // Track disconnect reason
         // Disconnect after a brief delay to ensure user sees the error message
         setTimeout(() => {
@@ -1392,17 +1392,17 @@ async function postToMeshMapperAPI(lat, lon, heardRepeats) {
         }, 1500);
         return; // Exit early after slot revocation
       } else if (data.allowed === true) {
-        debugLog("[API QUEUE] MeshMapper API allowed check passed: device still has an active WarDriving slot");
+        debugLog("[API QUEUE] MeshMapper API allowed check passed: device still has an active MeshMapper slot");
       } else {
-        debugWarn(`[API QUEUE] MeshMapper API response missing 'allowed' field: ${JSON.stringify(data)}`);
+        debugError(`[API QUEUE] MeshMapper API response missing 'allowed' field: ${JSON.stringify(data)}`);
       }
     } catch (parseError) {
-      debugWarn(`[API QUEUE] Failed to parse MeshMapper API response: ${parseError.message}`);
+      debugError(`[API QUEUE] Failed to parse MeshMapper API response: ${parseError.message}`);
       // Continue operation if we can't parse the response
     }
 
     if (!response.ok) {
-      debugWarn(`[API QUEUE] MeshMapper API returned error status ${response.status}`);
+      debugError(`[API QUEUE] MeshMapper API returned error status ${response.status}`);
     } else {
       debugLog(`[API QUEUE] MeshMapper API post successful (status ${response.status})`);
     }
@@ -1656,7 +1656,7 @@ async function flushApiQueue() {
     // Validate session_id exists
     if (!state.wardriveSessionId) {
       debugError("[API QUEUE] Cannot flush: no session_id available");
-      setDynamicStatus("Error: No session ID for API post", STATUS_COLORS.error);
+      setDynamicStatus("Missing session ID", STATUS_COLORS.error);
       state.disconnectReason = "session_id_error";
       setTimeout(() => {
         disconnect().catch(err => debugError(`[BLE] Disconnect after missing session_id failed: ${err.message}`));
@@ -1681,8 +1681,8 @@ async function flushApiQueue() {
       
       // Check if slot has been revoked
       if (data.allowed === false) {
-        debugWarn("[API QUEUE] Slot has been revoked by API");
-        setDynamicStatus("Error: Posting to API (Revoked)", STATUS_COLORS.error);
+        debugError("[API QUEUE] MeshMapper slot has been revoked");
+        setDynamicStatus("API post failed (revoked)", STATUS_COLORS.error);
         state.disconnectReason = "slot_revoked";
         setTimeout(() => {
           disconnect().catch(err => debugError(`[BLE] Disconnect after slot revocation failed: ${err.message}`));
@@ -1692,11 +1692,11 @@ async function flushApiQueue() {
         debugLog("[API QUEUE] Slot check passed");
       }
     } catch (parseError) {
-      debugWarn(`[API QUEUE] Failed to parse response: ${parseError.message}`);
+      debugError(`[API QUEUE] Failed to parse response: ${parseError.message}`);
     }
     
     if (!response.ok) {
-      debugWarn(`[API QUEUE] API returned error status ${response.status}`);
+      debugError(`[API QUEUE] API returned error status ${response.status}`);
       setDynamicStatus("Error: API batch post failed", STATUS_COLORS.error);
     } else {
       debugLog(`[API QUEUE] Batch post successful: ${txCount} TX, ${rxCount} RX`);
@@ -3892,23 +3892,23 @@ async function connect() {
         debugLog(`[BLE] Setting terminal status for reason: ${state.disconnectReason}`);
       } else if (state.disconnectReason === "capacity_full") {
         debugLog("[BLE] Branch: capacity_full");
-        setDynamicStatus("WarDriving app has reached capacity", STATUS_COLORS.error, true);
+        setDynamicStatus("MeshMapper at capacity", STATUS_COLORS.error, true);
         debugLog("[BLE] Setting terminal status for capacity full");
       } else if (state.disconnectReason === "app_down") {
         debugLog("[BLE] Branch: app_down");
-        setDynamicStatus("WarDriving app is down", STATUS_COLORS.error, true);
+        setDynamicStatus("MeshMapper unavailable", STATUS_COLORS.error, true);
         debugLog("[BLE] Setting terminal status for app down");
       } else if (state.disconnectReason === "slot_revoked") {
         debugLog("[BLE] Branch: slot_revoked");
-        setDynamicStatus("WarDriving slot has been revoked", STATUS_COLORS.error, true);
+        setDynamicStatus("MeshMapper slot revoked", STATUS_COLORS.error, true);
         debugLog("[BLE] Setting terminal status for slot revocation");
       } else if (state.disconnectReason === "session_id_error") {
         debugLog("[BLE] Branch: session_id_error");
-        setDynamicStatus("Session ID error; try reconnecting", STATUS_COLORS.error, true);
+        setDynamicStatus("Session error - reconnect", STATUS_COLORS.error, true);
         debugLog("[BLE] Setting terminal status for session_id error");
       } else if (state.disconnectReason === "public_key_error") {
         debugLog("[BLE] Branch: public_key_error");
-        setDynamicStatus("Unable to read device public key; try again", STATUS_COLORS.error, true);
+        setDynamicStatus("Device key error - reconnect", STATUS_COLORS.error, true);
         debugLog("[BLE] Setting terminal status for public key error");
       } else if (state.disconnectReason === "channel_setup_error") {
         debugLog("[BLE] Branch: channel_setup_error");

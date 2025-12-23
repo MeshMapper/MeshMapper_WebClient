@@ -155,12 +155,12 @@ connectBtn.addEventListener("click", async () => {
        - Shows fallback message: "Connection not allowed: [reason]"
      - If no reason code provided (backward compatibility):
        - Sets `state.disconnectReason = "capacity_full"`
-       - **Dynamic Status**: `"WarDriving app has reached capacity"` (red, terminal)
+       - **Dynamic Status**: `"MeshMapper at capacity"` (red, terminal)
    - If API error:
      - Sets `state.disconnectReason = "app_down"`
      - Triggers disconnect sequence after 1.5s delay (fail-closed)
      - **Connection Status**: `"Connecting"` → `"Disconnecting"` → `"Disconnected"` (red)
-     - **Dynamic Status**: `"Acquiring wardriving slot"` → `"WarDriving app is down"` (red, terminal)
+     - **Dynamic Status**: `"Acquiring wardriving slot"` → `"MeshMapper unavailable"` (red, terminal)
    - On success:
      - **Connection Status**: `"Connecting"` (blue, maintained)
      - **Dynamic Status**: `"Acquired wardriving slot"` (green)
@@ -288,10 +288,11 @@ See `content/wardrive.js` for the main `disconnect()` function.
    - **Connection Status**: `"Disconnected"` (red) - ALWAYS set regardless of reason
    - **Dynamic Status**: Set based on `state.disconnectReason` (WITHOUT "Disconnected:" prefix):
      - API reason codes in `REASON_MESSAGES` (e.g., `outofdate` → `"App out of date, please update"`) (red)
-     - `capacity_full` → `"WarDriving app has reached capacity"` (red)
-     - `app_down` → `"WarDriving app is down"` (red)
-     - `slot_revoked` → `"WarDriving slot has been revoked"` (red)
-     - `public_key_error` → `"Unable to read device public key; try again"` (red)
+     - `capacity_full` → `"MeshMapper at capacity"` (red)
+     - `app_down` → `"MeshMapper unavailable"` (red)
+     - `slot_revoked` → `"MeshMapper slot revoked"` (red)
+     - `public_key_error` → `"Device key error - reconnect"` (red)
+     - `session_id_error` → `"Session error - reconnect"` (red)
      - `channel_setup_error` → Error message (red)
      - `ble_disconnect_error` → Error message (red)
      - `normal` / `null` / `undefined` → `"—"` (em dash)
@@ -361,25 +362,25 @@ When a wardriving slot is revoked during an active session (detected during API 
 4. **Terminal Status**
    - Disconnect event handler detects `slot_revoked` reason
    - **Connection Status**: `"Disconnected"` (red)
-   - **Dynamic Status**: `"WarDriving slot has been revoked"` (red, terminal - NO "Disconnected:" prefix)
+   - **Dynamic Status**: `"MeshMapper slot revoked"` (red, terminal - NO "Disconnected:" prefix)
    - This is the final terminal status
 
 **Complete Revocation Flow (Updated for background API posting):**
 ```
 Connection Status: (unchanged) → "Disconnecting" → "Disconnected"
-Dynamic Status: "Idle"/"Waiting for next ping" → "Error: Posting to API (Revoked)" → "—" → "WarDriving slot has been revoked"
+Dynamic Status: "Idle"/"Waiting for next ping" → "API post failed (revoked)" → "—" → "MeshMapper slot revoked"
 ```
 **Timeline:**
 - T+0s: RX window completes, status shows "Idle" or "Waiting for next ping", next timer starts
 - T+0-3s: Background API post running (3s delay, then POST) - silent
-- T+3-4s: Revocation detected, "Error: Posting to API (Revoked)" shown (1.5s)
+- T+3-4s: Revocation detected, "API post failed (revoked)" shown (1.5s)
 - T+4.5s: Disconnect initiated
-- T+5s: Terminal status "WarDriving slot has been revoked"
+- T+5s: Terminal status "MeshMapper slot revoked"
 
 **Key Differences from Normal Disconnect:**
 - Normal disconnect: Dynamic Status shows `"—"` (em dash)
-- Revocation: Dynamic Status shows `"WarDriving slot has been revoked"` (red error, no prefix)
-- Revocation shows intermediate "Error: Posting to API (Revoked)" state
+- Revocation: Dynamic Status shows `"MeshMapper slot revoked"` (red error, no prefix)
+- Revocation shows intermediate "API post failed (revoked)" state
 - With the new ping/repeat flow, revocation may be detected after user already sees "Idle" or "Waiting for next ping" (because API runs in background)
 
 ## Workflow Diagrams
