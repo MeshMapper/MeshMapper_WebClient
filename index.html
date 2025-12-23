@@ -208,6 +208,9 @@
           </div>
           <div class="flex items-center gap-2">
             <span id="logLastSnr" class="text-xs font-mono text-slate-400">—</span>
+            <button id="sessionLogCopyBtn" class="copy-btn text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded transition-colors hidden">
+              Copy
+            </button>
             <svg id="logExpandArrow" class="w-4 h-4 text-slate-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
             </svg>
@@ -221,6 +224,65 @@
             <div id="sessionPings" class="space-y-2">
               <!-- Log entries will be appended here -->
               <div class="text-xs text-slate-500 italic text-center py-4">No pings logged yet</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- RX Log: Passive Observations -->
+      <section class="bg-slate-800/80 border border-slate-700 rounded-xl overflow-hidden" aria-labelledby="rxLogHeading">
+        <div id="rxLogSummaryBar" class="px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-slate-800/60 transition-colors">
+          <div class="flex items-center gap-3 text-sm min-w-0 flex-1">
+            <h2 id="rxLogHeading" class="text-sm font-medium text-slate-300 uppercase tracking-wide">RX Log</h2>
+            <span class="text-slate-500">|</span>
+            <span id="rxLogCount" class="font-medium text-slate-300">0 observations</span>
+            <span id="rxLogLastTime" class="text-slate-400 text-xs truncate hidden sm:inline">No data</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span id="rxLogLastRepeater" class="text-xs font-mono text-slate-400">—</span>
+            <span id="rxLogSnrChip" class="hidden"></span>
+            <button id="rxLogCopyBtn" class="copy-btn text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded transition-colors hidden">
+              Copy
+            </button>
+            <svg id="rxLogExpandArrow" class="w-4 h-4 text-slate-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+            </svg>
+          </div>
+        </div>
+        
+        <div id="rxLogBottomSheet" class="border-t border-slate-700 hidden">
+          <div id="rxLogScrollContainer" class="overflow-y-auto px-4 py-2 max-h-64">
+            <div id="rxLogEntries" class="space-y-2">
+              <div class="text-xs text-slate-500 italic text-center py-4">No RX observations yet</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Error Log -->
+      <section class="bg-slate-800/80 border border-slate-700 rounded-xl overflow-hidden" aria-labelledby="errorLogHeading">
+        <div id="errorLogSummaryBar" class="px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-slate-800/60 transition-colors">
+          <div class="flex items-center gap-3 text-sm min-w-0 flex-1">
+            <h2 id="errorLogHeading" class="text-sm font-medium text-red-300 uppercase tracking-wide">Error Log</h2>
+            <span class="text-slate-500">|</span>
+            <span id="errorLogCount" class="font-medium text-red-300">0 errors</span>
+            <span id="errorLogLastTime" class="text-slate-400 text-xs truncate hidden sm:inline">No errors</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span id="errorLogLastError" class="text-xs font-mono text-slate-400">—</span>
+            <button id="errorLogCopyBtn" class="copy-btn text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded transition-colors hidden">
+              Copy
+            </button>
+            <svg id="errorLogExpandArrow" class="w-4 h-4 text-slate-400 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+            </svg>
+          </div>
+        </div>
+        
+        <div id="errorLogBottomSheet" class="border-t border-slate-700 hidden">
+          <div id="errorLogScrollContainer" class="overflow-y-auto px-4 py-2 max-h-64">
+            <div id="errorLogEntries" class="space-y-2">
+              <div class="text-xs text-slate-500 italic text-center py-4">No errors logged</div>
             </div>
           </div>
         </div>

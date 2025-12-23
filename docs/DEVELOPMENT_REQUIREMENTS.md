@@ -16,6 +16,48 @@ This document defines the coding standards and requirements for all changes to t
 - Debug logging is controlled by the `DEBUG_ENABLED` flag (URL parameter `? debug=true`)
 - Log at key points: function entry, API calls, state changes, errors, and decision branches
 
+#### Debug Log Tagging Convention
+
+All debug log messages **MUST** include a descriptive tag in square brackets immediately after `[DEBUG]` that identifies the subsystem or feature area. This enables easier filtering and understanding of debug output. 
+
+**Format:** `[DEBUG] [TAG] Message here`
+
+**Required Tags:**
+
+| Tag | Description |
+|-----|-------------|
+| `[BLE]` | Bluetooth connection and device communication |
+| `[GPS]` | GPS/geolocation operations |
+| `[PING]` | Ping sending and validation |
+| `[API QUEUE]` | API batch queue operations |
+| `[RX BATCH]` | RX batch buffer operations |
+| `[PASSIVE RX]` | Passive RX logging logic |
+| `[PASSIVE RX UI]` | Passive RX UI rendering |
+| `[SESSION LOG]` | Session log tracking |
+| `[UNIFIED RX]` | Unified RX handler |
+| `[DECRYPT]` | Message decryption |
+| `[UI]` | General UI updates (status bar, buttons, etc.) |
+| `[CHANNEL]` | Channel setup and management |
+| `[TIMER]` | Timer and countdown operations |
+| `[WAKE LOCK]` | Wake lock acquisition/release |
+| `[GEOFENCE]` | Geofence and distance validation |
+| `[CAPACITY]` | Capacity check API calls |
+| `[AUTO]` | Auto ping mode operations |
+| `[INIT]` | Initialization and setup |
+| `[ERROR LOG]` | Error log UI operations |
+
+**Examples:**
+```javascript
+// ✅ Correct - includes tag
+debugLog("[BLE] Connection established");
+debugLog("[GPS] Fresh position acquired: lat=45.12345, lon=-75.12345");
+debugLog("[PING] Sending ping to channel 2");
+
+// ❌ Incorrect - missing tag
+debugLog("Connection established");
+debugLog("Fresh position acquired");
+```
+
 ### Status Messages
 - **ALWAYS** update `STATUS_MESSAGES.md` when adding or modifying user-facing status messages
 - Use the `setStatus(message, color)` function for all UI status updates
@@ -52,25 +94,20 @@ When **modifying connect or disconnect logic**, you must:
   - Any new states, retries, timeouts, or error handling
   - Any UI impacts (buttons, indicators, status messages)
 
----
-## Requested Change: Update App Connection Flow (Reorder Steps)
-
-### Background
-Below is the **current** app connection flow used when a user connects to a device for wardriving.
-
-#### Current Connection Flow
-1. **User Initiates** → User clicks **Connect**
-2. **Device Selection** → Browser displays BLE device picker
-3. **BLE GATT Connection** → App establishes a GATT connection to the selected device
-4. **Protocol Handshake** → App and device exchange/confirm protocol version compatibility
-5. **Device Info** → App retrieves device metadata (e.g., device name, public key, settings)
-6. **Time Sync** → App synchronizes the device clock
-7. **Channel Setup** → App creates or finds the `#wardriving` channel
-8. **GPS Init** → App starts GPS tracking
-9. **Capacity Check** → App acquires an API slot from **MeshMapper**
-10. **Connected** → App enables all controls; system is ready for wardriving
+### docs/PING_AUTO_PING_WORKFLOW.md Updates
+When **modifying ping or auto-ping logic**, you must: 
+- Read `docs/PING_AUTO_PING_WORKFLOW.md` before making the change (to understand current intended behavior).
+- Update `docs/PING_AUTO_PING_WORKFLOW.md` so it remains accurate after the change:
+  - Ping flows (manual `sendPing()`, auto-ping lifecycle)
+  - Validation logic (geofence, distance, cooldown)
+  - GPS acquisition and payload construction
+  - Repeater tracking and MeshMapper API posting
+  - Control locking and cooldown management
+  - Auto mode behavior (intervals, wake lock, page visibility)
+  - Any UI impacts (buttons, status messages, countdown displays)
 
 ---
 
 ### Requested Change
 
+<< Requested Changes go here >>

@@ -62,8 +62,9 @@
 6. **Time Sync** → Synchronizes device clock
 7. **Capacity Check** → Acquires API slot from MeshMapper
 8. **Channel Setup** → Creates/finds #wardriving channel
-9. **GPS Init** → Starts GPS tracking
-10. **Connected** → Enables all controls, ready for wardriving
+9. **Passive RX Listening** → Starts background packet monitoring
+10. **GPS Init** → Starts GPS tracking
+11. **Connected** → Enables all controls, ready for wardriving
 
 ### Detailed Connection Steps
 
@@ -141,16 +142,25 @@ connectBtn.addEventListener("click", async () => {
        "reason": "connect"
      }
      ```
-   - If `allowed: false`:
-     - Sets `state.disconnectReason = "capacity_full"`
-     - Triggers disconnect sequence after 1.5s delay
-     - **Connection Status**: `"Connecting"` → `"Disconnecting"` → `"Disconnected"` (red)
-     - **Dynamic Status**: `"Acquiring wardriving slot"` → `"WarDriving app has reached capacity"` (red, terminal)
+   - If `allowed: false` with reason code:
+     - API response may include `reason` field: `{"allowed": false, "reason": "outofdate"}`
+     - If reason code exists in `REASON_MESSAGES` mapping:
+       - Sets `state.disconnectReason = data.reason` (e.g., "outofdate")
+       - Triggers disconnect sequence after 1.5s delay
+       - **Connection Status**: `"Connecting"` → `"Disconnecting"` → `"Disconnected"` (red)
+       - **Dynamic Status**: `"Acquiring wardriving slot"` → `"[mapped message]"` (red, terminal)
+       - Example: "App out of date, please update" for reason="outofdate"
+     - If reason code not in mapping:
+       - Sets `state.disconnectReason = data.reason`
+       - Shows fallback message: "Connection not allowed: [reason]"
+     - If no reason code provided (backward compatibility):
+       - Sets `state.disconnectReason = "capacity_full"`
+       - **Dynamic Status**: `"MeshMapper at capacity"` (red, terminal)
    - If API error:
      - Sets `state.disconnectReason = "app_down"`
      - Triggers disconnect sequence after 1.5s delay (fail-closed)
      - **Connection Status**: `"Connecting"` → `"Disconnecting"` → `"Disconnected"` (red)
-     - **Dynamic Status**: `"Acquiring wardriving slot"` → `"WarDriving app is down"` (red, terminal)
+     - **Dynamic Status**: `"Acquiring wardriving slot"` → `"MeshMapper unavailable"` (red, terminal)
    - On success:
      - **Connection Status**: `"Connecting"` (blue, maintained)
      - **Dynamic Status**: `"Acquired wardriving slot"` (green)
@@ -173,22 +183,34 @@ connectBtn.addEventListener("click", async () => {
      - Stores channel object in `state.channel`
      - Updates UI: "#wardriving (CH:X)"
 
-9. **Initialize GPS**
+9. **Start Passive RX Listening**
    - **Connection Status**: `"Connecting"` (blue, maintained)
-   - **Dynamic Status**: `"Priming GPS"` (blue)
-   - Requests location permission
-   - Gets initial GPS position (30s timeout)
-   - Starts continuous GPS watch
-   - Starts GPS age updater (1s interval)
-   - Starts distance updater (3s interval)
-   - Updates UI with coordinates and accuracy
-   - Refreshes coverage map if accuracy < 100m
+   - **Dynamic Status**: No user-facing message (background operation)
+   - Registers event handler for `LogRxData` events
+   - Begins monitoring all incoming packets on wardriving channel
+   - Extracts last hop (direct repeater) from each packet
+   - Records observations: repeater ID, SNR, GPS location, timestamp
+   - Populates RX Log UI with real-time observations
+   - Operates independently of active ping operations
+   - **Debug Logging**: `[PASSIVE RX]` prefix for all debug messages
 
-10. **Connection Complete**
+10. **Initialize GPS**
+    - **Connection Status**: `"Connecting"` (blue, maintained)
+    - **Dynamic Status**: `"Priming GPS"` (blue)
+    - Requests location permission
+    - Gets initial GPS position (30s timeout)
+    - Starts continuous GPS watch
+    - Starts GPS age updater (1s interval)
+    - Starts distance updater (3s interval)
+    - Updates UI with coordinates and accuracy
+    - Refreshes coverage map if accuracy < 100m
+
+11. **Connection Complete**
     - **Connection Status**: `"Connected"` (green) - **NOW shown after GPS init**
     - **Dynamic Status**: `"—"` (em dash - cleared to show empty state)
     - Enables all UI controls
     - Ready for wardriving operations
+    - Passive RX listening running in background
 
 ## Disconnection Workflow
 
@@ -196,16 +218,18 @@ connectBtn.addEventListener("click", async () => {
 
 1. **Disconnect Trigger** → User clicks "Disconnect" or error occurs
 2. **Status Update** → Connection Status shows "Disconnecting", Dynamic Status cleared to em dash
-3. **Capacity Release** → Returns API slot to MeshMapper
-4. **Channel Deletion** → Removes #wardriving channel from device
-5. **BLE Disconnect** → Closes GATT connection
-6. **Cleanup** → Stops timers, GPS, wake locks
-7. **State Reset** → Clears all connection state
-8. **Disconnected** → Connection Status shows "Disconnected", Dynamic Status shows em dash or error message
+3. **API Queue Flush** → **CRITICAL: Flush pending messages BEFORE capacity release (session_id still valid)**
+4. **Stop Flush Timers** → Stop periodic and TX flush timers
+5. **Capacity Release** → Returns API slot to MeshMapper
+6. **Channel Deletion** → Removes #wardriving channel from device
+7. **BLE Disconnect** → Closes GATT connection
+8. **Cleanup** → Stops timers, GPS, wake locks, clears queue
+9. **State Reset** → Clears all connection state
+10. **Disconnected** → Connection Status shows "Disconnected", Dynamic Status shows em dash or error message
 
 ### Detailed Disconnection Steps
 
-See `content/wardrive.js` lines 2119-2179 for the main `disconnect()` function.
+See `content/wardrive.js` for the main `disconnect()` function.
 
 **Disconnect Triggers:**
 - User clicks "Disconnect" button
@@ -213,6 +237,7 @@ See `content/wardrive.js` lines 2119-2179 for the main `disconnect()` function.
 - Public key validation failure
 - Channel setup failure
 - BLE connection lost (device out of range)
+- Slot revocation during active session
 
 **Disconnection Sequence:**
 
@@ -221,40 +246,57 @@ See `content/wardrive.js` lines 2119-2179 for the main `disconnect()` function.
 
 2. **Set Disconnect Reason**
    - "normal" - user-initiated
-   - "capacity_full" - MeshMapper full
+   - "capacity_full" - MeshMapper full (no reason code)
    - "app_down" - API unavailable
    - "error" - validation/setup failure
    - "slot_revoked" - slot revoked during active session
+   - API reason codes (e.g., "outofdate") - specific denial reasons from capacity check API
 
 3. **Update Status**
    - **Connection Status**: `"Disconnecting"` (blue) - remains until cleanup completes
    - **Dynamic Status**: `"—"` (em dash - cleared)
 
-4. **Release Capacity**
+4. **Flush API Queue (CRITICAL - NEW)**
+   - **Connection Status**: `"Disconnecting"` (maintained)
+   - **Dynamic Status**: `"Posting X to API"` (if messages pending)
+   - Flushes all pending TX and RX messages in queue
+   - **Must occur BEFORE capacity release** (session_id still valid)
+   - Waits for flush to complete (async operation)
+   - Debug: `[API QUEUE] Flushing N queued messages before disconnect`
+
+5. **Stop Flush Timers**
+   - Stops 30-second periodic flush timer
+   - Stops TX-triggered 3-second flush timer
+   - Debug: `[API QUEUE] Stopping all flush timers`
+
+6. **Release Capacity**
    - POSTs to MeshMapper API with `reason: "disconnect"`
    - **Fail-open**: errors ignored, always proceeds
 
-5. **Delete Channel**
+7. **Delete Channel**
    - Sends `setChannel(idx, "", zeros)` to clear slot
    - **Fail-open**: errors ignored, always proceeds
 
-6. **Close BLE**
+8. **Close BLE**
    - Tries `connection.close()`
    - Falls back to `connection.disconnect()`
    - Last resort: `device.gatt.disconnect()`
    - Triggers "gattserverdisconnected" event
 
-7. **Disconnected Event Handler**
+9. **Disconnected Event Handler**
    - Fires on BLE disconnect
    - **Connection Status**: `"Disconnected"` (red) - ALWAYS set regardless of reason
    - **Dynamic Status**: Set based on `state.disconnectReason` (WITHOUT "Disconnected:" prefix):
-     - `capacity_full` → `"WarDriving app has reached capacity"` (red)
-     - `app_down` → `"WarDriving app is down"` (red)
-     - `slot_revoked` → `"WarDriving slot has been revoked"` (red)
-     - `public_key_error` → `"Unable to read device public key; try again"` (red)
+     - API reason codes in `REASON_MESSAGES` (e.g., `outofdate` → `"App out of date, please update"`) (red)
+     - `capacity_full` → `"MeshMapper at capacity"` (red)
+     - `app_down` → `"MeshMapper unavailable"` (red)
+     - `slot_revoked` → `"MeshMapper slot revoked"` (red)
+     - `public_key_error` → `"Device key error - reconnect"` (red)
+     - `session_id_error` → `"Session error - reconnect"` (red)
      - `channel_setup_error` → Error message (red)
      - `ble_disconnect_error` → Error message (red)
      - `normal` / `null` / `undefined` → `"—"` (em dash)
+     - Unknown reason codes → `"Connection not allowed: [reason]"` (red)
    - Runs comprehensive cleanup:
      - Stops auto-ping mode
      - Clears auto-ping timer
@@ -262,26 +304,28 @@ See `content/wardrive.js` lines 2119-2179 for the main `disconnect()` function.
      - Stops GPS age updater
      - Stops distance updater
      - Stops repeater tracking
+     - **Stops passive RX listening** (unregisters LogRxData handler)
+     - **Clears API queue messages** (timers already stopped)
      - Clears all timers (see `cleanupAllTimers()`)
      - Releases wake lock
      - Clears connection state
      - Clears device public key
 
-8. **UI Cleanup**
-   - Disables all controls except "Connect"
-   - Clears device info display
-   - Clears GPS display
-   - Clears distance display
-   - Changes button to "Connect" (green)
+10. **UI Cleanup**
+    - Disables all controls except "Connect"
+    - Clears device info display
+    - Clears GPS display
+    - Clears distance display
+    - Changes button to "Connect" (green)
 
-9. **State Reset**
-   - `state.connection = null`
-   - `state.channel = null`
-   - `state.lastFix = null`
-   - `state.lastSuccessfulPingLocation = null`
-   - `state.gpsState = "idle"`
+11. **State Reset**
+    - `state.connection = null`
+    - `state.channel = null`
+    - `state.lastFix = null`
+    - `state.lastSuccessfulPingLocation = null`
+    - `state.gpsState = "idle"`
 
-10. **Disconnected Complete**
+12. **Disconnected Complete**
     - **Connection Status**: `"Disconnected"` (red)
     - **Dynamic Status**: `"—"` (em dash) or error message based on disconnect reason
     - All resources released
@@ -299,7 +343,7 @@ When a wardriving slot is revoked during an active session (detected during API 
 **Revocation Sequence:**
 
 1. **Detection**
-   - During "Posting to API" operation
+   - During background API POST operation (runs asynchronously after RX window)
    - API returns `{"allowed": false, ...}`
    - Detected in `postToMeshMapperAPI()` response handler
 
@@ -307,6 +351,7 @@ When a wardriving slot is revoked during an active session (detected during API 
    - **Dynamic Status**: `"Error: Posting to API (Revoked)"` (red)
    - Sets `state.disconnectReason = "slot_revoked"`
    - Visible for 1.5 seconds
+   - **Note**: User may already be seeing "Idle" or "Waiting for next ping" before this error appears (because API runs in background)
 
 3. **Disconnect Initiated**
    - Calls `disconnect()` after 1.5s delay
@@ -317,19 +362,26 @@ When a wardriving slot is revoked during an active session (detected during API 
 4. **Terminal Status**
    - Disconnect event handler detects `slot_revoked` reason
    - **Connection Status**: `"Disconnected"` (red)
-   - **Dynamic Status**: `"WarDriving slot has been revoked"` (red, terminal - NO "Disconnected:" prefix)
+   - **Dynamic Status**: `"MeshMapper slot revoked"` (red, terminal - NO "Disconnected:" prefix)
    - This is the final terminal status
 
-**Complete Revocation Flow:**
+**Complete Revocation Flow (Updated for background API posting):**
 ```
 Connection Status: (unchanged) → "Disconnecting" → "Disconnected"
-Dynamic Status: "Posting to API" → "Error: Posting to API (Revoked)" → "—" → "WarDriving slot has been revoked"
+Dynamic Status: "Idle"/"Waiting for next ping" → "API post failed (revoked)" → "—" → "MeshMapper slot revoked"
 ```
+**Timeline:**
+- T+0s: RX window completes, status shows "Idle" or "Waiting for next ping", next timer starts
+- T+0-3s: Background API post running (3s delay, then POST) - silent
+- T+3-4s: Revocation detected, "API post failed (revoked)" shown (1.5s)
+- T+4.5s: Disconnect initiated
+- T+5s: Terminal status "MeshMapper slot revoked"
 
 **Key Differences from Normal Disconnect:**
 - Normal disconnect: Dynamic Status shows `"—"` (em dash)
-- Revocation: Dynamic Status shows `"WarDriving slot has been revoked"` (red error, no prefix)
-- Revocation shows intermediate "Error: Posting to API (Revoked)" state
+- Revocation: Dynamic Status shows `"MeshMapper slot revoked"` (red error, no prefix)
+- Revocation shows intermediate "API post failed (revoked)" state
+- With the new ping/repeat flow, revocation may be detected after user already sees "Idle" or "Waiting for next ping" (because API runs in background)
 
 ## Workflow Diagrams
 
@@ -576,6 +628,336 @@ stateDiagram-v2
 - Error → Disconnected
 - Recovery always possible
 
+## Ping/Repeat Listener Flow
+
+### Overview
+
+The ping/repeat listener flow manages the complete lifecycle of a wardrive ping operation, from sending the ping to listening for repeater echoes to posting data to the MeshMapper API.
+
+**Key Design Change (v1.4.2+):** API posting now runs in the background (asynchronously) to prevent blocking the main ping cycle. This allows the next ping timer to start immediately after the RX listening window completes, without waiting for the API POST to finish.
+
+### New Ping/Repeat Flow (v1.4.2+)
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ 1. Ping Sent                                                        │
+│    - Send ping to mesh network                                      │
+│    - Start repeater echo tracking                                   │
+│    - Show "Ping sent" status                                        │
+│    - Lock ping controls                                             │
+└──────────────────────────────┬──────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ 2. RX Listening Window (10 seconds)                                 │
+│    - Listen for repeater echoes                                     │
+│    - Show "Listening for heard repeats (Xs)" countdown              │
+│    - Track all repeaters that forward the ping                      │
+│    - Update session log in real-time                                │
+└──────────────────────────────┬──────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ 3. RX Window Complete - IMMEDIATE ACTIONS                           │
+│    - Stop RX listening countdown                                    │
+│    - Finalize heard repeats (stop tracking)                         │
+│    - Update UI log with final repeater data                         │
+│    - **Unlock ping controls** ← NEW: Don't wait for API             │
+│    - **Start next ping timer** ← NEW: Don't wait for API            │
+│    - **Set status to "Idle"/"Waiting for next ping"**               │
+└──────────────────────────────┬──────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ 4. Background API Posting (Async, Non-Blocking)                     │
+│    - Delay 3 seconds (silent, no status message)                    │
+│    - POST ping data to MeshMapper API                               │
+│    - **Success**: Silent (no UI notification)                       │
+│    - **Error**: Show "Error: API post failed"                       │
+│    - Refresh coverage map after POST completes                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Changes from Previous Flow (v1.4.1 and earlier)
+
+**Old Flow:**
+1. Ping sent
+2. Listen for repeats (7 seconds)
+3. **Wait for API post to complete** (3s delay + POST time)
+4. **Then** unlock controls and start next timer
+5. Status: "Ping sent" → "Listening (7s)" → "Posting to API" → "Idle"/"Waiting"
+
+**New Flow:**
+1. Ping sent
+2. Listen for repeats (10 seconds) ← **Increased from 7s to 10s**
+3. **Immediately** unlock controls and start next timer ← **Key change**
+4. **Background** API post (silent on success, error only if fails)
+5. Status: "Ping sent" → "Listening (10s)" → "Idle"/"Waiting" ← **No "Posting to API"**
+
+### Benefits
+
+1. **Faster cycle times**: Next ping can start immediately after 10s RX window, not waiting for API
+2. **Better UX**: User sees smooth progression without API delays blocking the UI
+3. **More repeater data**: 10-second listen window (vs 7s) captures more mesh echoes
+4. **Cleaner UI**: API success messages suppressed, only errors shown
+5. **Non-blocking**: API failures don't stall the ping cycle
+
+### Implementation Details
+
+**Functions:**
+- `postApiInBackground(lat, lon, accuracy, heardRepeats)` - New async function for background API posting
+- `sendPing(manual)` - Refactored to start next timer immediately after RX window
+- `RX_LOG_LISTEN_WINDOW_MS` - Increased from 7000ms to 10000ms
+
+**Error Handling:**
+- API POST failures are caught with `.catch()` handler
+- Error message shown to user: "Error: API post failed"
+- Main ping cycle continues unaffected by API failures
+- Background failures don't crash or stall the application
+
+**Debug Logging:**
+- `[DEBUG] Backgrounding API post for coordinates: ...`
+- `[DEBUG] Starting 3-second delay before API POST`
+- `[DEBUG] 3-second delay complete, posting to API`
+- `[DEBUG] Background API post completed successfully`
+- `[DEBUG] Background API post failed: ...`
+
+### Status Message Behavior
+
+**Visible to User:**
+- "Ping sent" (500ms minimum)
+- "Listening for heard repeats (10s)" (countdown, 10 seconds)
+- "Idle" or "Waiting for next ping (Xs)" (immediately after RX window)
+- "Error: API post failed" (only if background API fails)
+
+**Not Visible (Suppressed):**
+- ~~"Posting to API"~~ - No longer shown for successful API posts
+- API success confirmation - Silent operation
+
+### Timing Analysis
+
+**Total time from ping to next ping (Auto mode, 30s interval):**
+- Old flow: 10s (ping) + 7s (listen) + 3s (delay) + 0.5s (API) + 30s (interval) = ~50.5s between pings
+- New flow: 10s (ping) + 10s (listen) + 30s (interval) = ~50s between pings (API runs in parallel)
+
+**Actual improvement:** Next timer starts ~3.5s earlier (no waiting for API), better responsiveness
+
+## Passive RX Log Listening
+
+### Overview
+
+The passive RX log listening feature monitors all incoming packets on the wardriving channel without adding any traffic to the mesh network. This provides visibility into which repeaters can be heard at the current GPS location.
+
+### Key Differences: Active Ping Tracking vs Passive RX Listening
+
+**Active Ping Tracking (Existing):**
+- Triggered when user sends a ping
+- Validates incoming packets are echoes of our specific ping message
+- Extracts **first hop** (first repeater in the path)
+- Tracks repeaters that first forwarded our message into the mesh
+- Runs for 7 seconds after each ping
+- Results shown in Session Log
+
+**Passive RX Listening (New):**
+- Runs continuously in background once connected
+- Monitors **all** packets on wardriving channel (not just our pings)
+- Extracts **last hop** (repeater that directly delivered packet to us)
+- Shows which repeaters we can actually hear from current location
+- No time limit - runs entire connection duration
+- Results shown in RX Log UI section
+
+### Path Interpretation
+
+For a packet with path: `77 → 92 → 0C`
+- **First hop (ping tracking)**: `77` - origin repeater that first flooded our message
+- **Last hop (passive RX)**: `0C` - repeater that directly delivered the packet to us
+
+The last hop is more relevant for coverage mapping because it represents the repeater we can actually receive signals from at our current GPS coordinates.
+
+### Implementation Details
+
+**Startup:**
+1. Connection established
+2. Channel setup completes
+3. `startPassiveRxListening()` called
+4. Registers handler for `Constants.PushCodes.LogRxData` events
+5. Handler: `handlePassiveRxLogEvent()`
+
+**Packet Processing:**
+1. Parse packet from raw bytes
+2. Validate header (0x15 - GroupText/Flood)
+3. Validate channel hash matches wardriving channel
+4. Check path length (skip if no repeaters)
+5. Extract last hop from path
+6. Get current GPS coordinates
+7. Record observation: `{repeaterId, snr, lat, lon, timestamp}`
+8. Update RX Log UI
+
+**Shutdown:**
+1. Disconnect initiated
+2. `stopPassiveRxListening()` called in disconnect cleanup
+3. Unregisters LogRxData event handler
+4. Clears state
+
+### UI Components
+
+**RX Log Section** (below Session Log):
+- Header bar showing observation count and last repeater
+- Expandable/collapsible panel
+- Scrollable list of observations (newest first)
+- Each entry shows: timestamp, GPS coords, repeater ID, SNR chip
+- Max 100 entries (oldest removed when limit reached)
+
+### Future API Integration
+
+Placeholder function `postRxLogToMeshMapperAPI()` ready for future implementation:
+- Batch post accumulated observations
+- Include session_id from capacity check
+- Format: `{observations: [{repeaterId, snr, lat, lon, timestamp}]}`
+- API endpoint: `MESHMAPPER_RX_LOG_API_URL` (currently null)
+
+### Debug Logging
+
+All passive RX operations use `[PASSIVE RX]` prefix:
+- `[PASSIVE RX] Starting passive RX listening`
+- `[PASSIVE RX] Received rx_log entry: SNR=X`
+- `[PASSIVE RX] Header validation passed`
+- `[PASSIVE RX] Observation logged: repeater=XX`
+- `[PASSIVE RX UI] Summary updated: N observations`
+
+Enable debug mode with URL parameter: `?debug=true`
+
+### Coexistence with Active Ping Tracking
+
+Both handlers listen to the same `LogRxData` event simultaneously:
+- **Active handler**: Validates message content matches our ping, extracts first hop
+- **Passive handler**: Processes all messages, extracts last hop
+- No conflicts - they serve different purposes and operate independently
+- Event system supports multiple handlers on the same event
+
+## API Batch Queue System
+
+### Overview
+
+The batch queue system optimizes network efficiency by batching multiple API messages into a single POST request. The MeshMapper API accepts arrays of up to 50 messages (both TX and RX types) in a single request.
+
+**Key Benefits:**
+- Reduces network overhead (fewer HTTP requests)
+- Optimizes bandwidth usage
+- Supports mixed TX/RX batches
+- Maintains data integrity with proper flush sequencing
+
+### Queue Configuration
+
+**Constants:**
+```javascript
+const API_BATCH_MAX_SIZE = 50;              // Maximum messages per batch POST
+const API_BATCH_FLUSH_INTERVAL_MS = 30000;  // Flush every 30 seconds
+const API_TX_FLUSH_DELAY_MS = 3000;         // Flush 3 seconds after TX ping
+```
+
+**Queue State:**
+```javascript
+const apiQueue = {
+  messages: [],           // Array of pending payloads
+  flushTimerId: null,     // Timer ID for periodic flush (30s)
+  txFlushTimerId: null,   // Timer ID for TX-triggered flush (3s)
+  isProcessing: false     // Lock to prevent concurrent flush operations
+};
+```
+
+### Flush Triggers
+
+The queue flushes when ANY of these conditions are met:
+
+1. **TX Ping Queued** → Starts/resets 3-second timer, flushes when timer fires
+2. **30 Seconds Elapsed** → Periodic flush of any pending messages
+3. **Queue Size Reaches 50** → Immediate flush (prevents exceeding API limit)
+4. **Disconnect Called** → Flushes before releasing capacity slot
+
+### Message Flow
+
+**TX Messages (Active Pings):**
+1. User sends ping via `sendPing()`
+2. After RX listening window, `postApiAndRefreshMap()` called
+3. Builds payload and calls `queueApiMessage(payload, "TX")`
+4. Starts/resets TX flush timer (3 seconds)
+5. Status shows: `"Queued (X/50)"`
+
+**RX Messages (Passive Observations):**
+1. Passive RX listener detects repeater
+2. Batch aggregation logic processes observation
+3. Calls `queueApiPost(entry)` which calls `queueApiMessage(payload, "RX")`
+4. Rides along with TX flushes or 30-second periodic flush
+5. Status shows: `"Queued (X/50)"`
+
+**Batch Flush:**
+1. Flush trigger fires (TX timer, periodic, size limit, or disconnect)
+2. `flushApiQueue()` takes all messages from queue
+3. Prevents concurrent flushes with `isProcessing` lock
+4. POSTs entire batch as JSON array to API
+5. Logs TX/RX counts: `[API QUEUE] Batch composition: X TX, Y RX`
+6. Checks for slot revocation in response
+7. Status shows: `"Posting X to API"`
+
+### Implementation Functions
+
+**Core Functions:**
+- `queueApiMessage(payload, wardriveType)` - Add message to queue
+- `scheduleTxFlush()` - Schedule 3-second flush after TX
+- `startFlushTimer()` - Start 30-second periodic timer
+- `stopFlushTimers()` - Stop all flush timers
+- `flushApiQueue()` - Flush all queued messages
+- `getQueueStatus()` - Get queue status for debugging
+
+**Integration Points:**
+- `postApiAndRefreshMap()` - Queues TX messages (replaces direct POST)
+- `queueApiPost()` - Queues RX messages (replaces direct POST)
+- `disconnect()` - Flushes queue BEFORE capacity release
+- `cleanupAllTimers()` - Stops flush timers
+- Disconnected event handler - Clears queue messages
+
+### Error Handling
+
+**Session ID Validation:**
+- Queue functions validate `state.wardriveSessionId` before operations
+- Missing session_id triggers error and disconnect
+
+**Slot Revocation:**
+- API response checked for `allowed: false`
+- If revoked, triggers disconnect sequence
+- Status: `"Error: Posting to API (Revoked)"`
+
+**Network Errors:**
+- Flush failures logged but don't crash app
+- Status: `"Error: API batch post failed"`
+- Queue continues accepting new messages
+
+### Debug Logging
+
+All queue operations use `[API QUEUE]` prefix:
+- `[API QUEUE] Queueing TX message`
+- `[API QUEUE] Queue size: X/50`
+- `[API QUEUE] Scheduling TX flush in 3000ms`
+- `[API QUEUE] Batch composition: X TX, Y RX`
+- `[API QUEUE] Batch post successful: X TX, Y RX`
+
+Enable debug mode with URL parameter: `?debug=true`
+
+### Critical Disconnect Sequence
+
+**Order matters for data integrity:**
+
+1. **Flush queue** (session_id still valid) ← CRITICAL FIRST STEP
+2. Stop flush timers
+3. Release capacity slot
+4. Delete channel
+5. Close BLE
+6. Clear queue messages
+7. Cleanup and reset
+
+This ensures all pending messages are posted before the session becomes invalid.
+
 ## Summary
 
 MeshCore-GOME-WarDriver implements a robust Web Bluetooth wardriving application with clear connection/disconnection workflows:
@@ -586,11 +968,12 @@ MeshCore-GOME-WarDriver implements a robust Web Bluetooth wardriving application
 3. **Comprehensive Cleanup**: All resources explicitly released
 4. **Clear State Machine**: No ambiguous states
 5. **User Transparency**: Status messages at every step
+6. **Passive Background Monitoring**: Continuous RX logging without mesh traffic
 
-**Connection:** BLE → Device Info → Time Sync → Capacity Check → Channel Setup → GPS → Connected
+**Connection:** BLE → Device Info → Time Sync → Capacity Check → Channel Setup → Passive RX Start → GPS → Connected
 
-**Disconnection:** Capacity Release → Channel Delete → BLE Close → Full Cleanup → Disconnected
+**Disconnection:** Capacity Release → Channel Delete → BLE Close → Full Cleanup (including Passive RX Stop) → Disconnected
 
-**Debug Mode:** Add `?debug=true` to URL for detailed logging
+**Debug Mode:** Add `?debug=true` to URL for detailed logging (including `[PASSIVE RX]` messages)
 
-The workflow prioritizes reliability, clear error messages, and complete resource cleanup on every disconnect.
+The workflow prioritizes reliability, clear error messages, complete resource cleanup on every disconnect, and non-intrusive background observation of mesh network activity.

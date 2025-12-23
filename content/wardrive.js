@@ -28,6 +28,24 @@ function debugWarn(message, ...args) {
 function debugError(message, ...args) {
   if (DEBUG_ENABLED) {
     console.error(`[DEBUG] ${message}`, ...args);
+    
+    // Also add to Error Log UI (use try-catch to prevent recursive errors)
+    try {
+      // Extract source tag if present (e.g., "[BLE]" from "[BLE] Connection failed")
+      const tagMatch = message.match(/^\[([^\]]+)\]/);
+      const source = tagMatch ? tagMatch[1] : null;
+      
+      // Remove tag from message if present
+      const cleanMessage = tagMatch ? message.replace(/^\[[^\]]+\]\s*/, '') : message;
+      
+      // Only add to Error Log if the UI is initialized
+      if (typeof addErrorLogEntry === 'function') {
+        addErrorLogEntry(cleanMessage, source);
+      }
+    } catch (e) {
+      // Silently fail to prevent recursive errors
+      console.error('Failed to add error to Error Log UI:', e);
+    }
   }
 }
 
@@ -44,7 +62,8 @@ const STATUS_UPDATE_DELAY_MS = 100;            // Brief delay to ensure "Ping se
 const MAP_REFRESH_DELAY_MS = 1000;             // Delay after API post to ensure backend updated
 const MIN_PAUSE_THRESHOLD_MS = 1000;           // Minimum timer value (1 second) to pause
 const MAX_REASONABLE_TIMER_MS = 5 * 60 * 1000; // Maximum reasonable timer value (5 minutes) to handle clock skew
-const RX_LOG_LISTEN_WINDOW_MS = 7000;          // Listen window for repeater echoes (7 seconds)
+const RX_LOG_LISTEN_WINDOW_MS = 6000;         // Listen window for repeater echoes (6 seconds)
+const CHANNEL_GROUP_TEXT_HEADER = 0x15;       // Header byte for Meshtastic GroupText packets (0x15) - used exclusively for Session Log echo detection
 
 // Pre-computed channel hash and key for the wardriving channel
 // These will be computed once at startup and used for message correlation and decryption
@@ -56,11 +75,11 @@ let WARDRIVING_CHANNEL_KEY = null;
   try {
     WARDRIVING_CHANNEL_KEY = await deriveChannelKey(CHANNEL_NAME);
     WARDRIVING_CHANNEL_HASH = await computeChannelHash(WARDRIVING_CHANNEL_KEY);
-    debugLog(`Wardriving channel hash pre-computed at startup: 0x${WARDRIVING_CHANNEL_HASH.toString(16).padStart(2, '0')}`);
-    debugLog(`Wardriving channel key cached for message decryption (${WARDRIVING_CHANNEL_KEY.length} bytes)`);
+    debugLog(`[INIT] Wardriving channel hash pre-computed at startup: 0x${WARDRIVING_CHANNEL_HASH.toString(16).padStart(2, '0')}`);
+    debugLog(`[INIT] Wardriving channel key cached for message decryption (${WARDRIVING_CHANNEL_KEY.length} bytes)`);
   } catch (error) {
-    debugError(`CRITICAL: Failed to pre-compute channel hash/key: ${error.message}`);
-    debugError(`Repeater echo tracking will be disabled. Please reload the page.`);
+    debugError(`[INIT] CRITICAL: Failed to pre-compute channel hash/key: ${error.message}`);
+    debugError(`[INIT] Repeater echo tracking will be disabled. Please reload the page.`);
     // Channel hash and key remain null, which will be checked before starting tracking
   }
 })();
@@ -73,11 +92,22 @@ const OTTAWA_GEOFENCE_RADIUS_M = 150000; // 150 km in meters
 // Distance-Based Ping Filtering
 const MIN_PING_DISTANCE_M = 25; // Minimum distance (25m) between pings
 
+// Passive RX Log Batch Configuration
+const RX_BATCH_DISTANCE_M = 25;        // Distance trigger for flushing batch (separate from MIN_PING_DISTANCE_M for independent tuning)
+const RX_BATCH_TIMEOUT_MS = 30000;     // Max hold time per repeater (30 sec)
+const RX_BATCH_MIN_WAIT_MS = 2000;     // Min wait to collect burst RX events
+
+// API Batch Queue Configuration
+const API_BATCH_MAX_SIZE = 50;              // Maximum messages per batch POST
+const API_BATCH_FLUSH_INTERVAL_MS = 30000;  // Flush every 30 seconds
+const API_TX_FLUSH_DELAY_MS = 3000;         // Flush 3 seconds after TX ping
+
 // MeshMapper API Configuration
 const MESHMAPPER_API_URL = "https://yow.meshmapper.net/wardriving-api.php";
 const MESHMAPPER_CAPACITY_CHECK_URL = "https://yow.meshmapper.net/capacitycheck.php";
 const MESHMAPPER_API_KEY = "59C7754DABDF5C11CA5F5D8368F89";
 const MESHMAPPER_DEFAULT_WHO = "GOME-WarDriver"; // Default identifier
+const MESHMAPPER_RX_LOG_API_URL = "https://yow.meshmapper.net/wardriving-api.php";
 
 // Static for now; will be made dynamic later.
 const WARDIVE_IATA_CODE = "YOW";
@@ -87,6 +117,13 @@ const WARDIVE_IATA_CODE = "YOW";
 // For release builds: Contains the release version (e.g., "v1.3.0")
 // For DEV builds: Contains "DEV-<EPOCH>" format (e.g., "DEV-1734652800")
 const APP_VERSION = "UNKNOWN"; // Placeholder - replaced during build
+
+// ---- Capacity Check Reason Messages ----
+// Maps API reason codes to user-facing error messages
+const REASON_MESSAGES = {
+  outofdate: "App out of date, please update",
+  // Future reasons can be added here
+};
 
 // ---- UI helpers ----
 // Status colors for different states
@@ -126,12 +163,53 @@ const logScrollContainer = $("logScrollContainer");
 const logCount = $("logCount");
 const logLastTime = $("logLastTime");
 const logLastSnr = $("logLastSnr");
+const sessionLogCopyBtn = $("sessionLogCopyBtn");
+
+// RX Log selectors
+const rxLogSummaryBar = $("rxLogSummaryBar");
+const rxLogBottomSheet = $("rxLogBottomSheet");
+const rxLogScrollContainer = $("rxLogScrollContainer");
+const rxLogCount = $("rxLogCount");
+const rxLogLastTime = $("rxLogLastTime");
+const rxLogLastRepeater = $("rxLogLastRepeater");
+const rxLogSnrChip = $("rxLogSnrChip");
+const rxLogEntries = $("rxLogEntries");
+const rxLogExpandArrow = $("rxLogExpandArrow");
+const rxLogCopyBtn = $("rxLogCopyBtn");
+
+// Error Log selectors
+const errorLogSummaryBar = $("errorLogSummaryBar");
+const errorLogBottomSheet = $("errorLogBottomSheet");
+const errorLogScrollContainer = $("errorLogScrollContainer");
+const errorLogCount = $("errorLogCount");
+const errorLogLastTime = $("errorLogLastTime");
+const errorLogLastError = $("errorLogLastError");
+const errorLogEntries = $("errorLogEntries");
+const errorLogExpandArrow = $("errorLogExpandArrow");
+const errorLogCopyBtn = $("errorLogCopyBtn");
 
 // Session log state
 const sessionLogState = {
   entries: [],  // Array of parsed log entries
   isExpanded: false,
   autoScroll: true
+};
+
+// RX log state (passive observations)
+const rxLogState = {
+  entries: [],  // Array of parsed RX log entries
+  isExpanded: false,
+  autoScroll: true,
+  maxEntries: 100  // Limit to prevent memory issues
+};
+
+// Error log state
+const errorLogState = {
+  entries: [],  // Array of error log entries
+  isExpanded: false,
+  autoScroll: true,
+  maxEntries: 50,  // Limit to prevent memory issues
+  previewLength: 20  // Character length for error message preview in summary
 };
 
 // ---- State ----
@@ -155,11 +233,10 @@ const state = {
   skipReason: null, // Reason for skipping a ping - internal value only (e.g., "gps too old")
   pausedAutoTimerRemainingMs: null, // Remaining time when auto ping timer was paused by manual ping
   lastSuccessfulPingLocation: null, // { lat, lon } of the last successful ping (Mesh + API)
-  distanceUpdateTimer: null, // Timer for updating distance display
   capturedPingCoords: null, // { lat, lon, accuracy } captured at ping time, used for API post after 7s delay
   devicePublicKey: null, // Hex string of device's public key (used for capacity check)
   wardriveSessionId: null, // Session ID from capacity check API (used for all MeshMapper API posts)
-  disconnectReason: null, // Tracks the reason for disconnection (e.g., "app_down", "capacity_full", "public_key_error", "channel_setup_error", "ble_disconnect_error", "session_id_error", "normal")
+  disconnectReason: null, // Tracks the reason for disconnection (e.g., "app_down", "capacity_full", "public_key_error", "channel_setup_error", "ble_disconnect_error", "session_id_error", "normal", or API reason codes like "outofdate")
   channelSetupErrorMessage: null, // Error message from channel setup failure
   bleDisconnectErrorMessage: null, // Error message from BLE disconnect failure
   repeaterTracking: {
@@ -171,7 +248,21 @@ const state = {
     listenTimeout: null,          // Timeout handle for 7-second window
     rxLogHandler: null,           // Handler function for rx_log events
     currentLogEntry: null,        // Current log entry being updated (for incremental UI updates)
-  }
+  },
+  passiveRxTracking: {
+    isListening: false,           // Whether we're currently listening passively
+    rxLogHandler: null,           // Handler function for passive rx_log events
+    entries: []                   // Array of { repeaterId, snr, lat, lon, timestamp }
+  },
+  rxBatchBuffer: new Map()        // Map<repeaterId, {firstLocation, firstTimestamp, samples, timeoutId}>
+};
+
+// API Batch Queue State
+const apiQueue = {
+  messages: [],           // Array of pending payloads
+  flushTimerId: null,     // Timer ID for periodic flush (30s)
+  txFlushTimerId: null,   // Timer ID for TX-triggered flush (3s)
+  isProcessing: false     // Lock to prevent concurrent flush operations
 };
 
 // Status message management with minimum visibility duration
@@ -199,7 +290,7 @@ function setStatus(text, color = STATUS_COLORS.idle, immediate = false) {
   // This prevents countdown timer updates from being delayed unnecessarily
   // Example: If status is already "Waiting (10s)", the next "Waiting (9s)" won't be delayed
   if (text === statusMessageState.currentText && color === statusMessageState.currentColor) {
-    debugLog(`Status update (same message): "${text}"`);
+    debugLog(`[UI] Status update (same message): "${text}"`);
     statusMessageState.lastSetTime = now;
     return;
   }
@@ -218,7 +309,7 @@ function setStatus(text, color = STATUS_COLORS.idle, immediate = false) {
   
   // Minimum visibility time has not passed, queue the message
   const delayNeeded = MIN_STATUS_VISIBILITY_MS - timeSinceLastSet;
-  debugLog(`Status queued (${delayNeeded}ms delay): "${text}" (current: "${statusMessageState.currentText}")`);
+  debugLog(`[UI] Status queued (${delayNeeded}ms delay): "${text}" (current: "${statusMessageState.currentText}")`);
   
   // Store pending message
   statusMessageState.pendingMessage = { text, color };
@@ -250,7 +341,7 @@ function applyStatusImmediately(text, color) {
   statusMessageState.lastSetTime = Date.now();
   statusMessageState.currentText = text;
   statusMessageState.currentColor = color;
-  debugLog(`Status applied: "${text}"`);
+  debugLog(`[UI] Status applied: "${text}"`);
 }
 
 /**
@@ -381,9 +472,9 @@ function pauseAutoCountdown() {
     // Only pause if there's meaningful time remaining and not unreasonably large
     if (remainingMs > MIN_PAUSE_THRESHOLD_MS && remainingMs < MAX_REASONABLE_TIMER_MS) {
       state.pausedAutoTimerRemainingMs = remainingMs;
-      debugLog(`Pausing auto countdown with ${state.pausedAutoTimerRemainingMs}ms remaining`);
+      debugLog(`[TIMER] Pausing auto countdown with ${state.pausedAutoTimerRemainingMs}ms remaining`);
     } else {
-      debugLog(`Auto countdown time out of reasonable range (${remainingMs}ms), not pausing`);
+      debugLog(`[TIMER] Auto countdown time out of reasonable range (${remainingMs}ms), not pausing`);
       state.pausedAutoTimerRemainingMs = null;
     }
   }
@@ -397,12 +488,12 @@ function resumeAutoCountdown() {
   if (state.pausedAutoTimerRemainingMs !== null) {
     // Validate paused time is still reasonable before resuming
     if (state.pausedAutoTimerRemainingMs > MIN_PAUSE_THRESHOLD_MS && state.pausedAutoTimerRemainingMs < MAX_REASONABLE_TIMER_MS) {
-      debugLog(`Resuming auto countdown with ${state.pausedAutoTimerRemainingMs}ms remaining`);
+      debugLog(`[TIMER] Resuming auto countdown with ${state.pausedAutoTimerRemainingMs}ms remaining`);
       startAutoCountdown(state.pausedAutoTimerRemainingMs);
       state.pausedAutoTimerRemainingMs = null;
       return true;
     } else {
-      debugLog(`Paused time out of reasonable range (${state.pausedAutoTimerRemainingMs}ms), not resuming`);
+      debugLog(`[TIMER] Paused time out of reasonable range (${state.pausedAutoTimerRemainingMs}ms), not resuming`);
       state.pausedAutoTimerRemainingMs = null;
     }
   }
@@ -422,23 +513,23 @@ function resumeAutoCountdown() {
  */
 function handleManualPingBlockedDuringAutoMode() {
   if (state.running) {
-    debugLog("Manual ping blocked during auto mode - resuming auto countdown");
+    debugLog("[AUTO] Manual ping blocked during auto mode - resuming auto countdown");
     const resumed = resumeAutoCountdown();
     if (!resumed) {
-      debugLog("No paused countdown to resume, scheduling new auto ping");
+      debugLog("[AUTO] No paused countdown to resume, scheduling new auto ping");
       scheduleNextAutoPing();
     }
   }
 }
 
 function startRxListeningCountdown(delayMs) {
-  debugLog(`Starting RX listening countdown: ${delayMs}ms`);
+  debugLog(`[TIMER] Starting RX listening countdown: ${delayMs}ms`);
   state.rxListeningEndTime = Date.now() + delayMs;
   rxListeningCountdownTimer.start(delayMs);
 }
 
 function stopRxListeningCountdown() {
-  debugLog(`Stopping RX listening countdown`);
+  debugLog(`[TIMER] Stopping RX listening countdown`);
   state.rxListeningEndTime = null;
   rxListeningCountdownTimer.stop();
 }
@@ -470,7 +561,7 @@ function startCooldown() {
 function updateControlsForCooldown() {
   const connected = !!state.connection;
   const inCooldown = isInCooldown();
-  debugLog(`updateControlsForCooldown: connected=${connected}, inCooldown=${inCooldown}, pingInProgress=${state.pingInProgress}`);
+  debugLog(`[UI] updateControlsForCooldown: connected=${connected}, inCooldown=${inCooldown}, pingInProgress=${state.pingInProgress}`);
   sendPingBtn.disabled = !connected || inCooldown || state.pingInProgress;
   autoToggleBtn.disabled = !connected || inCooldown || state.pingInProgress;
 }
@@ -482,12 +573,12 @@ function updateControlsForCooldown() {
 function unlockPingControls(reason) {
   state.pingInProgress = false;
   updateControlsForCooldown();
-  debugLog(`Ping controls unlocked (pingInProgress=false) ${reason}`);
+  debugLog(`[UI] Ping controls unlocked (pingInProgress=false) ${reason}`);
 }
 
 // Timer cleanup
 function cleanupAllTimers() {
-  debugLog("Cleaning up all timers");
+  debugLog("[TIMER] Cleaning up all timers");
   
   if (state.meshMapperTimer) {
     clearTimeout(state.meshMapperTimer);
@@ -505,6 +596,9 @@ function cleanupAllTimers() {
     statusMessageState.pendingTimer = null;
     statusMessageState.pendingMessage = null;
   }
+  
+  // Clean up API queue timers
+  stopFlushTimers();
   
   // Clean up state timer references
   state.autoCountdownTimer = null;
@@ -525,6 +619,17 @@ function cleanupAllTimers() {
   
   // Clear wardrive session ID
   state.wardriveSessionId = null;
+  
+  // Clear RX batch buffer and cancel any pending timeouts
+  if (state.rxBatchBuffer && state.rxBatchBuffer.size > 0) {
+    for (const [repeaterId, batch] of state.rxBatchBuffer.entries()) {
+      if (batch.timeoutId) {
+        clearTimeout(batch.timeoutId);
+      }
+    }
+    state.rxBatchBuffer.clear();
+    debugLog("[RX BATCH] RX batch buffer cleared");
+  }
 }
 
 function enableControls(connected) {
@@ -560,7 +665,7 @@ function scheduleCoverageRefresh(lat, lon, delayMs = 0) {
 
   coverageRefreshTimer = setTimeout(() => {
     const url = buildCoverageEmbedUrl(lat, lon);
-    debugLog("Coverage iframe URL:", url);
+    debugLog("[UI] Coverage iframe URL:", url);
     coverageFrameEl.src = url;
   }, delayMs);
 }
@@ -606,7 +711,7 @@ function setConnStatus(text, color) {
   
   if (!connectionStatusEl) return;
   
-  debugLog(`Connection status: "${text}"`);
+  debugLog(`[UI] Connection status: "${text}"`);
   connectionStatusEl.textContent = text;
   connectionStatusEl.className = `font-medium ${color}`;
   
@@ -638,7 +743,7 @@ function setDynamicStatus(text, color = STATUS_COLORS.idle, immediate = false) {
   // Block connection words from dynamic bar
   const connectionWords = ['Connected', 'Connecting', 'Disconnecting', 'Disconnected'];
   if (connectionWords.includes(text)) {
-    debugWarn(`Attempted to show connection word "${text}" in dynamic status bar - blocked, showing em dash instead`);
+    debugWarn(`[UI] Attempted to show connection word "${text}" in dynamic status bar - blocked, showing em dash instead`);
     text = '—';
     color = STATUS_COLORS.idle;
   }
@@ -651,48 +756,48 @@ function setDynamicStatus(text, color = STATUS_COLORS.idle, immediate = false) {
 
 // ---- Wake Lock helpers ----
 async function acquireWakeLock() {
-  debugLog("Attempting to acquire wake lock");
+  debugLog("[WAKE LOCK] Attempting to acquire wake lock");
   if (navigator.bluetooth && typeof navigator.bluetooth.setScreenDimEnabled === "function") {
     try {
       navigator.bluetooth.setScreenDimEnabled(true);
       state.bluefyLockEnabled = true;
-      debugLog("Bluefy screen-dim prevention enabled");
+      debugLog("[WAKE LOCK] Bluefy screen-dim prevention enabled");
       return;
     } catch (e) {
-      debugWarn("Bluefy setScreenDimEnabled failed:", e);
+      debugWarn("[WAKE LOCK] Bluefy setScreenDimEnabled failed:", e);
     }
   }
   try {
     if ("wakeLock" in navigator && typeof navigator.wakeLock.request === "function") {
       state.wakeLock = await navigator.wakeLock.request("screen");
-      debugLog("Wake lock acquired successfully");
-      state.wakeLock.addEventListener?.("release", () => debugLog("Wake lock released"));
+      debugLog("[WAKE LOCK] Wake lock acquired successfully");
+      state.wakeLock.addEventListener?.("release", () => debugLog("[WAKE LOCK] Wake lock released"));
     } else {
-      debugLog("Wake Lock API not supported on this device");
+      debugLog("[WAKE LOCK] Wake Lock API not supported on this device");
     }
   } catch (err) {
-    debugError(`Could not obtain wake lock: ${err.name}, ${err.message}`);
+    debugError(`[WAKE LOCK] Could not obtain wake lock: ${err.name}, ${err.message}`);
   }
 }
 async function releaseWakeLock() {
-  debugLog("Attempting to release wake lock");
+  debugLog("[WAKE LOCK] Attempting to release wake lock");
   if (state.bluefyLockEnabled && navigator.bluetooth && typeof navigator.bluetooth.setScreenDimEnabled === "function") {
     try {
       navigator.bluetooth.setScreenDimEnabled(false);
       state.bluefyLockEnabled = false;
-      debugLog("Bluefy screen-dim prevention disabled");
+      debugLog("[WAKE LOCK] Bluefy screen-dim prevention disabled");
     } catch (e) {
-      debugWarn("Bluefy setScreenDimEnabled(false) failed:", e);
+      debugWarn("[WAKE LOCK] Bluefy setScreenDimEnabled(false) failed:", e);
     }
   }
   try {
     if (state.wakeLock) {
       await state.wakeLock.release?.();
       state.wakeLock = null;
-      debugLog("Wake lock released successfully");
+      debugLog("[WAKE LOCK] Wake lock released successfully");
     }
   } catch (e) {
-    debugWarn("Error releasing wake lock:", e);
+    debugWarn("[WAKE LOCK] Error releasing wake lock:", e);
     state.wakeLock = null;
   }
 }
@@ -708,7 +813,7 @@ async function releaseWakeLock() {
  * @returns {number} Distance in meters
  */
 function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
-  debugLog(`Calculating Haversine distance: (${lat1.toFixed(5)}, ${lon1.toFixed(5)}) to (${lat2.toFixed(5)}, ${lon2.toFixed(5)})`);
+  debugLog(`[GEOFENCE] Calculating Haversine distance: (${lat1.toFixed(5)}, ${lon1.toFixed(5)}) to (${lat2.toFixed(5)}, ${lon2.toFixed(5)})`);
   
   const R = 6371000; // Earth's radius in meters
   const toRad = (deg) => (deg * Math.PI) / 180;
@@ -724,7 +829,7 @@ function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   const distance = R * c;
   
-  debugLog(`Haversine distance calculated: ${distance.toFixed(2)}m`);
+  debugLog(`[GEOFENCE] Haversine distance calculated: ${distance.toFixed(2)}m`);
   return distance;
 }
 
@@ -735,13 +840,13 @@ function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
  * @returns {boolean} True if within geofence, false otherwise
  */
 function validateGeofence(lat, lon) {
-  debugLog(`Validating geofence for coordinates: (${lat.toFixed(5)}, ${lon.toFixed(5)})`);
-  debugLog(`Geofence center: (${OTTAWA_CENTER_LAT}, ${OTTAWA_CENTER_LON}), radius: ${OTTAWA_GEOFENCE_RADIUS_M}m`);
+  debugLog(`[GEOFENCE] Validating geofence for coordinates: (${lat.toFixed(5)}, ${lon.toFixed(5)})`);
+  debugLog(`[GEOFENCE] Geofence center: (${OTTAWA_CENTER_LAT}, ${OTTAWA_CENTER_LON}), radius: ${OTTAWA_GEOFENCE_RADIUS_M}m`);
   
   const distance = calculateHaversineDistance(lat, lon, OTTAWA_CENTER_LAT, OTTAWA_CENTER_LON);
   const isWithinGeofence = distance <= OTTAWA_GEOFENCE_RADIUS_M;
   
-  debugLog(`Geofence validation: distance=${distance.toFixed(2)}m, within_geofence=${isWithinGeofence}`);
+  debugLog(`[GEOFENCE] Geofence validation: distance=${distance.toFixed(2)}m, within_geofence=${isWithinGeofence}`);
   return isWithinGeofence;
 }
 
@@ -752,20 +857,20 @@ function validateGeofence(lat, lon) {
  * @returns {boolean} True if distance >= 25m or no previous ping, false otherwise
  */
 function validateMinimumDistance(lat, lon) {
-  debugLog(`Validating minimum distance for coordinates: (${lat.toFixed(5)}, ${lon.toFixed(5)})`);
+  debugLog(`[GEOFENCE] Validating minimum distance for coordinates: (${lat.toFixed(5)}, ${lon.toFixed(5)})`);
   
   if (!state.lastSuccessfulPingLocation) {
-    debugLog("No previous successful ping location, minimum distance check skipped");
+    debugLog("[GEOFENCE] No previous successful ping location, minimum distance check skipped");
     return true;
   }
   
   const { lat: lastLat, lon: lastLon } = state.lastSuccessfulPingLocation;
-  debugLog(`Last successful ping location: (${lastLat.toFixed(5)}, ${lastLon.toFixed(5)})`);
+  debugLog(`[GEOFENCE] Last successful ping location: (${lastLat.toFixed(5)}, ${lastLon.toFixed(5)})`);
   
   const distance = calculateHaversineDistance(lat, lon, lastLat, lastLon);
   const isMinimumDistanceMet = distance >= MIN_PING_DISTANCE_M;
   
-  debugLog(`Distance validation: distance=${distance.toFixed(2)}m, minimum_distance_met=${isMinimumDistanceMet} (threshold=${MIN_PING_DISTANCE_M}m)`);
+  debugLog(`[GEOFENCE] Distance validation: distance=${distance.toFixed(2)}m, minimum_distance_met=${isMinimumDistanceMet} (threshold=${MIN_PING_DISTANCE_M}m)`);
   return isMinimumDistanceMet;
 }
 
@@ -799,25 +904,7 @@ function updateDistanceUi() {
   }
 }
 
-/**
- * Start continuous distance display updates
- */
-function startDistanceUpdater() {
-  if (state.distanceUpdateTimer) return;
-  state.distanceUpdateTimer = setInterval(() => {
-    updateDistanceUi();
-  }, 3000); // Update every 3 seconds as fallback (main updates happen on GPS position changes)
-}
 
-/**
- * Stop distance display updates
- */
-function stopDistanceUpdater() {
-  if (state.distanceUpdateTimer) {
-    clearInterval(state.distanceUpdateTimer);
-    state.distanceUpdateTimer = null;
-  }
-}
 
 // ---- Geolocation ----
 async function getCurrentPosition() {
@@ -881,23 +968,22 @@ function stopGpsAgeUpdater() {
 }
 function startGeoWatch() {
   if (state.geoWatchId) {
-    debugLog("GPS watch already running, skipping start");
+    debugLog("[GPS] GPS watch already running, skipping start");
     return;
   }
   if (!("geolocation" in navigator)) {
-    debugError("Geolocation not available in navigator");
+    debugError("[GPS] Geolocation not available in navigator");
     return;
   }
 
-  debugLog("Starting GPS watch");
+  debugLog("[GPS] Starting GPS watch");
   state.gpsState = "acquiring";
   updateGpsUi();
   startGpsAgeUpdater(); // Start the age counter
-  startDistanceUpdater(); // Start the distance updater
 
   state.geoWatchId = navigator.geolocation.watchPosition(
     (pos) => {
-      debugLog(`GPS fix acquired: lat=${pos.coords.latitude.toFixed(5)}, lon=${pos.coords.longitude.toFixed(5)}, accuracy=${pos.coords.accuracy}m`);
+      debugLog(`[GPS] GPS fix acquired: lat=${pos.coords.latitude.toFixed(5)}, lon=${pos.coords.longitude.toFixed(5)}, accuracy=${pos.coords.accuracy}m`);
       state.lastFix = {
         lat: pos.coords.latitude,
         lon: pos.coords.longitude,
@@ -909,7 +995,7 @@ function startGeoWatch() {
       updateDistanceUi(); // Update distance when GPS position changes
     },
     (err) => {
-      debugError(`GPS watch error: ${err.code} - ${err.message}`);
+      debugError(`[GPS] GPS watch error: ${err.code} - ${err.message}`);
       state.gpsState = "error";
       // Display GPS error in Dynamic Status Bar
       setDynamicStatus("GPS error - check permissions", STATUS_COLORS.error);
@@ -925,17 +1011,16 @@ function startGeoWatch() {
 }
 function stopGeoWatch() {
   if (!state.geoWatchId) {
-    debugLog("No GPS watch to stop");
+    debugLog("[GPS] No GPS watch to stop");
     return;
   }
-  debugLog("Stopping GPS watch");
+  debugLog("[GPS] Stopping GPS watch");
   navigator.geolocation.clearWatch(state.geoWatchId);
   state.geoWatchId = null;
   stopGpsAgeUpdater(); // Stop the age counter
-  stopDistanceUpdater(); // Stop the distance updater
 }
 async function primeGpsOnce() {
-  debugLog("Priming GPS with initial position request");
+  debugLog("[GPS] Priming GPS with initial position request");
   // Start continuous watch so the UI keeps updating
   startGeoWatch();
 
@@ -945,7 +1030,7 @@ async function primeGpsOnce() {
   try {
     const pos = await getCurrentPosition();
 
-    debugLog(`Initial GPS position acquired: lat=${pos.coords.latitude.toFixed(5)}, lon=${pos.coords.longitude.toFixed(5)}, accuracy=${pos.coords.accuracy}m`);
+    debugLog(`[GPS] Initial GPS position acquired: lat=${pos.coords.latitude.toFixed(5)}, lon=${pos.coords.longitude.toFixed(5)}, accuracy=${pos.coords.accuracy}m`);
     state.lastFix = {
       lat: pos.coords.latitude,
       lon: pos.coords.longitude,
@@ -958,17 +1043,17 @@ async function primeGpsOnce() {
 
     // Only refresh the coverage map if we have an accurate fix
     if (state.lastFix.accM && state.lastFix.accM < GPS_ACCURACY_THRESHOLD_M) {
-      debugLog(`GPS accuracy ${state.lastFix.accM}m is within threshold, refreshing coverage map`);
+      debugLog(`[GPS] GPS accuracy ${state.lastFix.accM}m is within threshold, refreshing coverage map`);
       scheduleCoverageRefresh(
         state.lastFix.lat,
         state.lastFix.lon
       );
     } else {
-      debugLog(`GPS accuracy ${state.lastFix.accM}m exceeds threshold (${GPS_ACCURACY_THRESHOLD_M}m), skipping map refresh`);
+      debugLog(`[GPS] GPS accuracy ${state.lastFix.accM}m exceeds threshold (${GPS_ACCURACY_THRESHOLD_M}m), skipping map refresh`);
     }
 
   } catch (e) {
-    debugError(`primeGpsOnce failed: ${e.message}`);
+    debugError(`[GPS] primeGpsOnce failed: ${e.message}`);
     state.gpsState = "error";
     // Display GPS error in Dynamic Status Bar
     setDynamicStatus("GPS error - check permissions", STATUS_COLORS.error);
@@ -1025,7 +1110,7 @@ async function deriveChannelKey(channelName) {
   const hashArray = new Uint8Array(hashBuffer);
   const channelKey = hashArray.slice(0, 16);
   
-  debugLog(`Channel key derived successfully (${channelKey.length} bytes)`);
+  debugLog(`[CHANNEL] Channel key derived successfully (${channelKey.length} bytes)`);
   
   return channelKey;
 }
@@ -1034,25 +1119,25 @@ async function deriveChannelKey(channelName) {
 async function createWardriveChannel() {
   if (!state.connection) throw new Error("Not connected");
   
-  debugLog(`Attempting to create channel: ${CHANNEL_NAME}`);
+  debugLog(`[CHANNEL] Attempting to create channel: ${CHANNEL_NAME}`);
   
   // Get all channels
   const channels = await state.connection.getChannels();
-  debugLog(`Retrieved ${channels.length} channels`);
+  debugLog(`[CHANNEL] Retrieved ${channels.length} channels`);
   
   // Find first empty channel slot
   let emptyIdx = -1;
   for (let i = 0; i < channels.length; i++) {
     if (channels[i].name === '') {
       emptyIdx = i;
-      debugLog(`Found empty channel slot at index: ${emptyIdx}`);
+      debugLog(`[CHANNEL] Found empty channel slot at index: ${emptyIdx}`);
       break;
     }
   }
   
   // Throw error if no free slots
   if (emptyIdx === -1) {
-    debugError(`No empty channel slots available`);
+    debugError(`[CHANNEL] No empty channel slots available`);
     throw new Error(
       `No empty channel slots available. Please free a channel slot on your companion first.`
     );
@@ -1062,9 +1147,9 @@ async function createWardriveChannel() {
   const channelKey = await deriveChannelKey(CHANNEL_NAME);
   
   // Create the channel
-  debugLog(`Creating channel ${CHANNEL_NAME} at index ${emptyIdx}`);
+  debugLog(`[CHANNEL] Creating channel ${CHANNEL_NAME} at index ${emptyIdx}`);
   await state.connection.setChannel(emptyIdx, CHANNEL_NAME, channelKey);
-  debugLog(`Channel ${CHANNEL_NAME} created successfully at index ${emptyIdx}`);
+  debugLog(`[CHANNEL] Channel ${CHANNEL_NAME} created successfully at index ${emptyIdx}`);
   
   // Return channel object
   return {
@@ -1076,23 +1161,23 @@ async function createWardriveChannel() {
 async function ensureChannel() {
   if (!state.connection) throw new Error("Not connected");
   if (state.channel) {
-    debugLog(`Using existing channel: ${CHANNEL_NAME}`);
+    debugLog(`[CHANNEL] Using existing channel: ${CHANNEL_NAME}`);
     return state.channel;
   }
 
   setDynamicStatus("Looking for #wardriving channel", STATUS_COLORS.info);
-  debugLog(`Looking up channel: ${CHANNEL_NAME}`);
+  debugLog(`[CHANNEL] Looking up channel: ${CHANNEL_NAME}`);
   let ch = await state.connection.findChannelByName(CHANNEL_NAME);
   
   if (!ch) {
     setDynamicStatus("Channel #wardriving not found", STATUS_COLORS.info);
-    debugLog(`Channel ${CHANNEL_NAME} not found, attempting to create it`);
+    debugLog(`[CHANNEL] Channel ${CHANNEL_NAME} not found, attempting to create it`);
     try {
       ch = await createWardriveChannel();
       setDynamicStatus("Created #wardriving", STATUS_COLORS.success);
-      debugLog(`Channel ${CHANNEL_NAME} created successfully`);
+      debugLog(`[CHANNEL] Channel ${CHANNEL_NAME} created successfully`);
     } catch (e) {
-      debugError(`Failed to create channel ${CHANNEL_NAME}: ${e.message}`);
+      debugError(`[CHANNEL] Failed to create channel ${CHANNEL_NAME}: ${e.message}`);
       enableControls(false);
       throw new Error(
         `Channel ${CHANNEL_NAME} not found and could not be created: ${e.message}`
@@ -1100,7 +1185,7 @@ async function ensureChannel() {
     }
   } else {
     setDynamicStatus("Channel #wardriving found", STATUS_COLORS.success);
-    debugLog(`Channel found: ${CHANNEL_NAME} (index: ${ch.channelIdx})`);
+    debugLog(`[CHANNEL] Channel found: ${CHANNEL_NAME} (index: ${ch.channelIdx})`);
   }
 
   state.channel = ch;
@@ -1157,7 +1242,7 @@ function getDeviceIdentifier() {
 async function checkCapacity(reason) {
   // Validate public key exists
   if (!state.devicePublicKey) {
-    debugError("checkCapacity called but no public key stored");
+    debugError("[CAPACITY] checkCapacity called but no public key stored");
     return reason === "connect" ? false : true; // Fail closed on connect, allow disconnect
   }
 
@@ -1170,12 +1255,13 @@ async function checkCapacity(reason) {
     const payload = {
       key: MESHMAPPER_API_KEY,
       public_key: state.devicePublicKey,
+      ver: APP_VERSION,
       who: getDeviceIdentifier(),
       ver: APP_VERSION,
       reason: reason
     };
 
-    debugLog(`Checking capacity: reason=${reason}, public_key=${state.devicePublicKey.substring(0, 16)}..., who=${payload.who}`);
+    debugLog(`[CAPACITY] Checking capacity: reason=${reason}, public_key=${state.devicePublicKey.substring(0, 16)}..., who=${payload.who}`);
 
     const response = await fetch(MESHMAPPER_CAPACITY_CHECK_URL, {
       method: "POST",
@@ -1184,10 +1270,10 @@ async function checkCapacity(reason) {
     });
 
     if (!response.ok) {
-      debugWarn(`Capacity check API returned error status ${response.status}`);
+      debugError(`[CAPACITY] Capacity check API returned error status ${response.status}`);
       // Fail closed on network errors for connect
       if (reason === "connect") {
-        debugError("Failing closed (denying connection) due to API error");
+        debugError("[CAPACITY] Failing closed (denying connection) due to API error");
         state.disconnectReason = "app_down"; // Track disconnect reason
         return false;
       }
@@ -1195,31 +1281,37 @@ async function checkCapacity(reason) {
     }
 
     const data = await response.json();
-    debugLog(`Capacity check response: allowed=${data.allowed}, session_id=${data.session_id || 'missing'}`);
+    debugLog(`[CAPACITY] Capacity check response: allowed=${data.allowed}, session_id=${data.session_id || 'missing'}, reason=${data.reason || 'none'}`);
 
     // Handle capacity full vs. allowed cases separately
     if (data.allowed === false && reason === "connect") {
-      state.disconnectReason = "capacity_full"; // Track disconnect reason
+      // Check if a reason code is provided
+      if (data.reason) {
+        debugLog(`[CAPACITY] API returned reason code: ${data.reason}`);
+        state.disconnectReason = data.reason; // Store the reason code directly
+      } else {
+        state.disconnectReason = "capacity_full"; // Default to capacity_full
+      }
       return false;
     }
     
     // For connect requests, validate session_id is present when allowed === true
     if (reason === "connect" && data.allowed === true) {
       if (!data.session_id) {
-        debugError("Capacity check returned allowed=true but session_id is missing");
+        debugError("[CAPACITY] Capacity check returned allowed=true but session_id is missing");
         state.disconnectReason = "session_id_error"; // Track disconnect reason
         return false;
       }
       
       // Store the session_id for use in MeshMapper API posts
       state.wardriveSessionId = data.session_id;
-      debugLog(`Wardrive session ID received and stored: ${state.wardriveSessionId}`);
+      debugLog(`[CAPACITY] Wardrive session ID received and stored: ${state.wardriveSessionId}`);
     }
     
     // For disconnect requests, clear the session_id
     if (reason === "disconnect") {
       if (state.wardriveSessionId) {
-        debugLog(`Clearing wardrive session ID on disconnect: ${state.wardriveSessionId}`);
+        debugLog(`[CAPACITY] Clearing wardrive session ID on disconnect: ${state.wardriveSessionId}`);
         state.wardriveSessionId = null;
       }
     }
@@ -1227,11 +1319,11 @@ async function checkCapacity(reason) {
     return data.allowed === true;
 
   } catch (error) {
-    debugError(`Capacity check failed: ${error.message}`);
+    debugError(`[CAPACITY] Capacity check failed: ${error.message}`);
     
     // Fail closed on network errors for connect
     if (reason === "connect") {
-      debugError("Failing closed (denying connection) due to network error");
+      debugError("[CAPACITY] Failing closed (denying connection) due to network error");
       state.disconnectReason = "app_down"; // Track disconnect reason
       return false;
     }
@@ -1250,12 +1342,12 @@ async function postToMeshMapperAPI(lat, lon, heardRepeats) {
   try {
     // Validate session_id exists before posting
     if (!state.wardriveSessionId) {
-      debugError("Cannot post to MeshMapper API: no session_id available");
-      setDynamicStatus("Error: No session ID for API post", STATUS_COLORS.error);
+      debugError("[API QUEUE] Cannot post to MeshMapper API: no session_id available");
+      setDynamicStatus("Missing session ID", STATUS_COLORS.error);
       state.disconnectReason = "session_id_error"; // Track disconnect reason
       // Disconnect after a brief delay to ensure user sees the error message
       setTimeout(() => {
-        disconnect().catch(err => debugError(`Disconnect after missing session_id failed: ${err.message}`));
+        disconnect().catch(err => debugError(`[BLE] Disconnect after missing session_id failed: ${err.message}`));
       }, 1500);
       return; // Exit early
     }
@@ -1265,15 +1357,16 @@ async function postToMeshMapperAPI(lat, lon, heardRepeats) {
       lat,
       lon,
       who: getDeviceIdentifier(),
-      power: getCurrentPowerSetting() || "N/A",
+      power: getCurrentPowerSetting(),
       heard_repeats: heardRepeats,
       ver: APP_VERSION,
       test: 0,
       iata: WARDIVE_IATA_CODE,
-      session_id: state.wardriveSessionId
+      session_id: state.wardriveSessionId,
+      WARDRIVE_TYPE: "TX"
     };
 
-    debugLog(`Posting to MeshMapper API: lat=${lat.toFixed(5)}, lon=${lon.toFixed(5)}, who=${payload.who}, power=${payload.power}, heard_repeats=${heardRepeats}, ver=${payload.ver}, iata=${payload.iata}, session_id=${payload.session_id}`);
+    debugLog(`[API QUEUE] Posting to MeshMapper API: lat=${lat.toFixed(5)}, lon=${lon.toFixed(5)}, who=${payload.who}, power=${payload.power}, heard_repeats=${heardRepeats}, ver=${payload.ver}, iata=${payload.iata}, session_id=${payload.session_id}, WARDRIVE_TYPE=${payload.WARDRIVE_TYPE}`);
 
     const response = await fetch(MESHMAPPER_API_URL, {
       method: "POST",
@@ -1281,80 +1374,128 @@ async function postToMeshMapperAPI(lat, lon, heardRepeats) {
       body: JSON.stringify(payload)
     });
 
-    debugLog(`MeshMapper API response status: ${response.status}`);
+    debugLog(`[API QUEUE] MeshMapper API response status: ${response.status}`);
 
     // Always try to parse the response body to check for slot revocation
     // regardless of HTTP status code
     try {
       const data = await response.json();
-      debugLog(`MeshMapper API response data: ${JSON.stringify(data)}`);
+      debugLog(`[API QUEUE] MeshMapper API response data: ${JSON.stringify(data)}`);
       
       // Check if slot has been revoked
       if (data.allowed === false) {
-        debugWarn("MeshMapper API returned allowed=false, WarDriving slot has been revoked, disconnecting");
-        setDynamicStatus("Error: Posting to API (Revoked)", STATUS_COLORS.error);
+        debugError("[API QUEUE] MeshMapper slot has been revoked");
+        setDynamicStatus("API post failed (revoked)", STATUS_COLORS.error);
         state.disconnectReason = "slot_revoked"; // Track disconnect reason
         // Disconnect after a brief delay to ensure user sees the error message
         setTimeout(() => {
-          disconnect().catch(err => debugError(`Disconnect after slot revocation failed: ${err.message}`));
+          disconnect().catch(err => debugError(`[BLE] Disconnect after slot revocation failed: ${err.message}`));
         }, 1500);
         return; // Exit early after slot revocation
       } else if (data.allowed === true) {
-        debugLog("MeshMapper API allowed check passed: device still has an active WarDriving slot");
+        debugLog("[API QUEUE] MeshMapper API allowed check passed: device still has an active MeshMapper slot");
       } else {
-        debugWarn(`MeshMapper API response missing 'allowed' field: ${JSON.stringify(data)}`);
+        debugError(`[API QUEUE] MeshMapper API response missing 'allowed' field: ${JSON.stringify(data)}`);
       }
     } catch (parseError) {
-      debugWarn(`Failed to parse MeshMapper API response: ${parseError.message}`);
+      debugError(`[API QUEUE] Failed to parse MeshMapper API response: ${parseError.message}`);
       // Continue operation if we can't parse the response
     }
 
     if (!response.ok) {
-      debugWarn(`MeshMapper API returned error status ${response.status}`);
+      debugError(`[API QUEUE] MeshMapper API returned error status ${response.status}`);
     } else {
-      debugLog(`MeshMapper API post successful (status ${response.status})`);
+      debugLog(`[API QUEUE] MeshMapper API post successful (status ${response.status})`);
     }
   } catch (error) {
     // Log error but don't fail the ping
-    debugError(`MeshMapper API post failed: ${error.message}`);
+    debugError(`[API QUEUE] MeshMapper API post failed: ${error.message}`);
   }
 }
 
 /**
+ * Post to MeshMapper API in background (non-blocking)
+ * This function runs asynchronously after the RX listening window completes
+ * UI status messages are suppressed for successful posts, errors are shown
+ * @param {number} lat - Latitude
+ * @param {number} lon - Longitude
+ * @param {number} accuracy - GPS accuracy in meters
+ * @param {string} heardRepeats - Heard repeats string (e.g., "4e(1.75),b7(-0.75)" or "None")
+ */
+async function postApiInBackground(lat, lon, accuracy, heardRepeats) {
+  debugLog(`[API QUEUE] postApiInBackground called with heard_repeats="${heardRepeats}"`);
+  
+  // Hidden 3-second delay before API POST (no user-facing status message)
+  debugLog("[API QUEUE] Starting 3-second delay before API POST");
+  await new Promise(resolve => setTimeout(resolve, 3000));
+  
+  debugLog("[API QUEUE] 3-second delay complete, posting to API");
+  try {
+    await postToMeshMapperAPI(lat, lon, heardRepeats);
+    debugLog("[API QUEUE] Background API post completed successfully");
+    // No success status message - suppress from UI
+  } catch (error) {
+    debugError("[API QUEUE] Background API post failed:", error);
+    // Errors are propagated to caller for user notification
+    throw error;
+  }
+  
+  // Update map after API post
+  debugLog("[UI] Scheduling coverage map refresh");
+  setTimeout(() => {
+    const shouldRefreshMap = accuracy && accuracy < GPS_ACCURACY_THRESHOLD_M;
+    
+    if (shouldRefreshMap) {
+      debugLog(`[UI] Refreshing coverage map (accuracy ${accuracy}m within threshold)`);
+      scheduleCoverageRefresh(lat, lon);
+    } else {
+      debugLog(`[UI] Skipping map refresh (accuracy ${accuracy}m exceeds threshold)`);
+    }
+  }, MAP_REFRESH_DELAY_MS);
+}
+
+/**
  * Post to MeshMapper API and refresh coverage map after heard repeats are finalized
- * This executes immediately (no delay) because it's called after the RX listening window
+ * This function now queues TX messages instead of posting immediately
  * @param {number} lat - Latitude
  * @param {number} lon - Longitude
  * @param {number} accuracy - GPS accuracy in meters
  * @param {string} heardRepeats - Heard repeats string (e.g., "4e(1.75),b7(-0.75)" or "None")
  */
 async function postApiAndRefreshMap(lat, lon, accuracy, heardRepeats) {
-  debugLog(`postApiAndRefreshMap called with heard_repeats="${heardRepeats}"`);
+  debugLog(`[API QUEUE] postApiAndRefreshMap called with heard_repeats="${heardRepeats}"`);
   
-  setDynamicStatus("Posting to API", STATUS_COLORS.info);
+  // Build payload
+  const payload = {
+    key: MESHMAPPER_API_KEY,
+    lat,
+    lon,
+    who: getDeviceIdentifier(),
+    power: getCurrentPowerSetting(),
+    heard_repeats: heardRepeats,
+    ver: APP_VERSION,
+    test: 0,
+    iata: WARDIVE_IATA_CODE,
+    session_id: state.wardriveSessionId
+  };
   
-  // Hidden 3-second delay before API POST (user sees "Posting to API" status during this time)
-  await new Promise(resolve => setTimeout(resolve, 3000));
+  // Queue message instead of posting immediately
+  queueApiMessage(payload, "TX");
+  debugLog(`[API QUEUE] TX message queued: lat=${lat.toFixed(5)}, lon=${lon.toFixed(5)}, heard_repeats="${heardRepeats}"`);
   
-  try {
-    await postToMeshMapperAPI(lat, lon, heardRepeats);
-  } catch (error) {
-    debugError("MeshMapper API post failed:", error);
-  }
-  
-  // Update map after API post
+  // Update map after queueing
   setTimeout(() => {
     const shouldRefreshMap = accuracy && accuracy < GPS_ACCURACY_THRESHOLD_M;
     
     if (shouldRefreshMap) {
-      debugLog(`Refreshing coverage map (accuracy ${accuracy}m within threshold)`);
+      debugLog(`[UI] Refreshing coverage map (accuracy ${accuracy}m within threshold)`);
       scheduleCoverageRefresh(lat, lon);
     } else {
-      debugLog(`Skipping map refresh (accuracy ${accuracy}m exceeds threshold)`);
+      debugLog(`[UI] Skipping map refresh (accuracy ${accuracy}m exceeds threshold)`);
     }
     
-    // Unlock ping controls now that API post is complete
-    unlockPingControls("after API post completion");
+    // Unlock ping controls now that message is queued
+    unlockPingControls("after TX message queued");
     
     // Update status based on current mode
     if (state.connection) {
@@ -1363,17 +1504,229 @@ async function postApiAndRefreshMap(lat, lon, accuracy, heardRepeats) {
         const resumed = resumeAutoCountdown();
         if (!resumed) {
           // No paused timer to resume, schedule new auto ping (this was an auto ping)
-          debugLog("Scheduling next auto ping");
+          debugLog("[AUTO] Scheduling next auto ping");
           scheduleNextAutoPing();
         } else {
-          debugLog("Resumed auto countdown after manual ping");
+          debugLog("[AUTO] Resumed auto countdown after manual ping");
         }
       } else {
-        debugLog("Setting dynamic status to em dash");
-        setDynamicStatus("Idle");
+        debugLog("[AUTO] Setting dynamic status to show queue size");
+        // Status already set by queueApiMessage()
       }
     }
   }, MAP_REFRESH_DELAY_MS);
+}
+
+// ---- API Batch Queue System ----
+
+/**
+ * Queue an API message for batch posting
+ * @param {Object} payload - The API payload object
+ * @param {string} wardriveType - "TX" or "RX" wardrive type
+ */
+function queueApiMessage(payload, wardriveType) {
+  debugLog(`[API QUEUE] Queueing ${wardriveType} message`);
+  
+  // Add WARDRIVE_TYPE to payload
+  const messagePayload = {
+    ...payload,
+    WARDRIVE_TYPE: wardriveType
+  };
+  
+  apiQueue.messages.push(messagePayload);
+  debugLog(`[API QUEUE] Queue size: ${apiQueue.messages.length}/${API_BATCH_MAX_SIZE}`);
+  
+  // Start periodic flush timer if this is the first message
+  if (apiQueue.messages.length === 1 && !apiQueue.flushTimerId) {
+    startFlushTimer();
+  }
+  
+  // If TX type: start/reset 3-second flush timer
+  if (wardriveType === "TX") {
+    scheduleTxFlush();
+  }
+  
+  // If queue reaches max size: flush immediately
+  if (apiQueue.messages.length >= API_BATCH_MAX_SIZE) {
+    debugLog(`[API QUEUE] Queue reached max size (${API_BATCH_MAX_SIZE}), flushing immediately`);
+    flushApiQueue();
+  }
+  
+  // Queue depth is logged above for debugging - no need to show in dynamic status bar
+}
+
+/**
+ * Schedule flush 3 seconds after TX ping
+ * Resets timer if called again (coalesces rapid TX pings)
+ */
+function scheduleTxFlush() {
+  debugLog(`[API QUEUE] Scheduling TX flush in ${API_TX_FLUSH_DELAY_MS}ms`);
+  
+  // Clear existing TX flush timer if present
+  if (apiQueue.txFlushTimerId) {
+    clearTimeout(apiQueue.txFlushTimerId);
+    debugLog(`[API QUEUE] Cleared previous TX flush timer`);
+  }
+  
+  // Schedule new TX flush
+  apiQueue.txFlushTimerId = setTimeout(() => {
+    debugLog(`[API QUEUE] TX flush timer fired`);
+    flushApiQueue();
+  }, API_TX_FLUSH_DELAY_MS);
+}
+
+/**
+ * Start the 30-second periodic flush timer
+ */
+function startFlushTimer() {
+  debugLog(`[API QUEUE] Starting periodic flush timer (${API_BATCH_FLUSH_INTERVAL_MS}ms)`);
+  
+  // Clear existing timer if present
+  if (apiQueue.flushTimerId) {
+    clearInterval(apiQueue.flushTimerId);
+  }
+  
+  // Start periodic flush timer
+  apiQueue.flushTimerId = setInterval(() => {
+    if (apiQueue.messages.length > 0) {
+      debugLog(`[API QUEUE] Periodic flush timer fired, flushing ${apiQueue.messages.length} messages`);
+      flushApiQueue();
+    }
+  }, API_BATCH_FLUSH_INTERVAL_MS);
+}
+
+/**
+ * Stop all flush timers (periodic and TX)
+ */
+function stopFlushTimers() {
+  debugLog(`[API QUEUE] Stopping all flush timers`);
+  
+  if (apiQueue.flushTimerId) {
+    clearInterval(apiQueue.flushTimerId);
+    apiQueue.flushTimerId = null;
+    debugLog(`[API QUEUE] Periodic flush timer stopped`);
+  }
+  
+  if (apiQueue.txFlushTimerId) {
+    clearTimeout(apiQueue.txFlushTimerId);
+    apiQueue.txFlushTimerId = null;
+    debugLog(`[API QUEUE] TX flush timer stopped`);
+  }
+}
+
+/**
+ * Flush all queued messages to the API
+ * Prevents concurrent flushes with isProcessing flag
+ * @returns {Promise<void>}
+ */
+async function flushApiQueue() {
+  // Prevent concurrent flushes
+  if (apiQueue.isProcessing) {
+    debugWarn(`[API QUEUE] Flush already in progress, skipping`);
+    return;
+  }
+  
+  // Nothing to flush
+  if (apiQueue.messages.length === 0) {
+    debugLog(`[API QUEUE] Queue is empty, nothing to flush`);
+    return;
+  }
+  
+  // Lock processing
+  apiQueue.isProcessing = true;
+  debugLog(`[API QUEUE] Starting flush of ${apiQueue.messages.length} messages`);
+  
+  // Clear TX flush timer when flushing
+  if (apiQueue.txFlushTimerId) {
+    clearTimeout(apiQueue.txFlushTimerId);
+    apiQueue.txFlushTimerId = null;
+  }
+  
+  // Take all messages from queue
+  const batch = [...apiQueue.messages];
+  apiQueue.messages = [];
+  
+  // Count TX and RX messages for logging
+  const txCount = batch.filter(m => m.WARDRIVE_TYPE === "TX").length;
+  const rxCount = batch.filter(m => m.WARDRIVE_TYPE === "RX").length;
+  debugLog(`[API QUEUE] Batch composition: ${txCount} TX, ${rxCount} RX`);
+  
+  // Status removed from dynamic status bar - debug log above is sufficient for debugging
+  
+  try {
+    // Validate session_id exists
+    if (!state.wardriveSessionId) {
+      debugError("[API QUEUE] Cannot flush: no session_id available");
+      setDynamicStatus("Missing session ID", STATUS_COLORS.error);
+      state.disconnectReason = "session_id_error";
+      setTimeout(() => {
+        disconnect().catch(err => debugError(`[BLE] Disconnect after missing session_id failed: ${err.message}`));
+      }, 1500);
+      return;
+    }
+    
+    debugLog(`[API QUEUE] POST to ${MESHMAPPER_API_URL} with ${batch.length} messages`);
+    
+    const response = await fetch(MESHMAPPER_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(batch)
+    });
+    
+    debugLog(`[API QUEUE] Response status: ${response.status}`);
+    
+    // Parse response to check for slot revocation
+    try {
+      const data = await response.json();
+      debugLog(`[API QUEUE] Response data: ${JSON.stringify(data)}`);
+      
+      // Check if slot has been revoked
+      if (data.allowed === false) {
+        debugError("[API QUEUE] MeshMapper slot has been revoked");
+        setDynamicStatus("API post failed (revoked)", STATUS_COLORS.error);
+        state.disconnectReason = "slot_revoked";
+        setTimeout(() => {
+          disconnect().catch(err => debugError(`[BLE] Disconnect after slot revocation failed: ${err.message}`));
+        }, 1500);
+        return;
+      } else if (data.allowed === true) {
+        debugLog("[API QUEUE] Slot check passed");
+      }
+    } catch (parseError) {
+      debugError(`[API QUEUE] Failed to parse response: ${parseError.message}`);
+    }
+    
+    if (!response.ok) {
+      debugError(`[API QUEUE] API returned error status ${response.status}`);
+      setDynamicStatus("Error: API batch post failed", STATUS_COLORS.error);
+    } else {
+      debugLog(`[API QUEUE] Batch post successful: ${txCount} TX, ${rxCount} RX`);
+      // Clear status after successful post
+      if (state.connection && !state.running) {
+        setDynamicStatus("Idle");
+      }
+    }
+  } catch (error) {
+    debugError(`[API QUEUE] Batch post failed: ${error.message}`);
+    setDynamicStatus("Error: API batch post failed", STATUS_COLORS.error);
+  } finally {
+    // Unlock processing
+    apiQueue.isProcessing = false;
+    debugLog(`[API QUEUE] Flush complete`);
+  }
+}
+
+/**
+ * Get queue status for debugging
+ * @returns {Object} Queue status object
+ */
+function getQueueStatus() {
+  return {
+    queueSize: apiQueue.messages.length,
+    isProcessing: apiQueue.isProcessing,
+    hasPeriodicTimer: apiQueue.flushTimerId !== null,
+    hasTxTimer: apiQueue.txFlushTimerId !== null
+  };
 }
 
 // ---- Repeater Echo Tracking ----
@@ -1511,19 +1864,19 @@ async function decryptGroupTextPayload(payload, channelKey) {
  * @param {number} channelIdx - The channel index where the ping was sent
  */
 function startRepeaterTracking(payload, channelIdx) {
-  debugLog(`Starting repeater echo tracking for ping: "${payload}" on channel ${channelIdx}`);
-  debugLog(`7-second rx_log listening window opened at ${new Date().toISOString()}`);
+  debugLog(`[PING] Starting repeater echo tracking for ping: "${payload}" on channel ${channelIdx}`);
+  debugLog(`[PING] 7-second rx_log listening window opened at ${new Date().toISOString()}`);
   
   // Verify we have the channel hash
   if (WARDRIVING_CHANNEL_HASH === null) {
-    debugError(`Cannot start repeater tracking: channel hash not initialized`);
+    debugError(`[PING] Cannot start repeater tracking: channel hash not initialized`);
     return;
   }
   
   // Clear any existing tracking state
   stopRepeaterTracking();
   
-  debugLog(`Using pre-computed channel hash for correlation: 0x${WARDRIVING_CHANNEL_HASH.toString(16).padStart(2, '0')}`);
+  debugLog(`[PING] Using pre-computed channel hash for correlation: 0x${WARDRIVING_CHANNEL_HASH.toString(16).padStart(2, '0')}`);
   
   // Initialize tracking state
   state.repeaterTracking.isListening = true;
@@ -1532,77 +1885,54 @@ function startRepeaterTracking(payload, channelIdx) {
   state.repeaterTracking.channelIdx = channelIdx;
   state.repeaterTracking.repeaters.clear();
   
-  // Create the rx_log handler
-  const rxLogHandler = (data) => {
-    handleRxLogEvent(data, payload, channelIdx, WARDRIVING_CHANNEL_HASH);
-  };
+  debugLog(`[SESSION LOG] Session Log tracking activated - unified handler will delegate echoes to Session Log`);
   
-  // Store the handler so we can remove it later
-  state.repeaterTracking.rxLogHandler = rxLogHandler;
-  
-  // Listen for rx_log events
-  if (state.connection) {
-    state.connection.on(Constants.PushCodes.LogRxData, rxLogHandler);
-    debugLog(`Registered LogRxData event handler`);
-  }
-  
-  // Note: The 7-second timeout to stop listening is managed by the caller (sendPing function)
-  // This allows the caller to both stop tracking AND retrieve results at the same time
+  // Note: The unified RX handler (started at connect) will automatically delegate to
+  // handleSessionLogTracking() when isListening = true. No separate handler needed.
+  // The 7-second timeout to stop listening is managed by the caller (sendPing function)
 }
 
 /**
- * Handle an rx_log event and check if it's a repeater echo of our ping
+ * Handle Session Log tracking for repeater echoes
+ * Called by unified RX handler when tracking is active
+ * @param {Object} packet - Parsed packet from Packet.fromBytes
  * @param {Object} data - The LogRxData event data (contains lastSnr, lastRssi, raw)
- * @param {string} originalPayload - The payload we sent
- * @param {number} channelIdx - The channel index where we sent the ping
- * @param {number} expectedChannelHash - The channel hash we expect (for message correlation)
+ * @returns {boolean} True if packet was an echo and tracked, false otherwise
  */
-async function handleRxLogEvent(data, originalPayload, channelIdx, expectedChannelHash) {
+async function handleSessionLogTracking(packet, data) {
+  const originalPayload = state.repeaterTracking.sentPayload;
+  const channelIdx = state.repeaterTracking.channelIdx;
+  const expectedChannelHash = WARDRIVING_CHANNEL_HASH;
   try {
-    debugLog(`Received rx_log entry: SNR=${data.lastSnr}, RSSI=${data.lastRssi}`);
+    debugLog(`[SESSION LOG] Processing rx_log entry: SNR=${data.lastSnr}, RSSI=${data.lastRssi}`);
     
-    // Parse the packet from raw data
-    const packet = Packet.fromBytes(data.raw);
-    
-    // VALIDATION STEP 1: Header validation (MUST occur before all other checks)
-    // Expected header for channel GroupText packets: 0x15
-    // Binary: 00 0101 01
-    // - Bits 0-1: Route Type = 01 (Flood)
-    // - Bits 2-5: Payload Type = 0101 (GroupText = 5)
-    // - Bits 6-7: Protocol Version = 00
-    const EXPECTED_HEADER = 0x15;
-    if (packet.header !== EXPECTED_HEADER) {
-      debugLog(`Ignoring rx_log entry: header validation failed (header=0x${packet.header.toString(16).padStart(2, '0')}, expected=0x${EXPECTED_HEADER.toString(16).padStart(2, '0')})`);
-      return;
+    // VALIDATION STEP 1: Header validation for echo detection
+    // Only GroupText packets (CHANNEL_GROUP_TEXT_HEADER) can be echoes of our channel messages
+    if (packet.header !== CHANNEL_GROUP_TEXT_HEADER) {
+      debugLog(`[SESSION LOG] Ignoring: header validation failed (header=0x${packet.header.toString(16).padStart(2, '0')})`);
+      return false;
     }
     
-    debugLog(`Parsed packet: header=0x${packet.header.toString(16).padStart(2, '0')}, route_type=${packet.route_type_string}, payload_type=${packet.payload_type_string}, path_len=${packet.path.length}`);
-    debugLog(`Header validation passed: 0x${packet.header.toString(16).padStart(2, '0')}`);
+    debugLog(`[SESSION LOG] Header validation passed: 0x${packet.header.toString(16).padStart(2, '0')}`);
     
-    // VALIDATION STEP 2: Verify payload type is GRP_TXT (redundant with header check but kept for clarity)
-    if (packet.payload_type !== Packet.PAYLOAD_TYPE_GRP_TXT) {
-      debugLog(`Ignoring rx_log entry: not a channel message (payload_type=${packet.payload_type})`);
-      return;
-    }
-    
-    // VALIDATION STEP 3: Validate this message is for our channel by comparing channel hash
+    // VALIDATION STEP 2: Validate this message is for our channel by comparing channel hash
     // Channel message payload structure: [1 byte channel_hash][2 bytes MAC][encrypted message]
     if (packet.payload.length < 3) {
-      debugLog(`Ignoring rx_log entry: payload too short to contain channel hash`);
-      return;
+      debugLog(`[SESSION LOG] Ignoring: payload too short to contain channel hash`);
+      return false;
     }
     
     const packetChannelHash = packet.payload[0];
-    debugLog(`Message correlation check: packet_channel_hash=0x${packetChannelHash.toString(16).padStart(2, '0')}, expected=0x${expectedChannelHash.toString(16).padStart(2, '0')}`);
+    debugLog(`[SESSION LOG] Message correlation check: packet_channel_hash=0x${packetChannelHash.toString(16).padStart(2, '0')}, expected=0x${expectedChannelHash.toString(16).padStart(2, '0')}`);
     
     if (packetChannelHash !== expectedChannelHash) {
-      debugLog(`Ignoring rx_log entry: channel hash mismatch (packet=0x${packetChannelHash.toString(16).padStart(2, '0')}, expected=0x${expectedChannelHash.toString(16).padStart(2, '0')})`);
-      return;
+      debugLog(`[SESSION LOG] Ignoring: channel hash mismatch (packet=0x${packetChannelHash.toString(16).padStart(2, '0')}, expected=0x${expectedChannelHash.toString(16).padStart(2, '0')})`);
+      return false;
     }
     
-    debugLog(`Channel hash match confirmed - this is a message on our channel`);
+    debugLog(`[SESSION LOG] Channel hash match confirmed - this is a message on our channel`);
     
-    // VALIDATION STEP 4: Decrypt and verify message content matches what we sent
+    // VALIDATION STEP 3: Decrypt and verify message content matches what we sent
     // This ensures we're tracking echoes of OUR specific ping, not other messages on the channel
     debugLog(`[MESSAGE_CORRELATION] Starting message content verification...`);
     
@@ -1612,7 +1942,7 @@ async function handleRxLogEvent(data, originalPayload, channelIdx, expectedChann
       
       if (decryptedMessage === null) {
         debugLog(`[MESSAGE_CORRELATION] ❌ REJECT: Failed to decrypt message`);
-        return;
+        return false;
       }
       
       debugLog(`[MESSAGE_CORRELATION] Decryption successful, comparing content...`);
@@ -1627,7 +1957,7 @@ async function handleRxLogEvent(data, originalPayload, channelIdx, expectedChann
       if (!messageMatches) {
         debugLog(`[MESSAGE_CORRELATION] ❌ REJECT: Message content mismatch (not an echo of our ping)`);
         debugLog(`[MESSAGE_CORRELATION] This is a different message on the same channel`);
-        return;
+        return false;
       }
       
       if (decryptedMessage === originalPayload) {
@@ -1640,12 +1970,12 @@ async function handleRxLogEvent(data, originalPayload, channelIdx, expectedChann
       debugWarn(`[MESSAGE_CORRELATION] Proceeding without message content verification (less reliable)`);
     }
     
-    // VALIDATION STEP 5: Check path length (repeater echo vs direct transmission)
+    // VALIDATION STEP 4: Check path length (repeater echo vs direct transmission)
     // For channel messages, the path contains repeater hops
     // Each hop in the path is 1 byte (repeater ID)
     if (packet.path.length === 0) {
-      debugLog(`Ignoring rx_log entry: no path (direct transmission, not a repeater echo)`);
-      return;
+      debugLog(`[SESSION LOG] Ignoring: no path (direct transmission, not a repeater echo)`);
+      return false;
     }
     
     // Extract only the first hop (first repeater ID) from the path
@@ -1655,16 +1985,16 @@ async function handleRxLogEvent(data, originalPayload, channelIdx, expectedChann
     const firstHopId = packet.path[0];
     const pathHex = firstHopId.toString(16).padStart(2, '0');
     
-    debugLog(`Repeater echo accepted: first_hop=${pathHex}, SNR=${data.lastSnr}, full_path_length=${packet.path.length}`);
+    debugLog(`[PING] Repeater echo accepted: first_hop=${pathHex}, SNR=${data.lastSnr}, full_path_length=${packet.path.length}`);
     
     // Check if we already have this path
     if (state.repeaterTracking.repeaters.has(pathHex)) {
       const existing = state.repeaterTracking.repeaters.get(pathHex);
-      debugLog(`Deduplication: path ${pathHex} already seen (existing SNR=${existing.snr}, new SNR=${data.lastSnr})`);
+      debugLog(`[PING] Deduplication: path ${pathHex} already seen (existing SNR=${existing.snr}, new SNR=${data.lastSnr})`);
       
       // Keep the best (highest) SNR
       if (data.lastSnr > existing.snr) {
-        debugLog(`Deduplication decision: updating path ${pathHex} with better SNR: ${existing.snr} -> ${data.lastSnr}`);
+        debugLog(`[PING] Deduplication decision: updating path ${pathHex} with better SNR: ${existing.snr} -> ${data.lastSnr}`);
         state.repeaterTracking.repeaters.set(pathHex, {
           snr: data.lastSnr,
           seenCount: existing.seenCount + 1
@@ -1673,13 +2003,13 @@ async function handleRxLogEvent(data, originalPayload, channelIdx, expectedChann
         // Trigger incremental UI update since SNR changed
         updateCurrentLogEntryWithLiveRepeaters();
       } else {
-        debugLog(`Deduplication decision: keeping existing SNR for path ${pathHex} (existing ${existing.snr} >= new ${data.lastSnr})`);
+        debugLog(`[PING] Deduplication decision: keeping existing SNR for path ${pathHex} (existing ${existing.snr} >= new ${data.lastSnr})`);
         // Still increment seen count
         existing.seenCount++;
       }
     } else {
       // New path
-      debugLog(`Adding new repeater echo: path=${pathHex}, SNR=${data.lastSnr}`);
+      debugLog(`[PING] Adding new repeater echo: path=${pathHex}, SNR=${data.lastSnr}`);
       state.repeaterTracking.repeaters.set(pathHex, {
         snr: data.lastSnr,
         seenCount: 1
@@ -1688,8 +2018,14 @@ async function handleRxLogEvent(data, originalPayload, channelIdx, expectedChann
       // Trigger incremental UI update for the new repeater
       updateCurrentLogEntryWithLiveRepeaters();
     }
+    
+    // Successfully tracked this echo
+    debugLog(`[SESSION LOG] ✅ Echo tracked successfully`);
+    return true;
+    
   } catch (error) {
-    debugError(`Error processing rx_log entry: ${error.message}`, error);
+    debugError(`[SESSION LOG] Error processing rx_log entry: ${error.message}`, error);
+    return false;
   }
 }
 
@@ -1702,19 +2038,10 @@ function stopRepeaterTracking() {
     return [];
   }
   
-  debugLog(`Stopping repeater echo tracking`);
+  debugLog(`[PING] Stopping repeater echo tracking`);
   
-  // Stop listening for rx_log events
-  if (state.connection && state.repeaterTracking.rxLogHandler) {
-    state.connection.off(Constants.PushCodes.LogRxData, state.repeaterTracking.rxLogHandler);
-    debugLog(`Unregistered LogRxData event handler`);
-  }
-  
-  // Clear timeout
-  if (state.repeaterTracking.listenTimeout) {
-    clearTimeout(state.repeaterTracking.listenTimeout);
-    state.repeaterTracking.listenTimeout = null;
-  }
+  // No need to unregister handler - unified handler continues running
+  // Just clear the tracking state
   
   // Get the results
   const repeaters = Array.from(state.repeaterTracking.repeaters.entries()).map(([id, data]) => ({
@@ -1725,14 +2052,14 @@ function stopRepeaterTracking() {
   // Sort by repeater ID for deterministic output
   repeaters.sort((a, b) => a.repeaterId.localeCompare(b.repeaterId));
   
-  debugLog(`Final aggregated repeater list: ${repeaters.length > 0 ? repeaters.map(r => `${r.repeaterId}(${r.snr}dB)`).join(', ') : 'none'}`);
+  debugLog(`[PING] Final aggregated repeater list: ${repeaters.length > 0 ? repeaters.map(r => `${r.repeaterId}(${r.snr}dB)`).join(', ') : 'none'}`);
   
   // Reset state
   state.repeaterTracking.isListening = false;
   state.repeaterTracking.sentTimestamp = null;
   state.repeaterTracking.sentPayload = null;
   state.repeaterTracking.repeaters.clear();
-  state.repeaterTracking.rxLogHandler = null;
+  state.repeaterTracking.rxLogHandler = null; // Kept for compatibility
   state.repeaterTracking.currentLogEntry = null;
   
   return repeaters;
@@ -1751,6 +2078,331 @@ function formatRepeaterTelemetry(repeaters) {
   // Format as: path(snr), path(snr), ...
   // Display exact SNR values as received
   return repeaters.map(r => `${r.repeaterId}(${r.snr})`).join(',');
+}
+
+// ---- Passive RX Log Listening ----
+
+/**
+ * Unified RX log event handler - processes all incoming packets
+ * Delegates to Session Log tracking when active, otherwise handles passive RX logging
+ * @param {Object} data - The LogRxData event data (contains lastSnr, lastRssi, raw)
+ */
+async function handleUnifiedRxLogEvent(data) {
+  try {
+    debugLog(`[UNIFIED RX] Received rx_log entry: SNR=${data.lastSnr}, RSSI=${data.lastRssi}`);
+    
+    // Parse the packet from raw data (once for both handlers)
+    const packet = Packet.fromBytes(data.raw);
+    
+    // Log header for debugging (informational for all packet processing)
+    debugLog(`[UNIFIED RX] Packet header: 0x${packet.header.toString(16).padStart(2, '0')}`);
+    
+    // DELEGATION: If Session Log is actively tracking, delegate to it first
+    // Session Log requires header validation (CHANNEL_GROUP_TEXT_HEADER) and will handle validation internally
+    if (state.repeaterTracking.isListening) {
+      debugLog(`[UNIFIED RX] Session Log is tracking - delegating to Session Log handler`);
+      const wasTracked = await handleSessionLogTracking(packet, data);
+      
+      if (wasTracked) {
+        debugLog(`[UNIFIED RX] Packet was an echo and tracked by Session Log`);
+        return; // Echo handled, done
+      }
+      
+      debugLog(`[UNIFIED RX] Packet was not an echo, continuing to Passive RX processing`);
+    }
+    
+    // DELEGATION: Handle passive RX logging for all other cases
+    // Passive RX accepts any packet regardless of header type
+    await handlePassiveRxLogging(packet, data);
+    
+  } catch (error) {
+    debugError(`[UNIFIED RX] Error processing rx_log entry: ${error.message}`, error);
+  }
+}
+
+/**
+ * Handle passive RX logging - monitors all incoming packets not handled by Session Log
+ * Extracts the LAST hop from the path (direct repeater) and records observation
+ * @param {Object} packet - Parsed packet from Packet.fromBytes
+ * @param {Object} data - The LogRxData event data (contains lastSnr, lastRssi, raw)
+ */
+async function handlePassiveRxLogging(packet, data) {
+  try {
+    debugLog(`[PASSIVE RX] Processing packet for passive logging`);
+    
+    // VALIDATION: Check path length (need at least one hop)
+    // A packet's path array contains the sequence of repeater IDs that forwarded the message.
+    // Packets with no path are direct transmissions (node-to-node) and don't provide
+    // information about repeater coverage, so we skip them for RX wardriving purposes.
+    if (packet.path.length === 0) {
+      debugLog(`[PASSIVE RX] Ignoring: no path (direct transmission, not via repeater)`);
+      return;
+    }
+    
+    // Extract LAST hop from path (the repeater that directly delivered to us)
+    const lastHopId = packet.path[packet.path.length - 1];
+    const repeaterId = lastHopId.toString(16).padStart(2, '0');
+    
+    debugLog(`[PASSIVE RX] Packet heard via last hop: ${repeaterId}, SNR=${data.lastSnr}, path_length=${packet.path.length}`);
+    
+    // Get current GPS location
+    if (!state.lastFix) {
+      debugLog(`[PASSIVE RX] No GPS fix available, skipping entry`);
+      return;
+    }
+    
+    const lat = state.lastFix.lat;
+    const lon = state.lastFix.lon;
+    const timestamp = new Date().toISOString();
+    
+    // Add entry to RX log (including RSSI, path length, and header for CSV export)
+    addRxLogEntry(repeaterId, data.lastSnr, data.lastRssi, packet.path.length, packet.header, lat, lon, timestamp);
+    
+    debugLog(`[PASSIVE RX] ✅ Observation logged: repeater=${repeaterId}, snr=${data.lastSnr}, location=${lat.toFixed(5)},${lon.toFixed(5)}`);
+    
+    // Handle batch tracking for API (parallel batch per repeater)
+    handlePassiveRxForAPI(repeaterId, data.lastSnr, { lat, lon });
+    
+  } catch (error) {
+    debugError(`[PASSIVE RX] Error processing passive RX: ${error.message}`, error);
+  }
+}
+
+
+
+/**
+ * Start unified RX listening - handles both Session Log tracking and passive RX logging
+ */
+function startUnifiedRxListening() {
+  if (state.passiveRxTracking.isListening) {
+    debugLog(`[UNIFIED RX] Already listening, skipping start`);
+    return;
+  }
+  
+  if (!state.connection) {
+    debugWarn(`[UNIFIED RX] Cannot start listening: no connection`);
+    return;
+  }
+  
+  debugLog(`[UNIFIED RX] Starting unified RX listening`);
+  
+  const handler = (data) => handleUnifiedRxLogEvent(data);
+  state.passiveRxTracking.rxLogHandler = handler;
+  state.connection.on(Constants.PushCodes.LogRxData, handler);
+  state.passiveRxTracking.isListening = true;
+  
+  debugLog(`[UNIFIED RX] ✅ Unified listening started successfully`);
+}
+
+/**
+ * Stop unified RX listening
+ */
+function stopUnifiedRxListening() {
+  if (!state.passiveRxTracking.isListening) {
+    return;
+  }
+  
+  debugLog(`[UNIFIED RX] Stopping unified RX listening`);
+  
+  if (state.connection && state.passiveRxTracking.rxLogHandler) {
+    state.connection.off(Constants.PushCodes.LogRxData, state.passiveRxTracking.rxLogHandler);
+    debugLog(`[UNIFIED RX] Unregistered LogRxData event handler`);
+  }
+  
+  state.passiveRxTracking.isListening = false;
+  state.passiveRxTracking.rxLogHandler = null;
+  
+  debugLog(`[UNIFIED RX] ✅ Unified listening stopped`);
+}
+
+
+
+/**
+ * Future: Post RX log data to MeshMapper API
+ * @param {Array} entries - Array of RX log entries
+ */
+async function postRxLogToMeshMapperAPI(entries) {
+  if (!MESHMAPPER_RX_LOG_API_URL) {
+    debugLog('[PASSIVE RX] RX Log API posting not configured yet');
+    return;
+  }
+  
+  // Future implementation:
+  // - Batch post accumulated RX log entries
+  // - Include session_id from state.wardriveSessionId
+  // - Format: { observations: [{ repeaterId, snr, lat, lon, timestamp }] }
+  debugLog(`[PASSIVE RX] Would post ${entries.length} RX log entries to API (not implemented yet)`);
+}
+
+// ---- Passive RX Batch API Integration ----
+
+/**
+ * Handle passive RX event for API batching
+ * Each repeater is tracked independently with its own batch and timer
+ * @param {string} repeaterId - Repeater ID (hex string)
+ * @param {number} snr - Signal to noise ratio
+ * @param {Object} currentLocation - Current GPS location {lat, lon}
+ */
+function handlePassiveRxForAPI(repeaterId, snr, currentLocation) {
+  debugLog(`[RX BATCH] Processing RX event: repeater=${repeaterId}, snr=${snr}`);
+  
+  // Get or create batch for this repeater
+  let batch = state.rxBatchBuffer.get(repeaterId);
+  
+  if (!batch) {
+    // First RX from this repeater - create new batch
+    debugLog(`[RX BATCH] Creating new batch for repeater ${repeaterId}`);
+    batch = {
+      firstLocation: { lat: currentLocation.lat, lng: currentLocation.lon },
+      firstTimestamp: Date.now(),
+      samples: [],
+      timeoutId: null
+    };
+    state.rxBatchBuffer.set(repeaterId, batch);
+    
+    // Set timeout for this repeater (independent timer)
+    batch.timeoutId = setTimeout(() => {
+      debugLog(`[RX BATCH] Timeout triggered for repeater ${repeaterId} after ${RX_BATCH_TIMEOUT_MS}ms`);
+      flushBatch(repeaterId, 'timeout');
+    }, RX_BATCH_TIMEOUT_MS);
+    
+    debugLog(`[RX BATCH] Timeout set for repeater ${repeaterId}: ${RX_BATCH_TIMEOUT_MS}ms`);
+  }
+  
+  // Add sample to batch
+  const sample = {
+    snr,
+    location: { lat: currentLocation.lat, lng: currentLocation.lon },
+    timestamp: Date.now()
+  };
+  batch.samples.push(sample);
+  
+  debugLog(`[RX BATCH] Sample added to batch for repeater ${repeaterId}: sample_count=${batch.samples.length}`);
+  
+  // Check distance trigger (has user moved >= RX_BATCH_DISTANCE_M from first location?)
+  const distance = calculateHaversineDistance(
+    currentLocation.lat,
+    currentLocation.lon,
+    batch.firstLocation.lat,
+    batch.firstLocation.lng
+  );
+  
+  debugLog(`[RX BATCH] Distance check for repeater ${repeaterId}: ${distance.toFixed(2)}m from first location (threshold=${RX_BATCH_DISTANCE_M}m)`);
+  
+  if (distance >= RX_BATCH_DISTANCE_M) {
+    debugLog(`[RX BATCH] Distance threshold met for repeater ${repeaterId}, flushing batch`);
+    flushBatch(repeaterId, 'distance');
+  }
+}
+
+/**
+ * Flush a single repeater's batch - aggregate and post to API
+ * @param {string} repeaterId - Repeater ID to flush
+ * @param {string} trigger - What caused the flush: 'distance' | 'timeout' | 'session_end'
+ */
+function flushBatch(repeaterId, trigger) {
+  debugLog(`[RX BATCH] Flushing batch for repeater ${repeaterId}, trigger=${trigger}`);
+  
+  const batch = state.rxBatchBuffer.get(repeaterId);
+  if (!batch || batch.samples.length === 0) {
+    debugLog(`[RX BATCH] No batch to flush for repeater ${repeaterId}`);
+    return;
+  }
+  
+  // Clear timeout if it exists
+  if (batch.timeoutId) {
+    clearTimeout(batch.timeoutId);
+    debugLog(`[RX BATCH] Cleared timeout for repeater ${repeaterId}`);
+  }
+  
+  // Calculate aggregations
+  const snrValues = batch.samples.map(s => s.snr);
+  const snrAvg = snrValues.reduce((sum, val) => sum + val, 0) / snrValues.length;
+  const snrMax = Math.max(...snrValues);
+  const snrMin = Math.min(...snrValues);
+  const sampleCount = batch.samples.length;
+  const timestampStart = batch.firstTimestamp;
+  const timestampEnd = batch.samples[batch.samples.length - 1].timestamp;
+  
+  // Build API entry
+  const entry = {
+    repeater_id: repeaterId,
+    location: batch.firstLocation,
+    snr_avg: parseFloat(snrAvg.toFixed(3)),
+    snr_max: parseFloat(snrMax.toFixed(3)),
+    snr_min: parseFloat(snrMin.toFixed(3)),
+    sample_count: sampleCount,
+    timestamp_start: timestampStart,
+    timestamp_end: timestampEnd,
+    trigger: trigger
+  };
+  
+  debugLog(`[RX BATCH] Aggregated entry for repeater ${repeaterId}:`, entry);
+  debugLog(`[RX BATCH]   snr_avg=${snrAvg.toFixed(3)}, snr_max=${snrMax.toFixed(3)}, snr_min=${snrMin.toFixed(3)}`);
+  debugLog(`[RX BATCH]   sample_count=${sampleCount}, duration=${((timestampEnd - timestampStart) / 1000).toFixed(1)}s`);
+  
+  // Queue for API posting
+  queueApiPost(entry);
+  
+  // Remove batch from buffer (cleanup)
+  state.rxBatchBuffer.delete(repeaterId);
+  debugLog(`[RX BATCH] Batch removed from buffer for repeater ${repeaterId}`);
+}
+
+/**
+ * Flush all active batches (called on session end, disconnect, etc.)
+ * @param {string} trigger - What caused the flush: 'session_end' | 'disconnect' | etc.
+ */
+function flushAllBatches(trigger = 'session_end') {
+  debugLog(`[RX BATCH] Flushing all batches, trigger=${trigger}, active_batches=${state.rxBatchBuffer.size}`);
+  
+  if (state.rxBatchBuffer.size === 0) {
+    debugLog(`[RX BATCH] No batches to flush`);
+    return;
+  }
+  
+  // Iterate all repeater batches and flush each one
+  const repeaterIds = Array.from(state.rxBatchBuffer.keys());
+  for (const repeaterId of repeaterIds) {
+    flushBatch(repeaterId, trigger);
+  }
+  
+  debugLog(`[RX BATCH] All batches flushed: ${repeaterIds.length} repeaters`);
+}
+
+/**
+ * Queue an entry for API posting
+ * Uses the batch queue system to aggregate RX messages
+ * @param {Object} entry - The aggregated entry to post
+ */
+function queueApiPost(entry) {
+  // Validate session_id exists
+  if (!state.wardriveSessionId) {
+    debugWarn(`[RX BATCH API] Cannot queue: no session_id available`);
+    return;
+  }
+  
+  // Build unified API payload (without WARDRIVE_TYPE yet)
+  // Format heard_repeats as "repeater_id(snr_avg)" - e.g., "4e(12.0)"
+  // Use absolute value and format with one decimal place
+  const heardRepeats = `${entry.repeater_id}(${Math.abs(entry.snr_avg).toFixed(1)})`;
+  
+  const payload = {
+    key: MESHMAPPER_API_KEY,
+    lat: entry.location.lat,
+    lon: entry.location.lng,
+    who: getDeviceIdentifier(),
+    power: getCurrentPowerSetting(),
+    heard_repeats: heardRepeats,
+    ver: APP_VERSION,
+    test: 0,
+    iata: WARDIVE_IATA_CODE,
+    session_id: state.wardriveSessionId
+  };
+  
+  // Queue message instead of posting immediately
+  queueApiMessage(payload, "RX");
+  debugLog(`[RX BATCH API] RX message queued: repeater=${entry.repeater_id}, snr=${entry.snr_avg.toFixed(1)}, location=${entry.location.lat.toFixed(5)},${entry.location.lng.toFixed(5)}`);
 }
 
 // ---- Mobile Session Log Bottom Sheet ----
@@ -1840,7 +2492,7 @@ function createChipElement(type, value) {
  * @returns {HTMLElement} Log entry element
  */
 function createLogEntryElement(entry) {
-  debugLog(`Creating log entry element for timestamp: ${entry.timestamp}`);
+  debugLog(`[UI] Creating log entry element for timestamp: ${entry.timestamp}`);
   const logEntry = document.createElement('div');
   logEntry.className = 'logEntry';
   
@@ -1870,20 +2522,20 @@ function createLogEntryElement(entry) {
     noneSpan.className = 'text-xs text-slate-500 italic';
     noneSpan.textContent = 'No repeats heard';
     chipsRow.appendChild(noneSpan);
-    debugLog(`Log entry has no events (no repeats heard)`);
+    debugLog(`[UI] Log entry has no events (no repeats heard)`);
   } else {
-    debugLog(`Log entry has ${entry.events.length} event(s)`);
+    debugLog(`[UI] Log entry has ${entry.events.length} event(s)`);
     entry.events.forEach(event => {
       const chip = createChipElement(event.type, event.value);
       chipsRow.appendChild(chip);
-      debugLog(`Added chip for repeater ${event.type} with SNR ${event.value} dB`);
+      debugLog(`[UI] Added chip for repeater ${event.type} with SNR ${event.value} dB`);
     });
   }
   
   logEntry.appendChild(topRow);
   logEntry.appendChild(chipsRow);
   
-  debugLog(`Log entry element created successfully with class: ${logEntry.className}`);
+  debugLog(`[UI] Log entry element created successfully with class: ${logEntry.className}`);
   return logEntry;
 }
 
@@ -1899,7 +2551,7 @@ function updateLogSummary() {
   if (count === 0) {
     logLastTime.textContent = 'No data';
     logLastSnr.textContent = '—';
-    debugLog('Session log summary updated: no entries');
+    debugLog('[SESSION LOG] Session log summary updated: no entries');
     return;
   }
   
@@ -1909,7 +2561,7 @@ function updateLogSummary() {
   
   // Count total heard repeats in the latest ping
   const heardCount = lastEntry.events.length;
-  debugLog(`Session log summary updated: ${count} total pings, latest ping heard ${heardCount} repeats`);
+  debugLog(`[SESSION LOG] Session log summary updated: ${count} total pings, latest ping heard ${heardCount} repeats`);
   
   if (heardCount > 0) {
     logLastSnr.textContent = heardCount === 1 ? '1 Repeat' : `${heardCount} Repeats`;
@@ -1926,7 +2578,7 @@ function updateLogSummary() {
 function renderLogEntries() {
   if (!sessionPingsEl) return;
   
-  debugLog(`Rendering ${sessionLogState.entries.length} log entries`);
+  debugLog(`[UI] Rendering ${sessionLogState.entries.length} log entries`);
   sessionPingsEl.innerHTML = '';
   
   if (sessionLogState.entries.length === 0) {
@@ -1935,7 +2587,7 @@ function renderLogEntries() {
     placeholder.className = 'text-xs text-slate-500 italic text-center py-4';
     placeholder.textContent = 'No pings logged yet';
     sessionPingsEl.appendChild(placeholder);
-    debugLog(`Rendered placeholder (no entries)`);
+    debugLog(`[UI] Rendered placeholder (no entries)`);
     return;
   }
   
@@ -1945,16 +2597,16 @@ function renderLogEntries() {
   entries.forEach((entry, index) => {
     const element = createLogEntryElement(entry);
     sessionPingsEl.appendChild(element);
-    debugLog(`Appended log entry ${index + 1}/${entries.length} to sessionPingsEl`);
+    debugLog(`[UI] Appended log entry ${index + 1}/${entries.length} to sessionPingsEl`);
   });
   
   // Auto-scroll to top (newest)
   if (sessionLogState.autoScroll && logScrollContainer) {
     logScrollContainer.scrollTop = 0;
-    debugLog(`Auto-scrolled to top of log container`);
+    debugLog(`[UI] Auto-scrolled to top of log container`);
   }
   
-  debugLog(`Finished rendering all log entries`);
+  debugLog(`[UI] Finished rendering all log entries`);
 }
 
 /**
@@ -1982,6 +2634,19 @@ function toggleBottomSheet() {
       logExpandArrow.classList.remove('expanded');
     }
   }
+  
+  // Toggle copy button and status visibility
+  if (sessionLogState.isExpanded) {
+    // Hide status elements, show copy button
+    if (logLastSnr) logLastSnr.classList.add('hidden');
+    if (sessionLogCopyBtn) sessionLogCopyBtn.classList.remove('hidden');
+    debugLog('[SESSION LOG] Expanded - showing copy button, hiding status');
+  } else {
+    // Show status elements, hide copy button
+    if (logLastSnr) logLastSnr.classList.remove('hidden');
+    if (sessionLogCopyBtn) sessionLogCopyBtn.classList.add('hidden');
+    debugLog('[SESSION LOG] Collapsed - hiding copy button, showing status');
+  }
 }
 
 /**
@@ -2002,6 +2667,604 @@ function addLogEntry(timestamp, lat, lon, eventsStr) {
   }
 }
 
+// ---- RX Log UI Functions ----
+
+/**
+ * Parse RX log entry into structured data
+ * @param {Object} entry - RX log entry object
+ * @returns {Object} Parsed RX log entry with formatted data
+ */
+function parseRxLogEntry(entry) {
+  return {
+    repeaterId: entry.repeaterId,
+    snr: entry.snr,
+    rssi: entry.rssi,
+    pathLength: entry.pathLength,
+    header: entry.header,
+    lat: entry.lat.toFixed(5),
+    lon: entry.lon.toFixed(5),
+    timestamp: entry.timestamp
+  };
+}
+
+/**
+ * Create DOM element for RX log entry
+ * @param {Object} entry - RX log entry object
+ * @returns {HTMLElement} DOM element for the RX log entry
+ */
+function createRxLogEntryElement(entry) {
+  const parsed = parseRxLogEntry(entry);
+  
+  const logEntry = document.createElement('div');
+  logEntry.className = 'logEntry';
+  
+  // Top row: time + coords
+  const topRow = document.createElement('div');
+  topRow.className = 'logRowTop';
+  
+  const time = document.createElement('span');
+  time.className = 'logTime';
+  const date = new Date(parsed.timestamp);
+  time.textContent = date.toLocaleTimeString();
+  
+  const coords = document.createElement('span');
+  coords.className = 'logCoords';
+  coords.textContent = `${parsed.lat},${parsed.lon}`;
+  
+  topRow.appendChild(time);
+  topRow.appendChild(coords);
+  
+  // Chips row: repeater ID and SNR
+  const chipsRow = document.createElement('div');
+  chipsRow.className = 'heardChips';
+  
+  // Create chip for repeater with SNR
+  const chip = createChipElement(parsed.repeaterId, parsed.snr);
+  chipsRow.appendChild(chip);
+  
+  logEntry.appendChild(topRow);
+  logEntry.appendChild(chipsRow);
+  
+  return logEntry;
+}
+
+/**
+ * Update RX log summary bar with latest data
+ */
+function updateRxLogSummary() {
+  if (!rxLogCount || !rxLogLastTime || !rxLogLastRepeater) return;
+  
+  const count = rxLogState.entries.length;
+  rxLogCount.textContent = count === 1 ? '1 observation' : `${count} observations`;
+  
+  if (count === 0) {
+    rxLogLastTime.textContent = 'No data';
+    rxLogLastRepeater.textContent = '—';
+    // Hide SNR chip when no entries
+    if (rxLogSnrChip) {
+      rxLogSnrChip.classList.add('hidden');
+    }
+    debugLog('[PASSIVE RX UI] Summary updated: no entries');
+    return;
+  }
+  
+  const lastEntry = rxLogState.entries[count - 1];
+  const date = new Date(lastEntry.timestamp);
+  rxLogLastTime.textContent = date.toLocaleTimeString();
+  rxLogLastRepeater.textContent = lastEntry.repeaterId;
+  
+  // Update SNR chip
+  if (rxLogSnrChip && rxLogState.entries.length > 0) {
+    const snrClass = getSnrSeverityClass(lastEntry.snr);
+    rxLogSnrChip.className = `chip-mini ${snrClass}`;
+    rxLogSnrChip.textContent = `${lastEntry.snr.toFixed(2)} dB`;
+    rxLogSnrChip.classList.remove('hidden');
+    debugLog(`[PASSIVE RX UI] SNR chip updated: ${lastEntry.snr.toFixed(2)} dB (${snrClass})`);
+  } else if (rxLogSnrChip) {
+    rxLogSnrChip.classList.add('hidden');
+  }
+  
+  debugLog(`[PASSIVE RX UI] Summary updated: ${count} observations, last repeater: ${lastEntry.repeaterId}`);
+}
+
+/**
+ * Render all RX log entries
+ */
+/**
+ * Render RX log entries (full render or incremental)
+ * @param {boolean} fullRender - If true, re-render all entries. If false, only render new entries.
+ */
+function renderRxLogEntries(fullRender = false) {
+  if (!rxLogEntries) return;
+  
+  if (fullRender) {
+    debugLog(`[PASSIVE RX UI] Full render of ${rxLogState.entries.length} RX log entries`);
+    rxLogEntries.innerHTML = '';
+    
+    if (rxLogState.entries.length === 0) {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'text-xs text-slate-500 italic text-center py-4';
+      placeholder.textContent = 'No RX observations yet';
+      rxLogEntries.appendChild(placeholder);
+      debugLog(`[PASSIVE RX UI] Rendered placeholder (no entries)`);
+      return;
+    }
+    
+    // Render newest first
+    const entries = [...rxLogState.entries].reverse();
+    
+    entries.forEach((entry, index) => {
+      const element = createRxLogEntryElement(entry);
+      rxLogEntries.appendChild(element);
+    });
+    
+    debugLog(`[PASSIVE RX UI] Full render complete: ${entries.length} entries`);
+  } else {
+    // Incremental render: only add the newest entry
+    if (rxLogState.entries.length === 0) {
+      debugLog(`[PASSIVE RX UI] No entries to render incrementally`);
+      return;
+    }
+    
+    // Remove placeholder if it exists
+    const placeholder = rxLogEntries.querySelector('.text-xs.text-slate-500.italic');
+    if (placeholder) {
+      placeholder.remove();
+    }
+    
+    // Get the newest entry (last in array) and prepend it (newest first display)
+    const newestEntry = rxLogState.entries[rxLogState.entries.length - 1];
+    const element = createRxLogEntryElement(newestEntry);
+    rxLogEntries.insertBefore(element, rxLogEntries.firstChild);
+    
+    debugLog(`[PASSIVE RX UI] Appended entry ${rxLogState.entries.length}/${rxLogState.entries.length}`);
+  }
+  
+  // Auto-scroll to top (newest)
+  if (rxLogState.autoScroll && rxLogScrollContainer) {
+    rxLogScrollContainer.scrollTop = 0;
+    debugLog(`[PASSIVE RX UI] Auto-scrolled to top`);
+  }
+}
+
+/**
+ * Toggle RX log expanded/collapsed
+ */
+function toggleRxLogBottomSheet() {
+  rxLogState.isExpanded = !rxLogState.isExpanded;
+  
+  if (rxLogBottomSheet) {
+    if (rxLogState.isExpanded) {
+      rxLogBottomSheet.classList.add('open');
+      rxLogBottomSheet.classList.remove('hidden');
+    } else {
+      rxLogBottomSheet.classList.remove('open');
+      rxLogBottomSheet.classList.add('hidden');
+    }
+  }
+  
+  // Toggle arrow rotation
+  if (rxLogExpandArrow) {
+    if (rxLogState.isExpanded) {
+      rxLogExpandArrow.classList.add('expanded');
+    } else {
+      rxLogExpandArrow.classList.remove('expanded');
+    }
+  }
+  
+  // Toggle copy button and status visibility
+  if (rxLogState.isExpanded) {
+    // Hide status, show copy button
+    if (rxLogLastRepeater) rxLogLastRepeater.classList.add('hidden');
+    if (rxLogSnrChip) rxLogSnrChip.classList.add('hidden');
+    if (rxLogCopyBtn) rxLogCopyBtn.classList.remove('hidden');
+    debugLog('[PASSIVE RX UI] Expanded - showing copy button, hiding status');
+  } else {
+    // Show status, hide copy button
+    if (rxLogLastRepeater) rxLogLastRepeater.classList.remove('hidden');
+    if (rxLogSnrChip && rxLogState.entries.length > 0) {
+      rxLogSnrChip.classList.remove('hidden');
+    }
+    if (rxLogCopyBtn) rxLogCopyBtn.classList.add('hidden');
+    debugLog('[PASSIVE RX UI] Collapsed - hiding copy button, showing status');
+  }
+}
+
+/**
+ * Add entry to RX log
+ * @param {string} repeaterId - Repeater ID (hex)
+ * @param {number} snr - Signal-to-noise ratio
+ * @param {number} rssi - Received Signal Strength Indicator
+ * @param {number} pathLength - Number of hops in packet path
+ * @param {number} header - Packet header byte
+ * @param {number} lat - Latitude
+ * @param {number} lon - Longitude
+ * @param {string} timestamp - ISO timestamp
+ */
+function addRxLogEntry(repeaterId, snr, rssi, pathLength, header, lat, lon, timestamp) {
+  const entry = {
+    repeaterId,
+    snr,
+    rssi,
+    pathLength,
+    header,
+    lat,
+    lon,
+    timestamp
+  };
+  
+  rxLogState.entries.push(entry);
+  
+  // Apply max entries limit
+  if (rxLogState.entries.length > rxLogState.maxEntries) {
+    const removed = rxLogState.entries.shift();
+    debugLog(`[PASSIVE RX UI] Max entries limit reached, removed oldest entry (repeater=${removed.repeaterId})`);
+    // Need full re-render when removing old entries
+    renderRxLogEntries(true);
+  } else {
+    // Incremental render - only append the new entry
+    renderRxLogEntries(false);
+  }
+  
+  updateRxLogSummary();
+  
+  debugLog(`[PASSIVE RX UI] Added entry: repeater=${repeaterId}, snr=${snr}, location=${lat.toFixed(5)},${lon.toFixed(5)}`);
+}
+
+// ---- Error Log ----
+
+/**
+ * Create DOM element for Error log entry
+ * @param {Object} entry - Error log entry object
+ * @returns {HTMLElement} DOM element for the error log entry
+ */
+function createErrorLogEntryElement(entry) {
+  const logEntry = document.createElement('div');
+  logEntry.className = 'logEntry';
+  
+  // Top row: time + error type/source
+  const topRow = document.createElement('div');
+  topRow.className = 'logRowTop';
+  
+  const time = document.createElement('span');
+  time.className = 'logTime';
+  const date = new Date(entry.timestamp);
+  time.textContent = date.toLocaleTimeString();
+  
+  const source = document.createElement('span');
+  source.className = 'text-xs font-mono text-red-400';
+  source.textContent = entry.source || 'ERROR';
+  
+  topRow.appendChild(time);
+  topRow.appendChild(source);
+  
+  // Message row
+  const messageRow = document.createElement('div');
+  messageRow.className = 'text-xs text-red-300 break-words mt-1';
+  messageRow.textContent = entry.message;
+  
+  logEntry.appendChild(topRow);
+  logEntry.appendChild(messageRow);
+  
+  return logEntry;
+}
+
+/**
+ * Update error log summary bar
+ */
+function updateErrorLogSummary() {
+  if (!errorLogCount || !errorLogLastTime) return;
+  
+  const count = errorLogState.entries.length;
+  
+  if (count === 0) {
+    errorLogCount.textContent = '0 errors';
+    errorLogLastTime.textContent = 'No errors';
+    errorLogLastTime.classList.add('hidden');
+    if (errorLogLastError) {
+      errorLogLastError.textContent = '—';
+    }
+    debugLog('[ERROR LOG] Summary updated: no entries');
+    return;
+  }
+  
+  const lastEntry = errorLogState.entries[errorLogState.entries.length - 1];
+  errorLogCount.textContent = `${count} error${count !== 1 ? 's' : ''}`;
+  
+  const date = new Date(lastEntry.timestamp);
+  errorLogLastTime.textContent = date.toLocaleTimeString();
+  errorLogLastTime.classList.remove('hidden');
+  
+  if (errorLogLastError) {
+    // Show preview of error message
+    const preview = lastEntry.message.length > errorLogState.previewLength 
+      ? lastEntry.message.substring(0, errorLogState.previewLength) + '...' 
+      : lastEntry.message;
+    errorLogLastError.textContent = preview;
+  }
+  
+  debugLog(`[ERROR LOG] Summary updated: ${count} errors, last: ${lastEntry.message.substring(0, 30)}...`);
+}
+
+/**
+ * Render Error log entries (full render or incremental)
+ * @param {boolean} fullRender - If true, re-render all entries. If false, only render new entries.
+ */
+function renderErrorLogEntries(fullRender = false) {
+  if (!errorLogEntries) return;
+  
+  if (fullRender) {
+    debugLog(`[ERROR LOG] Full render of ${errorLogState.entries.length} error log entries`);
+    errorLogEntries.innerHTML = '';
+    
+    if (errorLogState.entries.length === 0) {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'text-xs text-slate-500 italic text-center py-4';
+      placeholder.textContent = 'No errors logged';
+      errorLogEntries.appendChild(placeholder);
+      debugLog(`[ERROR LOG] Rendered placeholder (no entries)`);
+      return;
+    }
+    
+    // Render newest first
+    const entries = [...errorLogState.entries].reverse();
+    
+    entries.forEach((entry, index) => {
+      const element = createErrorLogEntryElement(entry);
+      errorLogEntries.appendChild(element);
+    });
+    
+    debugLog(`[ERROR LOG] Full render complete: ${entries.length} entries`);
+  } else {
+    // Incremental render: only add the newest entry
+    if (errorLogState.entries.length === 0) {
+      debugLog(`[ERROR LOG] No entries to render incrementally`);
+      return;
+    }
+    
+    // Remove placeholder if it exists
+    const placeholder = errorLogEntries.querySelector('.text-xs.text-slate-500.italic');
+    if (placeholder) {
+      placeholder.remove();
+    }
+    
+    // Get the newest entry (last in array) and prepend it (newest first display)
+    const newestEntry = errorLogState.entries[errorLogState.entries.length - 1];
+    const element = createErrorLogEntryElement(newestEntry);
+    errorLogEntries.insertBefore(element, errorLogEntries.firstChild);
+    
+    debugLog(`[ERROR LOG] Appended entry ${errorLogState.entries.length}/${errorLogState.entries.length}`);
+  }
+  
+  // Auto-scroll to top (newest)
+  if (errorLogState.autoScroll && errorLogScrollContainer) {
+    errorLogScrollContainer.scrollTop = 0;
+    debugLog(`[ERROR LOG] Auto-scrolled to top`);
+  }
+}
+
+/**
+ * Toggle Error log expanded/collapsed
+ */
+function toggleErrorLogBottomSheet() {
+  errorLogState.isExpanded = !errorLogState.isExpanded;
+  
+  if (errorLogBottomSheet) {
+    if (errorLogState.isExpanded) {
+      errorLogBottomSheet.classList.add('open');
+      errorLogBottomSheet.classList.remove('hidden');
+    } else {
+      errorLogBottomSheet.classList.remove('open');
+      errorLogBottomSheet.classList.add('hidden');
+    }
+  }
+  
+  // Toggle arrow rotation
+  if (errorLogExpandArrow) {
+    if (errorLogState.isExpanded) {
+      errorLogExpandArrow.classList.add('expanded');
+    } else {
+      errorLogExpandArrow.classList.remove('expanded');
+    }
+  }
+  
+  // Toggle copy button and status visibility
+  if (errorLogState.isExpanded) {
+    // Hide status, show copy button
+    if (errorLogLastError) errorLogLastError.classList.add('hidden');
+    if (errorLogCopyBtn) errorLogCopyBtn.classList.remove('hidden');
+    debugLog('[ERROR LOG] Expanded - showing copy button, hiding status');
+  } else {
+    // Show status, hide copy button
+    if (errorLogLastError) errorLogLastError.classList.remove('hidden');
+    if (errorLogCopyBtn) errorLogCopyBtn.classList.add('hidden');
+    debugLog('[ERROR LOG] Collapsed - hiding copy button, showing status');
+  }
+}
+
+/**
+ * Add entry to Error log
+ * @param {string} message - Error message
+ * @param {string} source - Optional source/context of the error
+ */
+function addErrorLogEntry(message, source = null) {
+  const entry = {
+    message,
+    source,
+    timestamp: new Date().toISOString()
+  };
+  
+  errorLogState.entries.push(entry);
+  
+  // Apply max entries limit
+  if (errorLogState.entries.length > errorLogState.maxEntries) {
+    const removed = errorLogState.entries.shift();
+    debugLog(`[ERROR LOG] Max entries limit reached, removed oldest entry`);
+    // Need full re-render when removing old entries
+    renderErrorLogEntries(true);
+  } else {
+    // Incremental render - only append the new entry
+    renderErrorLogEntries(false);
+  }
+  
+  updateErrorLogSummary();
+  
+  debugLog(`[ERROR LOG] Added entry: ${message.substring(0, 50)}${message.length > 50 ? '...' : ''}`);
+}
+
+// ---- CSV Export Functions ----
+
+/**
+ * Convert Session Log to CSV format
+ * Columns: Timestamp,Latitude,Longitude,Repeater1_ID,Repeater1_SNR,Repeater2_ID,Repeater2_SNR,...
+ * @returns {string} CSV formatted string
+ */
+function sessionLogToCSV() {
+  debugLog('[SESSION LOG] Converting session log to CSV format');
+  
+  if (sessionLogState.entries.length === 0) {
+    debugWarn('[SESSION LOG] No session log entries to export');
+    return 'Timestamp,Latitude,Longitude,Repeats\n';
+  }
+  
+  // Fixed 4-column header
+  const header = 'Timestamp,Latitude,Longitude,Repeats\n';
+  
+  // Build CSV rows
+  const rows = sessionLogState.entries.map(entry => {
+    let row = `${entry.timestamp},${entry.lat},${entry.lon}`;
+    
+    // Combine all repeater data into single Repeats column
+    // Format: repeaterID(snr)|repeaterID(snr)|...
+    if (entry.events.length > 0) {
+      const repeats = entry.events.map(event => {
+        return `${event.type}(${event.value.toFixed(2)})`;
+      }).join('|');
+      row += `,${repeats}`;
+    } else {
+      row += ',';
+    }
+    
+    return row;
+  });
+  
+  const csv = header + rows.join('\n');
+  debugLog(`[SESSION LOG] CSV export complete: ${sessionLogState.entries.length} entries`);
+  return csv;
+}
+
+/**
+ * Convert RX Log to CSV format
+ * Columns: Timestamp,RepeaterID,SNR,RSSI,PathLength
+ * @returns {string} CSV formatted string
+ */
+function rxLogToCSV() {
+  debugLog('[PASSIVE RX UI] Converting RX log to CSV format');
+  
+  if (rxLogState.entries.length === 0) {
+    debugWarn('[PASSIVE RX UI] No RX log entries to export');
+    return 'Timestamp,RepeaterID,SNR,RSSI,PathLength\n';
+  }
+  
+  const header = 'Timestamp,RepeaterID,SNR,RSSI,PathLength\n';
+  
+  const rows = rxLogState.entries.map(entry => {
+    // Handle potentially missing fields from old entries
+    const snr = entry.snr !== undefined ? entry.snr.toFixed(2) : '';
+    const rssi = entry.rssi !== undefined ? entry.rssi : '';
+    const pathLength = entry.pathLength !== undefined ? entry.pathLength : '';
+    return `${entry.timestamp},${entry.repeaterId},${snr},${rssi},${pathLength}`;
+  });
+  
+  const csv = header + rows.join('\n');
+  debugLog(`[PASSIVE RX UI] CSV export complete: ${rxLogState.entries.length} entries`);
+  return csv;
+}
+
+/**
+ * Convert Error Log to CSV format
+ * Columns: Timestamp,ErrorType,Message
+ * @returns {string} CSV formatted string
+ */
+function errorLogToCSV() {
+  debugLog('[ERROR LOG] Converting error log to CSV format');
+  
+  if (errorLogState.entries.length === 0) {
+    debugWarn('[ERROR LOG] No error log entries to export');
+    return 'Timestamp,ErrorType,Message\n';
+  }
+  
+  const header = 'Timestamp,ErrorType,Message\n';
+  
+  const rows = errorLogState.entries.map(entry => {
+    // Escape quotes in both source and message fields
+    const source = (entry.source || 'ERROR').replace(/"/g, '""');
+    const message = entry.message.replace(/"/g, '""');
+    return `${entry.timestamp},"${source}","${message}"`;
+  });
+  
+  const csv = header + rows.join('\n');
+  debugLog(`[ERROR LOG] CSV export complete: ${errorLogState.entries.length} entries`);
+  return csv;
+}
+
+/**
+ * Copy log data to clipboard as CSV
+ * @param {string} logType - Type of log: 'session', 'rx', or 'error'
+ * @param {HTMLButtonElement} button - The button element that triggered the copy
+ */
+async function copyLogToCSV(logType, button) {
+  try {
+    debugLog(`[UI] Copy to CSV requested for ${logType} log`);
+    
+    let csv;
+    let logTag;
+    
+    switch (logType) {
+      case 'session':
+        csv = sessionLogToCSV();
+        logTag = '[SESSION LOG]';
+        break;
+      case 'rx':
+        csv = rxLogToCSV();
+        logTag = '[PASSIVE RX UI]';
+        break;
+      case 'error':
+        csv = errorLogToCSV();
+        logTag = '[ERROR LOG]';
+        break;
+      default:
+        debugError('[UI] Unknown log type for CSV export:', logType);
+        return;
+    }
+    
+    // Copy to clipboard
+    await navigator.clipboard.writeText(csv);
+    debugLog(`${logTag} CSV data copied to clipboard`);
+    
+    // Show feedback
+    const originalText = button.textContent;
+    button.textContent = 'Copied!';
+    button.classList.add('copied');
+    
+    // Reset after 1.5 seconds
+    setTimeout(() => {
+      button.textContent = originalText;
+      button.classList.remove('copied');
+      debugLog(`${logTag} Copy button feedback reset`);
+    }, 1500);
+    
+  } catch (error) {
+    debugError(`[UI] Failed to copy ${logType} log to clipboard:`, error.message);
+    // Show error feedback
+    const originalText = button.textContent;
+    button.textContent = 'Failed';
+    setTimeout(() => {
+      button.textContent = originalText;
+    }, 1500);
+  }
+}
+
 // ---- Ping ----
 /**
  * Acquire fresh GPS coordinates and update state
@@ -2015,7 +3278,7 @@ async function acquireFreshGpsPosition() {
     lon: pos.coords.longitude,
     accuracy: pos.coords.accuracy
   };
-  debugLog(`Fresh GPS acquired: lat=${coords.lat.toFixed(5)}, lon=${coords.lon.toFixed(5)}, accuracy=${coords.accuracy}m`);
+  debugLog(`[GPS] Fresh GPS acquired: lat=${coords.lat.toFixed(5)}, lon=${coords.lon.toFixed(5)}, accuracy=${coords.accuracy}m`);
   
   state.lastFix = {
     lat: coords.lat,
@@ -2037,7 +3300,7 @@ async function getGpsCoordinatesForPing(isAutoMode) {
   if (isAutoMode) {
     // Auto mode: validate GPS freshness before sending
     if (!state.lastFix) {
-      debugWarn("Auto ping skipped: no GPS fix available yet");
+      debugWarn("[AUTO] Auto ping skipped: no GPS fix available yet");
       setDynamicStatus("Waiting for GPS fix", STATUS_COLORS.warning);
       return null;
     }
@@ -2048,20 +3311,20 @@ async function getGpsCoordinatesForPing(isAutoMode) {
     const maxAge = intervalMs + GPS_FRESHNESS_BUFFER_MS;
     
     if (ageMs >= maxAge) {
-      debugLog(`GPS data too old for auto ping (${ageMs}ms), attempting to refresh`);
+      debugLog(`[GPS] GPS data too old for auto ping (${ageMs}ms), attempting to refresh`);
       setDynamicStatus("GPS data too old, requesting fresh position", STATUS_COLORS.warning);
       
       try {
         return await acquireFreshGpsPosition();
       } catch (e) {
-        debugError(`Could not refresh GPS position for auto ping: ${e.message}`, e);
+        debugError(`[GPS] Could not refresh GPS position for auto ping: ${e.message}`, e);
         // Set skip reason so the countdown will show the appropriate message
         state.skipReason = "gps too old";
         return null;
       }
     }
     
-    debugLog(`Using GPS watch data: lat=${state.lastFix.lat.toFixed(5)}, lon=${state.lastFix.lon.toFixed(5)} (age: ${ageMs}ms)`);
+    debugLog(`[GPS] Using GPS watch data: lat=${state.lastFix.lat.toFixed(5)}, lon=${state.lastFix.lon.toFixed(5)} (age: ${ageMs}ms)`);
     return {
       lat: state.lastFix.lat,
       lon: state.lastFix.lon,
@@ -2078,7 +3341,7 @@ async function getGpsCoordinatesForPing(isAutoMode) {
     
     // If GPS watch is running, use its data if recent (to avoid concurrent requests)
     if (isGpsWatchActive && ageMs < GPS_WATCH_MAX_AGE_MS) {
-      debugLog(`Using GPS watch data for manual ping (age: ${ageMs}ms, watch active)`);
+      debugLog(`[GPS] Using GPS watch data for manual ping (age: ${ageMs}ms, watch active)`);
       return {
         lat: state.lastFix.lat,
         lon: state.lastFix.lon,
@@ -2091,7 +3354,7 @@ async function getGpsCoordinatesForPing(isAutoMode) {
       const intervalMs = getSelectedIntervalMs();
       const maxAge = intervalMs + GPS_FRESHNESS_BUFFER_MS;
       if (ageMs < maxAge) {
-        debugLog(`Using cached GPS data (age: ${ageMs}ms, watch inactive)`);
+        debugLog(`[GPS] Using cached GPS data (age: ${ageMs}ms, watch inactive)`);
         return {
           lat: state.lastFix.lat,
           lon: state.lastFix.lon,
@@ -2101,16 +3364,16 @@ async function getGpsCoordinatesForPing(isAutoMode) {
     }
     
     // Data exists but is too old
-    debugLog(`GPS data too old (${ageMs}ms), requesting fresh position`);
+    debugLog(`[GPS] GPS data too old (${ageMs}ms), requesting fresh position`);
     setDynamicStatus("GPS data too old, requesting fresh position", STATUS_COLORS.warning);
   }
   
   // Get fresh GPS coordinates for manual ping
-  debugLog("Requesting fresh GPS position for manual ping");
+  debugLog("[GPS] Requesting fresh GPS position for manual ping");
   try {
     return await acquireFreshGpsPosition();
   } catch (e) {
-    debugError(`Could not get fresh GPS location: ${e.message}`, e);
+    debugError(`[GPS] Could not get fresh GPS location: ${e.message}`, e);
     // Note: "Error:" prefix is intentional per UX requirements for manual ping timeout
     throw new Error("Error: could not get fresh GPS location");
   }
@@ -2174,7 +3437,7 @@ function updatePingLogWithRepeaters(logData, repeaters) {
     }
   }
   
-  debugLog(`Updated ping log entry with repeater telemetry: ${repeaterStr}`);
+  debugLog(`[PING] Updated ping log entry with repeater telemetry: ${repeaterStr}`);
 }
 
 /**
@@ -2201,7 +3464,7 @@ function updateCurrentLogEntryWithLiveRepeaters() {
   // Reuse the existing updatePingLogWithRepeaters function
   updatePingLogWithRepeaters(logData, repeaters);
   
-  debugLog(`Incrementally updated ping log entry: ${repeaters.length} repeater(s) detected so far`);
+  debugLog(`[PING] Incrementally updated ping log entry: ${repeaters.length} repeater(s) detected so far`);
 }
 
 /**
@@ -2209,12 +3472,12 @@ function updateCurrentLogEntryWithLiveRepeaters() {
  * @param {boolean} manual - Whether this is a manual ping (true) or auto ping (false)
  */
 async function sendPing(manual = false) {
-  debugLog(`sendPing called (manual=${manual})`);
+  debugLog(`[PING] sendPing called (manual=${manual})`);
   try {
     // Check cooldown only for manual pings
     if (manual && isInCooldown()) {
       const remainingSec = getRemainingCooldownSeconds();
-      debugLog(`Manual ping blocked by cooldown (${remainingSec}s remaining)`);
+      debugLog(`[PING] Manual ping blocked by cooldown (${remainingSec}s remaining)`);
       setDynamicStatus(`Wait ${remainingSec}s before sending another ping`, STATUS_COLORS.warning);
       return;
     }
@@ -2222,7 +3485,7 @@ async function sendPing(manual = false) {
     // Handle countdown timers based on ping type
     if (manual && state.running) {
       // Manual ping during auto mode: pause the auto countdown
-      debugLog("Manual ping during auto mode - pausing auto countdown");
+      debugLog("[PING] Manual ping during auto mode - pausing auto countdown");
       pauseAutoCountdown();
       setDynamicStatus("Sending manual ping", STATUS_COLORS.info);
     } else if (!manual && state.running) {
@@ -2252,9 +3515,9 @@ async function sendPing(manual = false) {
     const { lat, lon, accuracy } = coords;
 
     // VALIDATION 1: Geofence check (FIRST - must be within Ottawa 150km)
-    debugLog("Starting geofence validation");
+    debugLog("[PING] Starting geofence validation");
     if (!validateGeofence(lat, lon)) {
-      debugLog("Ping blocked: outside geofence");
+      debugLog("[PING] Ping blocked: outside geofence");
       
       // Set skip reason for auto mode countdown display
       state.skipReason = "outside geofence";
@@ -2271,12 +3534,12 @@ async function sendPing(manual = false) {
       
       return;
     }
-    debugLog("Geofence validation passed");
+    debugLog("[PING] Geofence validation passed");
 
     // VALIDATION 2: Distance check (SECOND - must be ≥ 25m from last successful ping)
-    debugLog("Starting distance validation");
+    debugLog("[PING] Starting distance validation");
     if (!validateMinimumDistance(lat, lon)) {
-      debugLog("Ping blocked: too close to last ping");
+      debugLog("[PING] Ping blocked: too close to last ping");
       
       // Set skip reason for auto mode countdown display
       state.skipReason = "too close";
@@ -2293,41 +3556,41 @@ async function sendPing(manual = false) {
       
       return;
     }
-    debugLog("Distance validation passed");
+    debugLog("[PING] Distance validation passed");
 
     // Both validations passed - execute ping operation (Mesh + API)
-    debugLog("All validations passed, executing ping operation");
+    debugLog("[PING] All validations passed, executing ping operation");
     
     // Lock ping controls for the entire ping lifecycle (until API post completes)
     state.pingInProgress = true;
     updateControlsForCooldown();
-    debugLog("Ping controls locked (pingInProgress=true)");
+    debugLog("[PING] Ping controls locked (pingInProgress=true)");
     
     const payload = buildPayload(lat, lon);
-    debugLog(`Sending ping to channel: "${payload}"`);
+    debugLog(`[PING] Sending ping to channel: "${payload}"`);
 
     const ch = await ensureChannel();
     
-    // Capture GPS coordinates at ping time - these will be used for API post after 7s delay
+    // Capture GPS coordinates at ping time - these will be used for API post after 10s delay
     state.capturedPingCoords = { lat, lon, accuracy };
-    debugLog(`GPS coordinates captured at ping time: lat=${lat.toFixed(5)}, lon=${lon.toFixed(5)}, accuracy=${accuracy}m`);
+    debugLog(`[PING] GPS coordinates captured at ping time: lat=${lat.toFixed(5)}, lon=${lon.toFixed(5)}, accuracy=${accuracy}m`);
     
     // Start repeater echo tracking BEFORE sending the ping
-    debugLog(`Channel ping transmission: timestamp=${new Date().toISOString()}, channel=${ch.channelIdx}, payload="${payload}"`);
+    debugLog(`[PING] Channel ping transmission: timestamp=${new Date().toISOString()}, channel=${ch.channelIdx}, payload="${payload}"`);
     startRepeaterTracking(payload, ch.channelIdx);
     
     await state.connection.sendChannelTextMessage(ch.channelIdx, payload);
-    debugLog(`Ping sent successfully to channel ${ch.channelIdx}`);
+    debugLog(`[PING] Ping sent successfully to channel ${ch.channelIdx}`);
 
     // Ping operation succeeded - update last successful ping location
     state.lastSuccessfulPingLocation = { lat, lon };
-    debugLog(`Updated last successful ping location: (${lat.toFixed(5)}, ${lon.toFixed(5)})`);
+    debugLog(`[PING] Updated last successful ping location: (${lat.toFixed(5)}, ${lon.toFixed(5)})`);
     
     // Clear skip reason on successful ping
     state.skipReason = null;
 
     // Start cooldown period after successful ping
-    debugLog(`Starting ${COOLDOWN_MS}ms cooldown`);
+    debugLog(`[PING] Starting ${COOLDOWN_MS}ms cooldown`);
     startCooldown();
 
     // Update status after ping is sent
@@ -2342,51 +3605,69 @@ async function sendPing(manual = false) {
     // Start RX listening countdown
     // The minimum 500ms visibility of "Ping sent" is enforced by setStatus()
     if (state.connection) {
-      debugLog(`Starting RX listening window for ${RX_LOG_LISTEN_WINDOW_MS}ms`);
+      debugLog(`[PING] Starting RX listening window for ${RX_LOG_LISTEN_WINDOW_MS}ms`);
       startRxListeningCountdown(RX_LOG_LISTEN_WINDOW_MS);
     }
     
-    // Schedule the sequence: listen for 7s, THEN finalize repeats and post to API
+    // Schedule the sequence: listen for 10s, THEN finalize repeats and background the API post
     // This timeout is stored in meshMapperTimer for cleanup purposes
     // Capture coordinates locally to prevent race conditions with concurrent pings
     const capturedCoords = state.capturedPingCoords;
     state.meshMapperTimer = setTimeout(async () => {
-      debugLog(`RX listening window completed after ${RX_LOG_LISTEN_WINDOW_MS}ms`);
+      debugLog(`[PING] RX listening window completed after ${RX_LOG_LISTEN_WINDOW_MS}ms`);
       
       // Stop listening countdown
       stopRxListeningCountdown();
       
       // Stop repeater tracking and get final results
       const repeaters = stopRepeaterTracking();
-      debugLog(`Finalized heard repeats: ${repeaters.length} unique paths detected`);
+      debugLog(`[PING] Finalized heard repeats: ${repeaters.length} unique paths detected`);
       
       // Update UI log with repeater data
       updatePingLogWithRepeaters(logEntry, repeaters);
       
       // Format repeater data for API
       const heardRepeatsStr = formatRepeaterTelemetry(repeaters);
-      debugLog(`Formatted heard_repeats for API: "${heardRepeatsStr}"`);
+      debugLog(`[PING] Formatted heard_repeats for API: "${heardRepeatsStr}"`);
       
+      // Update status and start next timer IMMEDIATELY (before API post)
+      // This is the key change: we don't wait for API to complete
+      if (state.connection) {
+        if (state.running) {
+          // Check if we should resume a paused auto countdown (manual ping during auto mode)
+          const resumed = resumeAutoCountdown();
+          if (!resumed) {
+            // No paused timer to resume, schedule new auto ping (this was an auto ping)
+            debugLog("[AUTO] Scheduling next auto ping immediately after RX window");
+            scheduleNextAutoPing();
+          } else {
+            debugLog("[AUTO] Resumed auto countdown after manual ping");
+          }
+        } else {
+          debugLog("[UI] Setting dynamic status to Idle (manual mode)");
+          setDynamicStatus("Idle");
+        }
+      }
+      
+      // Unlock ping controls immediately (don't wait for API)
+      unlockPingControls("after RX listening window completion");
+      
+      // Background the API posting (runs asynchronously, doesn't block)
       // Use captured coordinates for API post (not current GPS position)
       if (capturedCoords) {
         const { lat: apiLat, lon: apiLon, accuracy: apiAccuracy } = capturedCoords;
-        debugLog(`Using captured ping coordinates for API post: lat=${apiLat.toFixed(5)}, lon=${apiLon.toFixed(5)}, accuracy=${apiAccuracy}m`);
+        debugLog(`[API QUEUE] Backgrounding API post for coordinates: lat=${apiLat.toFixed(5)}, lon=${apiLon.toFixed(5)}, accuracy=${apiAccuracy}m`);
         
-        // Post to API with heard repeats data
-        await postApiAndRefreshMap(apiLat, apiLon, apiAccuracy, heardRepeatsStr);
+        // Post to API in background (async, fire-and-forget with error handling)
+        postApiInBackground(apiLat, apiLon, apiAccuracy, heardRepeatsStr).catch(error => {
+          debugError(`[API QUEUE] Background API post failed: ${error.message}`, error);
+          // Show error to user only if API fails
+          setDynamicStatus("Error: API post failed", STATUS_COLORS.error);
+        });
       } else {
         // This should never happen as coordinates are always captured before ping
-        debugError(`CRITICAL: No captured ping coordinates available for API post - this indicates a logic error`);
-        debugError(`Skipping API post to avoid posting incorrect coordinates`);
-        
-        // Unlock ping controls since API post is being skipped
-        unlockPingControls("after skipping API post due to missing coordinates");
-        
-        // Fix 2: Schedule next auto ping if in auto mode to prevent getting stuck
-        if (state.running && !state.autoTimerId) {
-          debugLog("Scheduling next auto ping after skipped API post");
-          scheduleNextAutoPing();
-        }
+        debugError(`[API QUEUE] CRITICAL: No captured ping coordinates available for API post - this indicates a logic error`);
+        debugError(`[API QUEUE] Skipping API post to avoid posting incorrect coordinates`);
       }
       
       // Clear timer reference
@@ -2396,7 +3677,7 @@ async function sendPing(manual = false) {
     // Update distance display immediately after successful ping
     updateDistanceUi();
   } catch (e) {
-    debugError(`Ping operation failed: ${e.message}`, e);
+    debugError(`[PING] Ping operation failed: ${e.message}`, e);
     setDynamicStatus(e.message || "Ping failed", STATUS_COLORS.error);
     
     // Unlock ping controls on error
@@ -2406,17 +3687,17 @@ async function sendPing(manual = false) {
 
 // ---- Auto mode ----
 function stopAutoPing(stopGps = false) {
-  debugLog(`stopAutoPing called (stopGps=${stopGps})`);
+  debugLog(`[AUTO] stopAutoPing called (stopGps=${stopGps})`);
   // Check if we're in cooldown before stopping (unless stopGps is true for disconnect)
   if (!stopGps && isInCooldown()) {
     const remainingSec = getRemainingCooldownSeconds();
-    debugLog(`Auto ping stop blocked by cooldown (${remainingSec}s remaining)`);
+    debugLog(`[AUTO] Auto ping stop blocked by cooldown (${remainingSec}s remaining)`);
     setDynamicStatus(`Wait ${remainingSec}s before toggling auto mode`, STATUS_COLORS.warning);
     return;
   }
   
   if (state.autoTimerId) {
-    debugLog("Clearing auto ping timer");
+    debugLog("[AUTO] Clearing auto ping timer");
     clearTimeout(state.autoTimerId);
     state.autoTimerId = null;
   }
@@ -2434,16 +3715,16 @@ function stopAutoPing(stopGps = false) {
   state.running = false;
   updateAutoButton();
   releaseWakeLock();
-  debugLog("Auto ping stopped");
+  debugLog("[AUTO] Auto ping stopped");
 }
 function scheduleNextAutoPing() {
   if (!state.running) {
-    debugLog("Not scheduling next auto ping - auto mode not running");
+    debugLog("[AUTO] Not scheduling next auto ping - auto mode not running");
     return;
   }
   
   const intervalMs = getSelectedIntervalMs();
-  debugLog(`Scheduling next auto ping in ${intervalMs}ms`);
+  debugLog(`[AUTO] Scheduling next auto ping in ${intervalMs}ms`);
   
   // Start countdown immediately (skipReason may be set if ping was skipped)
   startAutoCountdown(intervalMs);
@@ -2453,16 +3734,16 @@ function scheduleNextAutoPing() {
     if (state.running) {
       // Clear skip reason before next attempt
       state.skipReason = null;
-      debugLog("Auto ping timer fired, sending ping");
+      debugLog("[AUTO] Auto ping timer fired, sending ping");
       sendPing(false).catch(console.error);
     }
   }, intervalMs);
 }
 
 function startAutoPing() {
-  debugLog("startAutoPing called");
+  debugLog("[AUTO] startAutoPing called");
   if (!state.connection) {
-    debugError("Cannot start auto ping - not connected");
+    debugError("[AUTO] Cannot start auto ping - not connected");
     alert("Connect to a MeshCore device first.");
     return;
   }
@@ -2470,14 +3751,14 @@ function startAutoPing() {
   // Check if we're in cooldown
   if (isInCooldown()) {
     const remainingSec = getRemainingCooldownSeconds();
-    debugLog(`Auto ping start blocked by cooldown (${remainingSec}s remaining)`);
+    debugLog(`[AUTO] Auto ping start blocked by cooldown (${remainingSec}s remaining)`);
     setDynamicStatus(`Wait ${remainingSec}s before toggling auto mode`, STATUS_COLORS.warning);
     return;
   }
   
   // Clean up any existing auto-ping timer (but keep GPS watch running)
   if (state.autoTimerId) {
-    debugLog("Clearing existing auto ping timer");
+    debugLog("[AUTO] Clearing existing auto ping timer");
     clearTimeout(state.autoTimerId);
     state.autoTimerId = null;
   }
@@ -2487,26 +3768,26 @@ function startAutoPing() {
   state.skipReason = null;
   
   // Start GPS watch for continuous updates
-  debugLog("Starting GPS watch for auto mode");
+  debugLog("[AUTO] Starting GPS watch for auto mode");
   startGeoWatch();
   
   state.running = true;
   updateAutoButton();
 
   // Acquire wake lock for auto mode
-  debugLog("Acquiring wake lock for auto mode");
+  debugLog("[AUTO] Acquiring wake lock for auto mode");
   acquireWakeLock().catch(console.error);
 
   // Send first ping immediately
-  debugLog("Sending initial auto ping");
+  debugLog("[AUTO] Sending initial auto ping");
   sendPing(false).catch(console.error);
 }
 
 // ---- BLE connect / disconnect ----
 async function connect() {
-  debugLog("connect() called");
+  debugLog("[BLE] connect() called");
   if (!("bluetooth" in navigator)) {
-    debugError("Web Bluetooth not supported");
+    debugError("[BLE] Web Bluetooth not supported");
     alert("Web Bluetooth not supported in this browser.");
     return;
   }
@@ -2517,130 +3798,139 @@ async function connect() {
   setDynamicStatus("Idle"); // Clear dynamic status
 
   try {
-    debugLog("Opening BLE connection...");
+    debugLog("[BLE] Opening BLE connection...");
     setDynamicStatus("BLE Connection Started", STATUS_COLORS.info); // Show BLE connection start
     const conn = await WebBleConnection.open();
     state.connection = conn;
-    debugLog("BLE connection object created");
+    debugLog("[BLE] BLE connection object created");
 
     conn.on("connected", async () => {
-      debugLog("BLE connected event fired");
+      debugLog("[BLE] BLE connected event fired");
       // Keep "Connecting" status visible during the full connection process
       // Don't show "Connected" until everything is complete
       setConnectButton(true);
       connectBtn.disabled = false;
       const selfInfo = await conn.getSelfInfo();
-      debugLog(`Device info: ${selfInfo?.name || "[No device]"}`);
+      debugLog(`[BLE] Device info: ${selfInfo?.name || "[No device]"}`);
       
       // Validate and store public key
       if (!selfInfo?.publicKey || selfInfo.publicKey.length !== 32) {
-        debugError("Missing or invalid public key from device", selfInfo?.publicKey);
+        debugError("[BLE] Missing or invalid public key from device", selfInfo?.publicKey);
         state.disconnectReason = "public_key_error"; // Mark specific disconnect reason
         // Disconnect after a brief delay to ensure "Acquiring wardriving slot" status is visible
         // before the disconnect sequence begins with "Disconnecting"
         setTimeout(() => {
-          disconnect().catch(err => debugError(`Disconnect after public key error failed: ${err.message}`));
+          disconnect().catch(err => debugError(`[BLE] Disconnect after public key error failed: ${err.message}`));
         }, 1500);
         return;
       }
       
       // Convert public key to hex and store
       state.devicePublicKey = BufferUtils.bytesToHex(selfInfo.publicKey);
-      debugLog(`Device public key stored: ${state.devicePublicKey.substring(0, 16)}...`);
+      debugLog(`[BLE] Device public key stored: ${state.devicePublicKey.substring(0, 16)}...`);
       
       deviceInfoEl.textContent = selfInfo?.name || "[No device]";
       updateAutoButton();
       try { 
         await conn.syncDeviceTime?.(); 
-        debugLog("Device time synced");
+        debugLog("[BLE] Device time synced");
       } catch { 
-        debugLog("Device time sync not available or failed");
+        debugLog("[BLE] Device time sync not available or failed");
       }
       try {
         // Check capacity immediately after time sync, before channel setup and GPS init
         const allowed = await checkCapacity("connect");
         if (!allowed) {
-          debugWarn("Capacity check denied, disconnecting");
+          debugWarn("[CAPACITY] Capacity check denied, disconnecting");
           // disconnectReason already set by checkCapacity()
           // Status message will be set by disconnected event handler based on disconnectReason
           // Disconnect after a brief delay to ensure "Acquiring wardriving slot" is visible
           setTimeout(() => {
-            disconnect().catch(err => debugError(`Disconnect after capacity denial failed: ${err.message}`));
+            disconnect().catch(err => debugError(`[BLE] Disconnect after capacity denial failed: ${err.message}`));
           }, 1500);
           return;
         }
         
         // Capacity check passed
         setDynamicStatus("Acquired wardriving slot", STATUS_COLORS.success);
-        debugLog("Wardriving slot acquired successfully");
+        debugLog("[BLE] Wardriving slot acquired successfully");
         
         // Proceed with channel setup and GPS initialization
         await ensureChannel();
         
+        // Start unified RX listening after channel setup
+        startUnifiedRxListening();
+        
         // GPS initialization
         setDynamicStatus("Priming GPS", STATUS_COLORS.info);
-        debugLog("Starting GPS initialization");
+        debugLog("[BLE] Starting GPS initialization");
         await primeGpsOnce();
         
         // Connection complete, show Connected status in connection bar
         setConnStatus("Connected", STATUS_COLORS.success);
         setDynamicStatus("Idle"); // Clear dynamic status to em dash
-        debugLog("Full connection process completed successfully");
+        debugLog("[BLE] Full connection process completed successfully");
       } catch (e) {
-        debugError(`Channel setup failed: ${e.message}`, e);
+        debugError(`[CHANNEL] Channel setup failed: ${e.message}`, e);
         state.disconnectReason = "channel_setup_error"; // Mark specific disconnect reason
         state.channelSetupErrorMessage = e.message || "Channel setup failed"; // Store error message
       }
     });
 
     conn.on("disconnected", () => {
-      debugLog("BLE disconnected event fired");
-      debugLog(`Disconnect reason: ${state.disconnectReason}`);
+      debugLog("[BLE] BLE disconnected event fired");
+      debugLog(`[BLE] Disconnect reason: ${state.disconnectReason}`);
       
       // Always set connection bar to "Disconnected"
       setConnStatus("Disconnected", STATUS_COLORS.error);
       
       // Set dynamic status based on disconnect reason (WITHOUT "Disconnected:" prefix)
-      if (state.disconnectReason === "capacity_full") {
-        debugLog("Branch: capacity_full");
-        setDynamicStatus("WarDriving app has reached capacity", STATUS_COLORS.error, true);
-        debugLog("Setting terminal status for capacity full");
+      // First check if reason has a mapped message in REASON_MESSAGES (for API reason codes)
+      if (state.disconnectReason && REASON_MESSAGES[state.disconnectReason]) {
+        debugLog(`[BLE] Branch: known reason code (${state.disconnectReason})`);
+        const errorMsg = REASON_MESSAGES[state.disconnectReason];
+        setDynamicStatus(errorMsg, STATUS_COLORS.error, true);
+        debugLog(`[BLE] Setting terminal status for reason: ${state.disconnectReason}`);
+      } else if (state.disconnectReason === "capacity_full") {
+        debugLog("[BLE] Branch: capacity_full");
+        setDynamicStatus("MeshMapper at capacity", STATUS_COLORS.error, true);
+        debugLog("[BLE] Setting terminal status for capacity full");
       } else if (state.disconnectReason === "app_down") {
-        debugLog("Branch: app_down");
-        setDynamicStatus("WarDriving app is down", STATUS_COLORS.error, true);
-        debugLog("Setting terminal status for app down");
+        debugLog("[BLE] Branch: app_down");
+        setDynamicStatus("MeshMapper unavailable", STATUS_COLORS.error, true);
+        debugLog("[BLE] Setting terminal status for app down");
       } else if (state.disconnectReason === "slot_revoked") {
-        debugLog("Branch: slot_revoked");
-        setDynamicStatus("WarDriving slot has been revoked", STATUS_COLORS.error, true);
-        debugLog("Setting terminal status for slot revocation");
+        debugLog("[BLE] Branch: slot_revoked");
+        setDynamicStatus("MeshMapper slot revoked", STATUS_COLORS.error, true);
+        debugLog("[BLE] Setting terminal status for slot revocation");
       } else if (state.disconnectReason === "session_id_error") {
-        debugLog("Branch: session_id_error");
-        setDynamicStatus("Session ID error; try reconnecting", STATUS_COLORS.error, true);
-        debugLog("Setting terminal status for session_id error");
+        debugLog("[BLE] Branch: session_id_error");
+        setDynamicStatus("Session error - reconnect", STATUS_COLORS.error, true);
+        debugLog("[BLE] Setting terminal status for session_id error");
       } else if (state.disconnectReason === "public_key_error") {
-        debugLog("Branch: public_key_error");
-        setDynamicStatus("Unable to read device public key; try again", STATUS_COLORS.error, true);
-        debugLog("Setting terminal status for public key error");
+        debugLog("[BLE] Branch: public_key_error");
+        setDynamicStatus("Device key error - reconnect", STATUS_COLORS.error, true);
+        debugLog("[BLE] Setting terminal status for public key error");
       } else if (state.disconnectReason === "channel_setup_error") {
-        debugLog("Branch: channel_setup_error");
+        debugLog("[BLE] Branch: channel_setup_error");
         const errorMsg = state.channelSetupErrorMessage || "Channel setup failed";
         setDynamicStatus(errorMsg, STATUS_COLORS.error, true);
-        debugLog("Setting terminal status for channel setup error");
+        debugLog("[BLE] Setting terminal status for channel setup error");
         state.channelSetupErrorMessage = null; // Clear after use (also cleared in cleanup as safety net)
       } else if (state.disconnectReason === "ble_disconnect_error") {
-        debugLog("Branch: ble_disconnect_error");
+        debugLog("[BLE] Branch: ble_disconnect_error");
         const errorMsg = state.bleDisconnectErrorMessage || "BLE disconnect failed";
         setDynamicStatus(errorMsg, STATUS_COLORS.error, true);
-        debugLog("Setting terminal status for BLE disconnect error");
+        debugLog("[BLE] Setting terminal status for BLE disconnect error");
         state.bleDisconnectErrorMessage = null; // Clear after use (also cleared in cleanup as safety net)
       } else if (state.disconnectReason === "normal" || state.disconnectReason === null || state.disconnectReason === undefined) {
-        debugLog("Branch: normal/null/undefined");
+        debugLog("[BLE] Branch: normal/null/undefined");
         setDynamicStatus("Idle"); // Show em dash for normal disconnect
       } else {
-        debugLog(`Branch: else (unknown reason: ${state.disconnectReason})`);
-        // For unknown disconnect reasons, show em dash
-        debugLog(`Showing em dash for unknown reason: ${state.disconnectReason}`);
-        setDynamicStatus("Idle");
+        debugLog(`[BLE] Branch: else (unknown reason: ${state.disconnectReason})`);
+        // For unknown disconnect reasons from API, show a generic message
+        debugLog(`[BLE] Showing generic error for unknown reason: ${state.disconnectReason}`);
+        setDynamicStatus(`Connection not allowed: ${state.disconnectReason}`, STATUS_COLORS.error, true);
       }
       
       setConnectButton(false);
@@ -2657,31 +3947,44 @@ async function connect() {
       updateAutoButton();
       stopGeoWatch();
       stopGpsAgeUpdater(); // Ensure age updater stops
-      stopDistanceUpdater(); // Ensure distance updater stops
       stopRepeaterTracking(); // Stop repeater echo tracking
+      stopUnifiedRxListening(); // Stop unified RX listening
+      
+      // Flush all pending RX batch data before cleanup
+      flushAllBatches('disconnect');
+      
+      // Clear API queue messages (timers already stopped in cleanupAllTimers)
+      apiQueue.messages = [];
+      debugLog(`[API QUEUE] Queue cleared on disconnect`);
       
       // Clean up all timers
       cleanupAllTimers();
+      
+      // Clear RX log entries on disconnect
+      rxLogState.entries = [];
+      renderRxLogEntries(true); // Full render to show placeholder
+      updateRxLogSummary();
+      debugLog("[BLE] RX log cleared on disconnect");
       
       state.lastFix = null;
       state.lastSuccessfulPingLocation = null;
       state.gpsState = "idle";
       updateGpsUi();
       updateDistanceUi();
-      debugLog("Disconnect cleanup complete");
+      debugLog("[BLE] Disconnect cleanup complete");
     });
 
   } catch (e) {
-    debugError(`BLE connection failed: ${e.message}`, e);
+    debugError(`[BLE] BLE connection failed: ${e.message}`, e);
     setConnStatus("Disconnected", STATUS_COLORS.error);
     setDynamicStatus("Connection failed", STATUS_COLORS.error);
     connectBtn.disabled = false;
   }
 }
 async function disconnect() {
-  debugLog("disconnect() called");
+  debugLog("[BLE] disconnect() called");
   if (!state.connection) {
-    debugLog("No connection to disconnect");
+    debugLog("[BLE] No connection to disconnect");
     return;
   }
 
@@ -2696,45 +3999,53 @@ async function disconnect() {
   setConnStatus("Disconnecting", STATUS_COLORS.info);
   setDynamicStatus("Idle"); // Clear dynamic status
 
-  // Release capacity slot if we have a public key
+  // 1. CRITICAL: Flush API queue FIRST (session_id still valid)
+  if (apiQueue.messages.length > 0) {
+    debugLog(`[BLE] Flushing ${apiQueue.messages.length} queued messages before disconnect`);
+    await flushApiQueue();
+  }
+  stopFlushTimers();
+
+  // 2. THEN release capacity slot if we have a public key
   if (state.devicePublicKey) {
     try {
-      debugLog("Releasing capacity slot");
+      debugLog("[BLE] Releasing capacity slot");
       await checkCapacity("disconnect");
     } catch (e) {
-      debugWarn(`Failed to release capacity slot: ${e.message}`);
+      debugWarn(`[CAPACITY] Failed to release capacity slot: ${e.message}`);
       // Don't fail disconnect if capacity release fails
     }
   }
 
-  // Delete the wardriving channel before disconnecting
+  // 3. Delete the wardriving channel before disconnecting
   try {
     if (state.channel && typeof state.connection.deleteChannel === "function") {
-      debugLog(`Deleting channel ${CHANNEL_NAME} at index ${state.channel.channelIdx}`);
+      debugLog(`[BLE] Deleting channel ${CHANNEL_NAME} at index ${state.channel.channelIdx}`);
       await state.connection.deleteChannel(state.channel.channelIdx);
-      debugLog(`Channel ${CHANNEL_NAME} deleted successfully`);
+      debugLog(`[BLE] Channel ${CHANNEL_NAME} deleted successfully`);
     }
   } catch (e) {
-    debugWarn(`Failed to delete channel ${CHANNEL_NAME}: ${e.message}`);
+    debugWarn(`[CHANNEL] Failed to delete channel ${CHANNEL_NAME}: ${e.message}`);
     // Don't fail disconnect if channel deletion fails
   }
 
+  // 4. Close BLE connection
   try {
     // WebBleConnection typically exposes one of these.
     if (typeof state.connection.close === "function") {
-      debugLog("Calling connection.close()");
+      debugLog("[BLE] Calling connection.close()");
       await state.connection.close();
     } else if (typeof state.connection.disconnect === "function") {
-      debugLog("Calling connection.disconnect()");
+      debugLog("[BLE] Calling connection.disconnect()");
       await state.connection.disconnect();
     } else if (typeof state.connection.device?.gatt?.disconnect === "function") {
-      debugLog("Calling device.gatt.disconnect()");
+      debugLog("[BLE] Calling device.gatt.disconnect()");
       state.connection.device.gatt.disconnect();
     } else {
-      debugWarn("No known disconnect method on connection object");
+      debugWarn("[BLE] No known disconnect method on connection object");
     }
   } catch (e) {
-    debugError(`BLE disconnect failed: ${e.message}`, e);
+    debugError(`[BLE] BLE disconnect failed: ${e.message}`, e);
     state.disconnectReason = "ble_disconnect_error"; // Mark specific disconnect reason
     state.bleDisconnectErrorMessage = e.message || "Disconnect failed"; // Store error message
   } finally {
@@ -2746,17 +4057,17 @@ async function disconnect() {
 // ---- Page visibility ----
 document.addEventListener("visibilitychange", async () => {
   if (document.hidden) {
-    debugLog("Page visibility changed to hidden");
+    debugLog("[UI] Page visibility changed to hidden");
     if (state.running) {
-      debugLog("Stopping auto ping due to page hidden");
+      debugLog("[UI] Stopping auto ping due to page hidden");
       stopAutoPing(true); // Ignore cooldown check when page is hidden
       setDynamicStatus("Lost focus, auto mode stopped", STATUS_COLORS.warning);
     } else {
-      debugLog("Releasing wake lock due to page hidden");
+      debugLog("[UI] Releasing wake lock due to page hidden");
       releaseWakeLock();
     }
   } else {
-    debugLog("Page visibility changed to visible");
+    debugLog("[UI] Page visibility changed to visible");
     // On visible again, user can manually re-start Auto.
   }
 });
@@ -2774,10 +4085,10 @@ function updateConnectButtonState() {
     
     // Update dynamic status based on power selection
     if (!radioPowerSelected) {
-      debugLog("Radio power not selected - showing message in status bar");
+      debugLog("[UI] Radio power not selected - showing message in status bar");
       setDynamicStatus("Select radio power to connect", STATUS_COLORS.warning);
     } else {
-      debugLog("Radio power selected - clearing message from status bar");
+      debugLog("[UI] Radio power selected - clearing message from status bar");
       setDynamicStatus("Idle");
     }
   }
@@ -2785,7 +4096,7 @@ function updateConnectButtonState() {
 
 // ---- Bind UI & init ----
 export async function onLoad() {
-  debugLog("wardrive.js onLoad() called - initializing");
+  debugLog("[INIT] wardrive.js onLoad() called - initializing");
   setConnStatus("Disconnected", STATUS_COLORS.error);
   enableControls(false);
   updateAutoButton();
@@ -2801,16 +4112,16 @@ export async function onLoad() {
         await connect();
       }
     } catch (e) {
-      debugError(`Connection button error: ${e.message}`, e);
+      debugError("[UI] Connection button error:", `${e.message}`, e);
       setDynamicStatus(e.message || "Connection failed", STATUS_COLORS.error);
     }
   });
   sendPingBtn.addEventListener("click", () => {
-    debugLog("Manual ping button clicked");
+    debugLog("[UI] Manual ping button clicked");
     sendPing(true).catch(console.error);
   });
   autoToggleBtn.addEventListener("click", () => {
-    debugLog("Auto toggle button clicked");
+    debugLog("[UI] Auto toggle button clicked");
     if (state.running) {
       stopAutoPing();
       setDynamicStatus("Auto mode stopped", STATUS_COLORS.idle);
@@ -2827,7 +4138,7 @@ export async function onLoad() {
   
   if (settingsGearBtn && settingsPanel && connectionBar) {
     settingsGearBtn.addEventListener("click", () => {
-      debugLog("Settings gear button clicked");
+      debugLog("[UI] Settings gear button clicked");
       const isHidden = settingsPanel.classList.contains("hidden");
       settingsPanel.classList.toggle("hidden");
       
@@ -2846,7 +4157,7 @@ export async function onLoad() {
 
   if (settingsCloseBtn && settingsPanel && connectionBar) {
     settingsCloseBtn.addEventListener("click", () => {
-      debugLog("Settings close button clicked");
+      debugLog("[UI] Settings close button clicked");
       settingsPanel.classList. add("hidden");
       // Restore full rounded corners to connection bar
       connectionBar.classList.remove("rounded-t-xl", "rounded-b-none");
@@ -2858,7 +4169,7 @@ export async function onLoad() {
   const powerRadios = document.querySelectorAll('input[name="power"]');
   powerRadios.forEach(radio => {
     radio.addEventListener("change", () => {
-      debugLog(`Radio power changed to: ${getCurrentPowerSetting()}`);
+      debugLog(`[UI] Radio power changed to: ${getCurrentPowerSetting()}`);
       updateConnectButtonState();
     });
   });
@@ -2866,18 +4177,59 @@ export async function onLoad() {
   // Session Log event listener
   if (logSummaryBar) {
     logSummaryBar.addEventListener("click", () => {
-      debugLog("Log summary bar clicked - toggling session log");
+      debugLog("[UI] Log summary bar clicked - toggling session log");
       toggleBottomSheet();
     });
   }
 
+  // RX Log event listener
+  if (rxLogSummaryBar) {
+    rxLogSummaryBar.addEventListener("click", () => {
+      debugLog("[PASSIVE RX UI] RX log summary bar clicked - toggling RX log");
+      toggleRxLogBottomSheet();
+    });
+  }
+
+  // Error Log event listener
+  if (errorLogSummaryBar) {
+    errorLogSummaryBar.addEventListener("click", () => {
+      debugLog("[ERROR LOG] Error log summary bar clicked - toggling Error log");
+      toggleErrorLogBottomSheet();
+    });
+  }
+
+  // Copy button event listeners
+  if (sessionLogCopyBtn) {
+    sessionLogCopyBtn.addEventListener("click", (e) => {
+      e.stopPropagation(); // Prevent triggering the summary bar toggle
+      debugLog("[SESSION LOG] Copy button clicked");
+      copyLogToCSV('session', sessionLogCopyBtn);
+    });
+  }
+
+  if (rxLogCopyBtn) {
+    rxLogCopyBtn.addEventListener("click", (e) => {
+      e.stopPropagation(); // Prevent triggering the summary bar toggle
+      debugLog("[PASSIVE RX UI] Copy button clicked");
+      copyLogToCSV('rx', rxLogCopyBtn);
+    });
+  }
+
+  if (errorLogCopyBtn) {
+    errorLogCopyBtn.addEventListener("click", (e) => {
+      e.stopPropagation(); // Prevent triggering the summary bar toggle
+      debugLog("[ERROR LOG] Copy button clicked");
+      copyLogToCSV('error', errorLogCopyBtn);
+    });
+  }
+
   // Prompt location permission early (optional)
-  debugLog("Requesting initial location permission");
+  debugLog("[GPS] Requesting initial location permission");
   try { 
     await getCurrentPosition(); 
-    debugLog("Initial location permission granted");
+    debugLog("[GPS] Initial location permission granted");
   } catch (e) { 
-    debugLog(`Initial location permission not granted: ${e.message}`);
+    debugLog(`[GPS] Initial location permission not granted: ${e.message}`);
   }
-  debugLog("wardrive.js initialization complete");
+  debugLog("[INIT] wardrive.js initialization complete");
 }

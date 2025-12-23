@@ -110,57 +110,75 @@ These messages appear in the Dynamic App Status Bar. They NEVER include connecti
 - **When**: Capacity check passed successfully, slot acquired from MeshMapper API
 - **Source**: `content/wardrive.js:connect()`
 
-##### WarDriving app has reached capacity
-- **Message**: `"WarDriving app has reached capacity"`
+##### MeshMapper at capacity
+- **Message**: `"MeshMapper at capacity"`
 - **Color**: Red (error)
 - **When**: Capacity check API denies slot on connect (returns allowed=false)
 - **Terminal State**: Yes (persists until user takes action)
-- **Notes**: Complete flow: Connection bar shows "Connecting" → "Disconnecting" → "Disconnected". Dynamic bar shows "Acquiring wardriving slot" → "WarDriving app has reached capacity" (terminal)
+- **Notes**: Complete flow: Connection bar shows "Connecting" → "Disconnecting" → "Disconnected". Dynamic bar shows "Acquiring wardriving slot" → "MeshMapper at capacity" (terminal)
 
-##### WarDriving app is down
-- **Message**: `"WarDriving app is down"`
+##### MeshMapper unavailable
+- **Message**: `"MeshMapper unavailable"`
 - **Color**: Red (error)
 - **When**: Capacity check API returns error status or network is unreachable during connect
 - **Terminal State**: Yes (persists until user takes action)
-- **Notes**: Implements fail-closed policy - connection denied if API fails. Complete flow: Connection bar shows "Connecting" → "Disconnecting" → "Disconnected". Dynamic bar shows "Acquiring wardriving slot" → "WarDriving app is down" (terminal)
+- **Notes**: Implements fail-closed policy - connection denied if API fails. Complete flow: Connection bar shows "Connecting" → "Disconnecting" → "Disconnected". Dynamic bar shows "Acquiring wardriving slot" → "MeshMapper unavailable" (terminal)
 
-##### WarDriving slot has been revoked
-- **Message**: `"WarDriving slot has been revoked"`
+##### MeshMapper slot revoked
+- **Message**: `"MeshMapper slot revoked"`
 - **Color**: Red (error)
-- **When**: During active session, API returns allowed=false during ping posting
+- **When**: During active session, API returns allowed=false during background ping posting
 - **Terminal State**: Yes (persists until user takes action)
-- **Sequence**: 
-  1. "Posting to API" (blue)
-  2. "Error: Posting to API (Revoked)" (red, 1.5s)
-  3. Connection bar: "Disconnecting" → "Disconnected"
-  4. Dynamic bar: "WarDriving slot has been revoked" (terminal)
+- **Sequence** (Updated for background API posting): 
+  1. RX listening window completes → Status shows "Idle" or "Waiting for next ping"
+  2. Background API post detects revocation (silent, no status change yet)
+  3. "API post failed (revoked)" (red, 1.5s)
+  4. Connection bar: "Disconnecting" → "Disconnected"
+  5. Dynamic bar: "MeshMapper slot revoked" (terminal)
+- **Notes**: With the new ping/repeat flow, revocation is detected during the background API post (which runs after the RX window completes and next timer starts)
 
-##### Error: Posting to API (Revoked)
-- **Message**: `"Error: Posting to API (Revoked)"`
+##### API post failed (revoked)
+- **Message**: `"API post failed (revoked)"`
 - **Color**: Red (error)
-- **When**: Intermediate status shown when slot revocation detected during API posting
+- **When**: Intermediate status shown when slot revocation detected during background API posting
 - **Duration**: 1.5 seconds (visible before disconnect begins)
-- **Notes**: First status in revocation sequence, followed by disconnect flow
+- **Notes**: First visible status in revocation sequence, followed by disconnect flow. Appears after background API post detects revocation.
 
-##### Unable to read device public key; try again
-- **Message**: `"Unable to read device public key; try again"`
+##### Device key error - reconnect
+- **Message**: `"Device key error - reconnect"`
 - **Color**: Red (error)
 - **When**: Device public key is missing or invalid during connection
 - **Terminal State**: Yes
 - **Notes**: Triggers automatic disconnect
 
-##### Session ID error; try reconnecting
-- **Message**: `"Session ID error; try reconnecting"`
+##### Session error - reconnect
+- **Message**: `"Session error - reconnect"`
 - **Color**: Red (error)
 - **When**: 
   - Capacity check returns allowed=true but session_id is missing during connection
   - Attempting to post to MeshMapper API without a valid session_id
 - **Terminal State**: Yes (persists until user takes action)
-- **Notes**: Implements fail-closed policy - connection/posting denied if session_id is missing. Complete flow: Connection bar shows "Connecting" → "Disconnecting" → "Disconnected". Dynamic bar shows "Acquiring wardriving slot" → "Session ID error; try reconnecting" (terminal)
+- **Notes**: Implements fail-closed policy - connection/posting denied if session_id is missing. Complete flow: Connection bar shows "Connecting" → "Disconnecting" → "Disconnected". Dynamic bar shows "Acquiring wardriving slot" → "Session error - reconnect" (terminal)
 - **Source**: `content/wardrive.js:checkCapacity()`, `content/wardrive.js:postToMeshMapperAPI()`
 
-##### Error: No session ID for API post
-- **Message**: `"Error: No session ID for API post"`
+##### App out of date, please update
+- **Message**: `"App out of date, please update"`
+- **Color**: Red (error)
+- **When**: Capacity check API denies slot on connect with reason code "outofdate" (returns allowed=false, reason="outofdate")
+- **Terminal State**: Yes (persists until user takes action)
+- **Notes**: Indicates the app version is outdated and needs to be updated. Complete flow: Connection bar shows "Connecting" → "Disconnecting" → "Disconnected". Dynamic bar shows "Acquiring wardriving slot" → "App out of date, please update" (terminal). This is part of the extensible reason code system - future reason codes can be added to REASON_MESSAGES mapping.
+- **Source**: `content/wardrive.js:checkCapacity()`, `content/wardrive.js` disconnected event handler
+
+##### Connection not allowed: [reason]
+- **Message**: `"Connection not allowed: [reason]"` (where [reason] is the API-provided reason code)
+- **Color**: Red (error)
+- **When**: Capacity check API denies slot on connect with an unknown reason code not defined in REASON_MESSAGES mapping (returns allowed=false, reason="unknown_code")
+- **Terminal State**: Yes (persists until user takes action)
+- **Notes**: Fallback message for future/unknown reason codes. Shows the raw reason code to help with debugging. Complete flow: Connection bar shows "Connecting" → "Disconnecting" → "Disconnected". Dynamic bar shows "Acquiring wardriving slot" → "Connection not allowed: [reason]" (terminal)
+- **Source**: `content/wardrive.js` disconnected event handler
+
+##### Missing session ID
+- **Message**: `"Missing session ID"`
 - **Color**: Red (error)
 - **When**: Intermediate status shown when attempting to post to MeshMapper API without a valid session_id
 - **Duration**: 1.5 seconds (visible before disconnect begins)
@@ -280,7 +298,7 @@ These messages use a hybrid approach: **first display respects 500ms minimum**, 
 - **Message**: `"Listening for heard repeats (Xs)"` (X is dynamic countdown)
 - **Color**: Sky blue (info)
 - **When**: After successful ping, listening for repeater echoes
-- **Duration**: 7 seconds total
+- **Duration**: 10 seconds total (changed from 7 seconds)
 - **Minimum Visibility**: 500ms for first message, immediate for countdown updates
 - **Source**: `content/wardrive.js:rxListeningCountdownTimer`
 
@@ -322,22 +340,52 @@ These messages use a hybrid approach: **first display respects 500ms minimum**, 
 
 #### 6. API and Map Update Messages
 
-##### Posting to API
+##### Queued (X/50)
+- **Message**: `"Queued (X/50)"` (X is current queue size)
+- **Color**: Sky blue (info)
+- **When**: After TX or RX message is added to the batch queue
+- **Notes**: Shows queue depth to indicate messages waiting for batch posting. Queue automatically flushes at 50 messages, after 3 seconds for TX, or after 30 seconds for any pending messages.
+- **Source**: `content/wardrive.js:queueApiMessage()`
+
+##### Posting X to API
+- **Message**: `"Posting X to API"` (X is batch size)
+- **Color**: Sky blue (info)
+- **When**: Batch queue is being flushed to MeshMapper API
+- **Timing**: Visible during batch POST operation
+- **Notes**: Batch can contain mixed TX and RX messages (up to 50 total). Debug logs show TX/RX breakdown.
+- **Source**: `content/wardrive.js:flushApiQueue()`
+
+##### Posting to API (DEPRECATED - Replaced by Queued/Batch system)
 - **Message**: `"Posting to API"`
 - **Color**: Sky blue (info)
-- **When**: After RX listening window, posting ping data to MeshMapper API
-- **Timing**: Visible during API POST operation (3-second hidden delay + API call time, typically ~3.5-4.5s total)
-- **Source**: `content/wardrive.js:postApiAndRefreshMap()`
+- **When**: ~~After RX listening window, posting ping data to MeshMapper API~~ **REPLACED BY BATCH QUEUE**
+- **Notes**: As of the batch queue implementation, individual API posts have been replaced by batched posts. Messages are queued and flushed in batches.
+- **Source**: ~~`content/wardrive.js:postApiAndRefreshMap()`~~ Replaced by batch queue system
+
+##### Error: API batch post failed
+- **Message**: `"Error: API batch post failed"`
+- **Color**: Red (error)
+- **When**: Batch API POST fails during flush operation
+- **Notes**: Batch posting failed, but queue system will continue accepting new messages.
+- **Source**: `content/wardrive.js:flushApiQueue()` error handler
+
+##### Error: API post failed (DEPRECATED)
+- **Message**: `"Error: API post failed"`
+- **Color**: Red (error)
+- **When**: ~~Background API POST fails during asynchronous posting~~ **REPLACED BY BATCH QUEUE**
+- **Notes**: Replaced by "Error: API batch post failed" in batch queue system.
+- **Source**: ~~`content/wardrive.js:postApiInBackground()`~~ Replaced by batch queue system
 
 ##### — (em dash)
 - **Message**: `"—"` (em dash character)
 - **Color**: Slate (idle)
 - **When**: 
-  - Manual mode after API post completes
+  - Manual mode immediately after RX listening window completes (changed from "after API post completes")
   - After successful connection (shows "Connected" in connection bar)
   - Normal disconnect (shows "Disconnected" in connection bar)
   - Any time there is no active message to display
 - **Purpose**: Placeholder to indicate "no message" state
+- **Notes**: With the new ping/repeat listener flow, the em dash appears immediately after the 10-second RX window, not after API posting (which now runs in background)
 - **Source**: Multiple locations - `content/wardrive.js`
 
 #### 7. Auto Mode Messages
