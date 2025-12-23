@@ -75,11 +75,11 @@ let WARDRIVING_CHANNEL_KEY = null;
   try {
     WARDRIVING_CHANNEL_KEY = await deriveChannelKey(CHANNEL_NAME);
     WARDRIVING_CHANNEL_HASH = await computeChannelHash(WARDRIVING_CHANNEL_KEY);
-    debugLog(`Wardriving channel hash pre-computed at startup: 0x${WARDRIVING_CHANNEL_HASH.toString(16).padStart(2, '0')}`);
-    debugLog(`Wardriving channel key cached for message decryption (${WARDRIVING_CHANNEL_KEY.length} bytes)`);
+    debugLog(`[INIT] Wardriving channel hash pre-computed at startup: 0x${WARDRIVING_CHANNEL_HASH.toString(16).padStart(2, '0')}`);
+    debugLog(`[INIT] Wardriving channel key cached for message decryption (${WARDRIVING_CHANNEL_KEY.length} bytes)`);
   } catch (error) {
-    debugError(`CRITICAL: Failed to pre-compute channel hash/key: ${error.message}`);
-    debugError(`Repeater echo tracking will be disabled. Please reload the page.`);
+    debugError(`[INIT] CRITICAL: Failed to pre-compute channel hash/key: ${error.message}`);
+    debugError(`[INIT] Repeater echo tracking will be disabled. Please reload the page.`);
     // Channel hash and key remain null, which will be checked before starting tracking
   }
 })();
@@ -278,7 +278,7 @@ function setStatus(text, color = STATUS_COLORS.idle, immediate = false) {
   // This prevents countdown timer updates from being delayed unnecessarily
   // Example: If status is already "Waiting (10s)", the next "Waiting (9s)" won't be delayed
   if (text === statusMessageState.currentText && color === statusMessageState.currentColor) {
-    debugLog(`Status update (same message): "${text}"`);
+    debugLog(`[UI] Status update (same message): "${text}"`);
     statusMessageState.lastSetTime = now;
     return;
   }
@@ -297,7 +297,7 @@ function setStatus(text, color = STATUS_COLORS.idle, immediate = false) {
   
   // Minimum visibility time has not passed, queue the message
   const delayNeeded = MIN_STATUS_VISIBILITY_MS - timeSinceLastSet;
-  debugLog(`Status queued (${delayNeeded}ms delay): "${text}" (current: "${statusMessageState.currentText}")`);
+  debugLog(`[UI] Status queued (${delayNeeded}ms delay): "${text}" (current: "${statusMessageState.currentText}")`);
   
   // Store pending message
   statusMessageState.pendingMessage = { text, color };
@@ -329,7 +329,7 @@ function applyStatusImmediately(text, color) {
   statusMessageState.lastSetTime = Date.now();
   statusMessageState.currentText = text;
   statusMessageState.currentColor = color;
-  debugLog(`Status applied: "${text}"`);
+  debugLog(`[UI] Status applied: "${text}"`);
 }
 
 /**
@@ -460,9 +460,9 @@ function pauseAutoCountdown() {
     // Only pause if there's meaningful time remaining and not unreasonably large
     if (remainingMs > MIN_PAUSE_THRESHOLD_MS && remainingMs < MAX_REASONABLE_TIMER_MS) {
       state.pausedAutoTimerRemainingMs = remainingMs;
-      debugLog(`Pausing auto countdown with ${state.pausedAutoTimerRemainingMs}ms remaining`);
+      debugLog(`[TIMER] Pausing auto countdown with ${state.pausedAutoTimerRemainingMs}ms remaining`);
     } else {
-      debugLog(`Auto countdown time out of reasonable range (${remainingMs}ms), not pausing`);
+      debugLog(`[TIMER] Auto countdown time out of reasonable range (${remainingMs}ms), not pausing`);
       state.pausedAutoTimerRemainingMs = null;
     }
   }
@@ -476,12 +476,12 @@ function resumeAutoCountdown() {
   if (state.pausedAutoTimerRemainingMs !== null) {
     // Validate paused time is still reasonable before resuming
     if (state.pausedAutoTimerRemainingMs > MIN_PAUSE_THRESHOLD_MS && state.pausedAutoTimerRemainingMs < MAX_REASONABLE_TIMER_MS) {
-      debugLog(`Resuming auto countdown with ${state.pausedAutoTimerRemainingMs}ms remaining`);
+      debugLog(`[TIMER] Resuming auto countdown with ${state.pausedAutoTimerRemainingMs}ms remaining`);
       startAutoCountdown(state.pausedAutoTimerRemainingMs);
       state.pausedAutoTimerRemainingMs = null;
       return true;
     } else {
-      debugLog(`Paused time out of reasonable range (${state.pausedAutoTimerRemainingMs}ms), not resuming`);
+      debugLog(`[TIMER] Paused time out of reasonable range (${state.pausedAutoTimerRemainingMs}ms), not resuming`);
       state.pausedAutoTimerRemainingMs = null;
     }
   }
@@ -501,23 +501,23 @@ function resumeAutoCountdown() {
  */
 function handleManualPingBlockedDuringAutoMode() {
   if (state.running) {
-    debugLog("Manual ping blocked during auto mode - resuming auto countdown");
+    debugLog("[AUTO] Manual ping blocked during auto mode - resuming auto countdown");
     const resumed = resumeAutoCountdown();
     if (!resumed) {
-      debugLog("No paused countdown to resume, scheduling new auto ping");
+      debugLog("[AUTO] No paused countdown to resume, scheduling new auto ping");
       scheduleNextAutoPing();
     }
   }
 }
 
 function startRxListeningCountdown(delayMs) {
-  debugLog(`Starting RX listening countdown: ${delayMs}ms`);
+  debugLog(`[TIMER] Starting RX listening countdown: ${delayMs}ms`);
   state.rxListeningEndTime = Date.now() + delayMs;
   rxListeningCountdownTimer.start(delayMs);
 }
 
 function stopRxListeningCountdown() {
-  debugLog(`Stopping RX listening countdown`);
+  debugLog(`[TIMER] Stopping RX listening countdown`);
   state.rxListeningEndTime = null;
   rxListeningCountdownTimer.stop();
 }
@@ -549,7 +549,7 @@ function startCooldown() {
 function updateControlsForCooldown() {
   const connected = !!state.connection;
   const inCooldown = isInCooldown();
-  debugLog(`updateControlsForCooldown: connected=${connected}, inCooldown=${inCooldown}, pingInProgress=${state.pingInProgress}`);
+  debugLog(`[UI] updateControlsForCooldown: connected=${connected}, inCooldown=${inCooldown}, pingInProgress=${state.pingInProgress}`);
   sendPingBtn.disabled = !connected || inCooldown || state.pingInProgress;
   autoToggleBtn.disabled = !connected || inCooldown || state.pingInProgress;
 }
@@ -561,12 +561,12 @@ function updateControlsForCooldown() {
 function unlockPingControls(reason) {
   state.pingInProgress = false;
   updateControlsForCooldown();
-  debugLog(`Ping controls unlocked (pingInProgress=false) ${reason}`);
+  debugLog(`[UI] Ping controls unlocked (pingInProgress=false) ${reason}`);
 }
 
 // Timer cleanup
 function cleanupAllTimers() {
-  debugLog("Cleaning up all timers");
+  debugLog("[TIMER] Cleaning up all timers");
   
   if (state.meshMapperTimer) {
     clearTimeout(state.meshMapperTimer);
@@ -616,7 +616,7 @@ function cleanupAllTimers() {
       }
     }
     state.rxBatchBuffer.clear();
-    debugLog("RX batch buffer cleared");
+    debugLog("[RX BATCH] RX batch buffer cleared");
   }
 }
 
@@ -653,7 +653,7 @@ function scheduleCoverageRefresh(lat, lon, delayMs = 0) {
 
   coverageRefreshTimer = setTimeout(() => {
     const url = buildCoverageEmbedUrl(lat, lon);
-    debugLog("Coverage iframe URL:", url);
+    debugLog("[UI] Coverage iframe URL:", url);
     coverageFrameEl.src = url;
   }, delayMs);
 }
@@ -699,7 +699,7 @@ function setConnStatus(text, color) {
   
   if (!connectionStatusEl) return;
   
-  debugLog(`Connection status: "${text}"`);
+  debugLog(`[UI] Connection status: "${text}"`);
   connectionStatusEl.textContent = text;
   connectionStatusEl.className = `font-medium ${color}`;
   
@@ -744,48 +744,48 @@ function setDynamicStatus(text, color = STATUS_COLORS.idle, immediate = false) {
 
 // ---- Wake Lock helpers ----
 async function acquireWakeLock() {
-  debugLog("Attempting to acquire wake lock");
+  debugLog("[WAKE LOCK] Attempting to acquire wake lock");
   if (navigator.bluetooth && typeof navigator.bluetooth.setScreenDimEnabled === "function") {
     try {
       navigator.bluetooth.setScreenDimEnabled(true);
       state.bluefyLockEnabled = true;
-      debugLog("Bluefy screen-dim prevention enabled");
+      debugLog("[WAKE LOCK] Bluefy screen-dim prevention enabled");
       return;
     } catch (e) {
-      debugWarn("Bluefy setScreenDimEnabled failed:", e);
+      debugWarn("[WAKE LOCK] Bluefy setScreenDimEnabled failed:", e);
     }
   }
   try {
     if ("wakeLock" in navigator && typeof navigator.wakeLock.request === "function") {
       state.wakeLock = await navigator.wakeLock.request("screen");
-      debugLog("Wake lock acquired successfully");
-      state.wakeLock.addEventListener?.("release", () => debugLog("Wake lock released"));
+      debugLog("[WAKE LOCK] Wake lock acquired successfully");
+      state.wakeLock.addEventListener?.("release", () => debugLog("[WAKE LOCK] Wake lock released"));
     } else {
-      debugLog("Wake Lock API not supported on this device");
+      debugLog("[WAKE LOCK] Wake Lock API not supported on this device");
     }
   } catch (err) {
-    debugError(`Could not obtain wake lock: ${err.name}, ${err.message}`);
+    debugError(`[WAKE LOCK] Could not obtain wake lock: ${err.name}, ${err.message}`);
   }
 }
 async function releaseWakeLock() {
-  debugLog("Attempting to release wake lock");
+  debugLog("[WAKE LOCK] Attempting to release wake lock");
   if (state.bluefyLockEnabled && navigator.bluetooth && typeof navigator.bluetooth.setScreenDimEnabled === "function") {
     try {
       navigator.bluetooth.setScreenDimEnabled(false);
       state.bluefyLockEnabled = false;
-      debugLog("Bluefy screen-dim prevention disabled");
+      debugLog("[WAKE LOCK] Bluefy screen-dim prevention disabled");
     } catch (e) {
-      debugWarn("Bluefy setScreenDimEnabled(false) failed:", e);
+      debugWarn("[WAKE LOCK] Bluefy setScreenDimEnabled(false) failed:", e);
     }
   }
   try {
     if (state.wakeLock) {
       await state.wakeLock.release?.();
       state.wakeLock = null;
-      debugLog("Wake lock released successfully");
+      debugLog("[WAKE LOCK] Wake lock released successfully");
     }
   } catch (e) {
-    debugWarn("Error releasing wake lock:", e);
+    debugWarn("[WAKE LOCK] Error releasing wake lock:", e);
     state.wakeLock = null;
   }
 }
@@ -801,7 +801,7 @@ async function releaseWakeLock() {
  * @returns {number} Distance in meters
  */
 function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
-  debugLog(`Calculating Haversine distance: (${lat1.toFixed(5)}, ${lon1.toFixed(5)}) to (${lat2.toFixed(5)}, ${lon2.toFixed(5)})`);
+  debugLog(`[GEOFENCE] Calculating Haversine distance: (${lat1.toFixed(5)}, ${lon1.toFixed(5)}) to (${lat2.toFixed(5)}, ${lon2.toFixed(5)})`);
   
   const R = 6371000; // Earth's radius in meters
   const toRad = (deg) => (deg * Math.PI) / 180;
@@ -817,7 +817,7 @@ function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   const distance = R * c;
   
-  debugLog(`Haversine distance calculated: ${distance.toFixed(2)}m`);
+  debugLog(`[GEOFENCE] Haversine distance calculated: ${distance.toFixed(2)}m`);
   return distance;
 }
 
@@ -828,13 +828,13 @@ function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
  * @returns {boolean} True if within geofence, false otherwise
  */
 function validateGeofence(lat, lon) {
-  debugLog(`Validating geofence for coordinates: (${lat.toFixed(5)}, ${lon.toFixed(5)})`);
-  debugLog(`Geofence center: (${OTTAWA_CENTER_LAT}, ${OTTAWA_CENTER_LON}), radius: ${OTTAWA_GEOFENCE_RADIUS_M}m`);
+  debugLog(`[GEOFENCE] Validating geofence for coordinates: (${lat.toFixed(5)}, ${lon.toFixed(5)})`);
+  debugLog(`[GEOFENCE] Geofence center: (${OTTAWA_CENTER_LAT}, ${OTTAWA_CENTER_LON}), radius: ${OTTAWA_GEOFENCE_RADIUS_M}m`);
   
   const distance = calculateHaversineDistance(lat, lon, OTTAWA_CENTER_LAT, OTTAWA_CENTER_LON);
   const isWithinGeofence = distance <= OTTAWA_GEOFENCE_RADIUS_M;
   
-  debugLog(`Geofence validation: distance=${distance.toFixed(2)}m, within_geofence=${isWithinGeofence}`);
+  debugLog(`[GEOFENCE] Geofence validation: distance=${distance.toFixed(2)}m, within_geofence=${isWithinGeofence}`);
   return isWithinGeofence;
 }
 
@@ -845,20 +845,20 @@ function validateGeofence(lat, lon) {
  * @returns {boolean} True if distance >= 25m or no previous ping, false otherwise
  */
 function validateMinimumDistance(lat, lon) {
-  debugLog(`Validating minimum distance for coordinates: (${lat.toFixed(5)}, ${lon.toFixed(5)})`);
+  debugLog(`[GEOFENCE] Validating minimum distance for coordinates: (${lat.toFixed(5)}, ${lon.toFixed(5)})`);
   
   if (!state.lastSuccessfulPingLocation) {
-    debugLog("No previous successful ping location, minimum distance check skipped");
+    debugLog("[GEOFENCE] No previous successful ping location, minimum distance check skipped");
     return true;
   }
   
   const { lat: lastLat, lon: lastLon } = state.lastSuccessfulPingLocation;
-  debugLog(`Last successful ping location: (${lastLat.toFixed(5)}, ${lastLon.toFixed(5)})`);
+  debugLog(`[GEOFENCE] Last successful ping location: (${lastLat.toFixed(5)}, ${lastLon.toFixed(5)})`);
   
   const distance = calculateHaversineDistance(lat, lon, lastLat, lastLon);
   const isMinimumDistanceMet = distance >= MIN_PING_DISTANCE_M;
   
-  debugLog(`Distance validation: distance=${distance.toFixed(2)}m, minimum_distance_met=${isMinimumDistanceMet} (threshold=${MIN_PING_DISTANCE_M}m)`);
+  debugLog(`[GEOFENCE] Distance validation: distance=${distance.toFixed(2)}m, minimum_distance_met=${isMinimumDistanceMet} (threshold=${MIN_PING_DISTANCE_M}m)`);
   return isMinimumDistanceMet;
 }
 
