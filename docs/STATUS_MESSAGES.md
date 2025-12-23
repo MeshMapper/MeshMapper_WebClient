@@ -110,55 +110,55 @@ These messages appear in the Dynamic App Status Bar. They NEVER include connecti
 - **When**: Capacity check passed successfully, slot acquired from MeshMapper API
 - **Source**: `content/wardrive.js:connect()`
 
-##### WarDriving app has reached capacity
-- **Message**: `"WarDriving app has reached capacity"`
+##### MeshMapper at capacity
+- **Message**: `"MeshMapper at capacity"`
 - **Color**: Red (error)
 - **When**: Capacity check API denies slot on connect (returns allowed=false)
 - **Terminal State**: Yes (persists until user takes action)
-- **Notes**: Complete flow: Connection bar shows "Connecting" → "Disconnecting" → "Disconnected". Dynamic bar shows "Acquiring wardriving slot" → "WarDriving app has reached capacity" (terminal)
+- **Notes**: Complete flow: Connection bar shows "Connecting" → "Disconnecting" → "Disconnected". Dynamic bar shows "Acquiring wardriving slot" → "MeshMapper at capacity" (terminal)
 
-##### WarDriving app is down
-- **Message**: `"WarDriving app is down"`
+##### MeshMapper unavailable
+- **Message**: `"MeshMapper unavailable"`
 - **Color**: Red (error)
 - **When**: Capacity check API returns error status or network is unreachable during connect
 - **Terminal State**: Yes (persists until user takes action)
-- **Notes**: Implements fail-closed policy - connection denied if API fails. Complete flow: Connection bar shows "Connecting" → "Disconnecting" → "Disconnected". Dynamic bar shows "Acquiring wardriving slot" → "WarDriving app is down" (terminal)
+- **Notes**: Implements fail-closed policy - connection denied if API fails. Complete flow: Connection bar shows "Connecting" → "Disconnecting" → "Disconnected". Dynamic bar shows "Acquiring wardriving slot" → "MeshMapper unavailable" (terminal)
 
-##### WarDriving slot has been revoked
-- **Message**: `"WarDriving slot has been revoked"`
+##### MeshMapper slot revoked
+- **Message**: `"MeshMapper slot revoked"`
 - **Color**: Red (error)
 - **When**: During active session, API returns allowed=false during background ping posting
 - **Terminal State**: Yes (persists until user takes action)
 - **Sequence** (Updated for background API posting): 
   1. RX listening window completes → Status shows "Idle" or "Waiting for next ping"
   2. Background API post detects revocation (silent, no status change yet)
-  3. "Error: Posting to API (Revoked)" (red, 1.5s)
+  3. "API post failed (revoked)" (red, 1.5s)
   4. Connection bar: "Disconnecting" → "Disconnected"
-  5. Dynamic bar: "WarDriving slot has been revoked" (terminal)
+  5. Dynamic bar: "MeshMapper slot revoked" (terminal)
 - **Notes**: With the new ping/repeat flow, revocation is detected during the background API post (which runs after the RX window completes and next timer starts)
 
-##### Error: Posting to API (Revoked)
-- **Message**: `"Error: Posting to API (Revoked)"`
+##### API post failed (revoked)
+- **Message**: `"API post failed (revoked)"`
 - **Color**: Red (error)
 - **When**: Intermediate status shown when slot revocation detected during background API posting
 - **Duration**: 1.5 seconds (visible before disconnect begins)
 - **Notes**: First visible status in revocation sequence, followed by disconnect flow. Appears after background API post detects revocation.
 
-##### Unable to read device public key; try again
-- **Message**: `"Unable to read device public key; try again"`
+##### Device key error - reconnect
+- **Message**: `"Device key error - reconnect"`
 - **Color**: Red (error)
 - **When**: Device public key is missing or invalid during connection
 - **Terminal State**: Yes
 - **Notes**: Triggers automatic disconnect
 
-##### Session ID error; try reconnecting
-- **Message**: `"Session ID error; try reconnecting"`
+##### Session error - reconnect
+- **Message**: `"Session error - reconnect"`
 - **Color**: Red (error)
 - **When**: 
   - Capacity check returns allowed=true but session_id is missing during connection
   - Attempting to post to MeshMapper API without a valid session_id
 - **Terminal State**: Yes (persists until user takes action)
-- **Notes**: Implements fail-closed policy - connection/posting denied if session_id is missing. Complete flow: Connection bar shows "Connecting" → "Disconnecting" → "Disconnected". Dynamic bar shows "Acquiring wardriving slot" → "Session ID error; try reconnecting" (terminal)
+- **Notes**: Implements fail-closed policy - connection/posting denied if session_id is missing. Complete flow: Connection bar shows "Connecting" → "Disconnecting" → "Disconnected". Dynamic bar shows "Acquiring wardriving slot" → "Session error - reconnect" (terminal)
 - **Source**: `content/wardrive.js:checkCapacity()`, `content/wardrive.js:postToMeshMapperAPI()`
 
 ##### App out of date, please update
@@ -177,8 +177,8 @@ These messages appear in the Dynamic App Status Bar. They NEVER include connecti
 - **Notes**: Fallback message for future/unknown reason codes. Shows the raw reason code to help with debugging. Complete flow: Connection bar shows "Connecting" → "Disconnecting" → "Disconnected". Dynamic bar shows "Acquiring wardriving slot" → "Connection not allowed: [reason]" (terminal)
 - **Source**: `content/wardrive.js` disconnected event handler
 
-##### Error: No session ID for API post
-- **Message**: `"Error: No session ID for API post"`
+##### Missing session ID
+- **Message**: `"Missing session ID"`
 - **Color**: Red (error)
 - **When**: Intermediate status shown when attempting to post to MeshMapper API without a valid session_id
 - **Duration**: 1.5 seconds (visible before disconnect begins)
