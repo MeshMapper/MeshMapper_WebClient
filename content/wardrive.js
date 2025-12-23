@@ -28,6 +28,24 @@ function debugWarn(message, ...args) {
 function debugError(message, ...args) {
   if (DEBUG_ENABLED) {
     console.error(`[DEBUG] ${message}`, ...args);
+    
+    // Also add to Error Log UI (use try-catch to prevent recursive errors)
+    try {
+      // Extract source tag if present (e.g., "[BLE]" from "[BLE] Connection failed")
+      const tagMatch = message.match(/^\[([^\]]+)\]/);
+      const source = tagMatch ? tagMatch[1] : null;
+      
+      // Remove tag from message if present
+      const cleanMessage = tagMatch ? message.replace(/^\[[^\]]+\]\s*/, '') : message;
+      
+      // Only add to Error Log if the UI is initialized
+      if (typeof addErrorLogEntry === 'function') {
+        addErrorLogEntry(cleanMessage, source);
+      }
+    } catch (e) {
+      // Silently fail to prevent recursive errors
+      console.error('Failed to add error to Error Log UI:', e);
+    }
   }
 }
 
@@ -149,6 +167,16 @@ const rxLogLastRepeater = $("rxLogLastRepeater");
 const rxLogEntries = $("rxLogEntries");
 const rxLogExpandArrow = $("rxLogExpandArrow");
 
+// Error Log selectors
+const errorLogSummaryBar = $("errorLogSummaryBar");
+const errorLogBottomSheet = $("errorLogBottomSheet");
+const errorLogScrollContainer = $("errorLogScrollContainer");
+const errorLogCount = $("errorLogCount");
+const errorLogLastTime = $("errorLogLastTime");
+const errorLogLastError = $("errorLogLastError");
+const errorLogEntries = $("errorLogEntries");
+const errorLogExpandArrow = $("errorLogExpandArrow");
+
 // Session log state
 const sessionLogState = {
   entries: [],  // Array of parsed log entries
@@ -162,6 +190,14 @@ const rxLogState = {
   isExpanded: false,
   autoScroll: true,
   maxEntries: 100  // Limit to prevent memory issues
+};
+
+// Error log state
+const errorLogState = {
+  entries: [],  // Array of error log entries
+  isExpanded: false,
+  autoScroll: true,
+  maxEntries: 50  // Limit to prevent memory issues
 };
 
 // ---- State ----
@@ -2893,6 +2929,194 @@ function addRxLogEntry(repeaterId, snr, lat, lon, timestamp) {
   debugLog(`[PASSIVE RX UI] Added entry: repeater=${repeaterId}, snr=${snr}, location=${lat.toFixed(5)},${lon.toFixed(5)}`);
 }
 
+// ---- Error Log ----
+
+/**
+ * Create DOM element for Error log entry
+ * @param {Object} entry - Error log entry object
+ * @returns {HTMLElement} DOM element for the error log entry
+ */
+function createErrorLogEntryElement(entry) {
+  const logEntry = document.createElement('div');
+  logEntry.className = 'logEntry';
+  
+  // Top row: time + error type/source
+  const topRow = document.createElement('div');
+  topRow.className = 'logRowTop';
+  
+  const time = document.createElement('span');
+  time.className = 'logTime';
+  const date = new Date(entry.timestamp);
+  time.textContent = date.toLocaleTimeString();
+  
+  const source = document.createElement('span');
+  source.className = 'text-xs font-mono text-red-400';
+  source.textContent = entry.source || 'ERROR';
+  
+  topRow.appendChild(time);
+  topRow.appendChild(source);
+  
+  // Message row
+  const messageRow = document.createElement('div');
+  messageRow.className = 'text-xs text-red-300 break-words mt-1';
+  messageRow.textContent = entry.message;
+  
+  logEntry.appendChild(topRow);
+  logEntry.appendChild(messageRow);
+  
+  return logEntry;
+}
+
+/**
+ * Update error log summary bar
+ */
+function updateErrorLogSummary() {
+  if (!errorLogCount || !errorLogLastTime) return;
+  
+  const count = errorLogState.entries.length;
+  
+  if (count === 0) {
+    errorLogCount.textContent = '0 errors';
+    errorLogLastTime.textContent = 'No errors';
+    errorLogLastTime.classList.add('hidden');
+    if (errorLogLastError) {
+      errorLogLastError.textContent = '—';
+    }
+    debugLog('[ERROR LOG] Summary updated: no entries');
+    return;
+  }
+  
+  const lastEntry = errorLogState.entries[errorLogState.entries.length - 1];
+  errorLogCount.textContent = `${count} error${count !== 1 ? 's' : ''}`;
+  
+  const date = new Date(lastEntry.timestamp);
+  errorLogLastTime.textContent = date.toLocaleTimeString();
+  errorLogLastTime.classList.remove('hidden');
+  
+  if (errorLogLastError) {
+    // Show first 20 chars of error message
+    const preview = lastEntry.message.length > 20 
+      ? lastEntry.message.substring(0, 20) + '...' 
+      : lastEntry.message;
+    errorLogLastError.textContent = preview;
+  }
+  
+  debugLog(`[ERROR LOG] Summary updated: ${count} errors, last: ${lastEntry.message.substring(0, 30)}...`);
+}
+
+/**
+ * Render Error log entries (full render or incremental)
+ * @param {boolean} fullRender - If true, re-render all entries. If false, only render new entries.
+ */
+function renderErrorLogEntries(fullRender = false) {
+  if (!errorLogEntries) return;
+  
+  if (fullRender) {
+    debugLog(`[ERROR LOG] Full render of ${errorLogState.entries.length} error log entries`);
+    errorLogEntries.innerHTML = '';
+    
+    if (errorLogState.entries.length === 0) {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'text-xs text-slate-500 italic text-center py-4';
+      placeholder.textContent = 'No errors logged';
+      errorLogEntries.appendChild(placeholder);
+      debugLog(`[ERROR LOG] Rendered placeholder (no entries)`);
+      return;
+    }
+    
+    // Render newest first
+    const entries = [...errorLogState.entries].reverse();
+    
+    entries.forEach((entry, index) => {
+      const element = createErrorLogEntryElement(entry);
+      errorLogEntries.appendChild(element);
+    });
+    
+    debugLog(`[ERROR LOG] Full render complete: ${entries.length} entries`);
+  } else {
+    // Incremental render: only add the newest entry
+    if (errorLogState.entries.length === 0) {
+      debugLog(`[ERROR LOG] No entries to render incrementally`);
+      return;
+    }
+    
+    // Remove placeholder if it exists
+    const placeholder = errorLogEntries.querySelector('.text-xs.text-slate-500.italic');
+    if (placeholder) {
+      placeholder.remove();
+    }
+    
+    // Get the newest entry (last in array) and prepend it (newest first display)
+    const newestEntry = errorLogState.entries[errorLogState.entries.length - 1];
+    const element = createErrorLogEntryElement(newestEntry);
+    errorLogEntries.insertBefore(element, errorLogEntries.firstChild);
+    
+    debugLog(`[ERROR LOG] Appended entry ${errorLogState.entries.length}/${errorLogState.entries.length}`);
+  }
+  
+  // Auto-scroll to top (newest)
+  if (errorLogState.autoScroll && errorLogScrollContainer) {
+    errorLogScrollContainer.scrollTop = 0;
+    debugLog(`[ERROR LOG] Auto-scrolled to top`);
+  }
+}
+
+/**
+ * Toggle Error log expanded/collapsed
+ */
+function toggleErrorLogBottomSheet() {
+  errorLogState.isExpanded = !errorLogState.isExpanded;
+  
+  if (errorLogBottomSheet) {
+    if (errorLogState.isExpanded) {
+      errorLogBottomSheet.classList.add('open');
+      errorLogBottomSheet.classList.remove('hidden');
+    } else {
+      errorLogBottomSheet.classList.remove('open');
+      errorLogBottomSheet.classList.add('hidden');
+    }
+  }
+  
+  // Toggle arrow rotation
+  if (errorLogExpandArrow) {
+    if (errorLogState.isExpanded) {
+      errorLogExpandArrow.classList.add('expanded');
+    } else {
+      errorLogExpandArrow.classList.remove('expanded');
+    }
+  }
+}
+
+/**
+ * Add entry to Error log
+ * @param {string} message - Error message
+ * @param {string} source - Optional source/context of the error
+ */
+function addErrorLogEntry(message, source = null) {
+  const entry = {
+    message,
+    source,
+    timestamp: new Date().toISOString()
+  };
+  
+  errorLogState.entries.push(entry);
+  
+  // Apply max entries limit
+  if (errorLogState.entries.length > errorLogState.maxEntries) {
+    const removed = errorLogState.entries.shift();
+    debugLog(`[ERROR LOG] Max entries limit reached, removed oldest entry`);
+    // Need full re-render when removing old entries
+    renderErrorLogEntries(true);
+  } else {
+    // Incremental render - only append the new entry
+    renderErrorLogEntries(false);
+  }
+  
+  updateErrorLogSummary();
+  
+  debugLog(`[ERROR LOG] Added entry: ${message.substring(0, 50)}${message.length > 50 ? '...' : ''}`);
+}
+
 // ---- Ping ----
 /**
  * Acquire fresh GPS coordinates and update state
@@ -3809,6 +4033,14 @@ export async function onLoad() {
     rxLogSummaryBar.addEventListener("click", () => {
       debugLog("[PASSIVE RX UI] RX log summary bar clicked - toggling RX log");
       toggleRxLogBottomSheet();
+    });
+  }
+
+  // Error Log event listener
+  if (errorLogSummaryBar) {
+    errorLogSummaryBar.addEventListener("click", () => {
+      debugLog("[ERROR LOG] Error log summary bar clicked - toggling Error log");
+      toggleErrorLogBottomSheet();
     });
   }
 
