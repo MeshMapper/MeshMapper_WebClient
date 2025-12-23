@@ -293,7 +293,7 @@ function applyStatusImmediately(text, color) {
   statusMessageState.lastSetTime = Date.now();
   statusMessageState.currentText = text;
   statusMessageState.currentColor = color;
-  debugLog(`Status applied: "${text}"`);
+  // Debug log removed - status updates are already logged earlier in the flow
 }
 
 /**
@@ -1596,8 +1596,7 @@ async function flushApiQueue() {
   const rxCount = batch.filter(m => m.WARDRIVE_TYPE === "RX").length;
   debugLog(`[API QUEUE] Batch composition: ${txCount} TX, ${rxCount} RX`);
   
-  // Update status
-  setDynamicStatus(`Posting ${batch.length} to API`, STATUS_COLORS.info);
+  // Status removed from dynamic status bar - debug log above is sufficient for debugging
   
   try {
     // Validate session_id exists
@@ -2776,37 +2775,61 @@ function updateRxLogSummary() {
 /**
  * Render all RX log entries
  */
-function renderRxLogEntries() {
+/**
+ * Render RX log entries (full render or incremental)
+ * @param {boolean} fullRender - If true, re-render all entries. If false, only render new entries.
+ */
+function renderRxLogEntries(fullRender = false) {
   if (!rxLogEntries) return;
   
-  debugLog(`[PASSIVE RX UI] Rendering ${rxLogState.entries.length} RX log entries`);
-  rxLogEntries.innerHTML = '';
-  
-  if (rxLogState.entries.length === 0) {
-    const placeholder = document.createElement('div');
-    placeholder.className = 'text-xs text-slate-500 italic text-center py-4';
-    placeholder.textContent = 'No RX observations yet';
-    rxLogEntries.appendChild(placeholder);
-    debugLog(`[PASSIVE RX UI] Rendered placeholder (no entries)`);
-    return;
+  if (fullRender) {
+    debugLog(`[PASSIVE RX UI] Full render of ${rxLogState.entries.length} RX log entries`);
+    rxLogEntries.innerHTML = '';
+    
+    if (rxLogState.entries.length === 0) {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'text-xs text-slate-500 italic text-center py-4';
+      placeholder.textContent = 'No RX observations yet';
+      rxLogEntries.appendChild(placeholder);
+      debugLog(`[PASSIVE RX UI] Rendered placeholder (no entries)`);
+      return;
+    }
+    
+    // Render newest first
+    const entries = [...rxLogState.entries].reverse();
+    
+    entries.forEach((entry, index) => {
+      const element = createRxLogEntryElement(entry);
+      rxLogEntries.appendChild(element);
+    });
+    
+    debugLog(`[PASSIVE RX UI] Full render complete: ${entries.length} entries`);
+  } else {
+    // Incremental render: only add the newest entry
+    if (rxLogState.entries.length === 0) {
+      debugLog(`[PASSIVE RX UI] No entries to render incrementally`);
+      return;
+    }
+    
+    // Remove placeholder if it exists
+    const placeholder = rxLogEntries.querySelector('.text-xs.text-slate-500.italic');
+    if (placeholder) {
+      placeholder.remove();
+    }
+    
+    // Get the newest entry (last in array) and prepend it (newest first display)
+    const newestEntry = rxLogState.entries[rxLogState.entries.length - 1];
+    const element = createRxLogEntryElement(newestEntry);
+    rxLogEntries.insertBefore(element, rxLogEntries.firstChild);
+    
+    debugLog(`[PASSIVE RX UI] Appended entry ${rxLogState.entries.length}/${rxLogState.entries.length}`);
   }
-  
-  // Render newest first
-  const entries = [...rxLogState.entries].reverse();
-  
-  entries.forEach((entry, index) => {
-    const element = createRxLogEntryElement(entry);
-    rxLogEntries.appendChild(element);
-    debugLog(`[PASSIVE RX UI] Appended entry ${index + 1}/${entries.length}`);
-  });
   
   // Auto-scroll to top (newest)
   if (rxLogState.autoScroll && rxLogScrollContainer) {
     rxLogScrollContainer.scrollTop = 0;
     debugLog(`[PASSIVE RX UI] Auto-scrolled to top`);
   }
-  
-  debugLog(`[PASSIVE RX UI] Finished rendering all entries`);
 }
 
 /**
@@ -2858,9 +2881,13 @@ function addRxLogEntry(repeaterId, snr, lat, lon, timestamp) {
   if (rxLogState.entries.length > rxLogState.maxEntries) {
     const removed = rxLogState.entries.shift();
     debugLog(`[PASSIVE RX UI] Max entries limit reached, removed oldest entry (repeater=${removed.repeaterId})`);
+    // Need full re-render when removing old entries
+    renderRxLogEntries(true);
+  } else {
+    // Incremental render - only append the new entry
+    renderRxLogEntries(false);
   }
   
-  renderRxLogEntries();
   updateRxLogSummary();
   
   debugLog(`[PASSIVE RX UI] Added entry: repeater=${repeaterId}, snr=${snr}, location=${lat.toFixed(5)},${lon.toFixed(5)}`);
@@ -3557,7 +3584,7 @@ async function connect() {
       
       // Clear RX log entries on disconnect
       rxLogState.entries = [];
-      renderRxLogEntries();
+      renderRxLogEntries(true); // Full render to show placeholder
       updateRxLogSummary();
       debugLog("RX log cleared on disconnect");
       
