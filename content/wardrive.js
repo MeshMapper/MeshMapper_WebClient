@@ -2598,7 +2598,7 @@ function renderLogEntriesGeneric(config) {
   if (!containerElement) return;
   
   if (fullRender) {
-    debugLog(`[${logTag}] ${fullRender ? 'Full' : 'Incremental'} render of ${entries.length} log entries`);
+    debugLog(`[${logTag}] Full render of ${entries.length} log entries`);
     containerElement.innerHTML = '';
     
     if (entries.length === 0) {
@@ -2616,12 +2616,9 @@ function renderLogEntriesGeneric(config) {
     reversedEntries.forEach((entry, index) => {
       const element = createElementFn(entry);
       containerElement.appendChild(element);
-      if (fullRender && index === 0) {
-        debugLog(`[${logTag}] Appended log entry ${index + 1}/${reversedEntries.length} to container`);
-      }
     });
     
-    debugLog(`[${logTag}] ${fullRender ? 'Full' : 'Incremental'} render complete: ${reversedEntries.length} entries`);
+    debugLog(`[${logTag}] Full render complete: ${entries.length} entries`);
   } else {
     // Incremental render: only add the newest entry
     if (entries.length === 0) {
