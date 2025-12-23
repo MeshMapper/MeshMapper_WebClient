@@ -3957,7 +3957,7 @@ export async function onLoad() {
         await connect();
       }
     } catch (e) {
-      debugError("[UI] Connection button error:" ${e.message}`, e);
+      debugError("[UI] Connection button error:" `${e.message}`, e);
       setDynamicStatus(e.message || "Connection failed", STATUS_COLORS.error);
     }
   });
