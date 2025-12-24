@@ -111,7 +111,7 @@ const MESHMAPPER_RX_LOG_API_URL = "https://yow.meshmapper.net/wardriving-api.php
 
 // Geo-Fenced Auth API Configuration (Placeholder URLs)
 const GEO_AUTH_ZONES_STATUS_URL = "{{API_URL}}/zones/status";  // Preflight: Check zone status before connect
-const GEO_AUTH_POST_URL = "{{API_URL}}/auth";  // Auth: Request connection token after BLE pairing
+
 
 // Static for now; will be made dynamic later.
 const WARDIVE_IATA_CODE = "YOW";
@@ -723,18 +723,12 @@ function setConnectButton(connected) {
  */
 function setConnStatus(text, color) {
   const connectionStatusEl = document.getElementById("connectionStatus");
-  const statusIndicatorEl = document.getElementById("statusIndicator");
   
   if (!connectionStatusEl) return;
   
   debugLog(`[UI] Connection status: "${text}"`);
   connectionStatusEl.textContent = text;
   connectionStatusEl.className = `font-medium ${color}`;
-  
-  // Update status indicator dot color to match
-  if (statusIndicatorEl) {
-    statusIndicatorEl.className = `text-lg ${color}`;
-  }
 }
 
 /**
@@ -1330,59 +1324,6 @@ async function checkZoneStatus() {
     state.zoneStatus.isChecking = false;
     updateZoneStatusUI();
   }
-}
-
-/**
- * Post auth request (placeholder - actual implementation commented out)
- * This will be called after BLE pairing to request a session token
- * 
- * See docs/GEO_AUTH_DESIGN.md for full auth flow specification.
- * To enable: uncomment fetch() call and remove console.debug() simulation.
- * 
- * @param {object} coords - GPS coordinates {lat, lon, accuracy, timestamp}
- * @returns {Promise<boolean>} True if auth successful (currently simulated)
- */
-async function postAuthRequest(coords) {
-  debugLog("[GEOFENCE] postAuthRequest called (commented out implementation)");
-  
-  const payload = {
-    public_key: state.devicePublicKey,
-    who: getDeviceIdentifier(),
-    ver: APP_VERSION,
-    reason: "connect",
-    coords: {
-      lat: coords.lat,
-      lng: coords.lon,
-      accuracy_m: coords.accuracy,
-      timestamp: Math.floor(coords.timestamp / 1000)
-    }
-  };
-  
-  console.debug(`[GEOFENCE] Auth POST payload (simulated):`, payload);
-  console.debug(`[GEOFENCE] Auth POST target URL: ${GEO_AUTH_POST_URL}`);
-  
-  /* Uncomment when backend is ready:
-  const response = await fetch(GEO_AUTH_POST_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-  
-  if (!response.ok) throw new Error(`Auth API returned status ${response.status}`);
-  
-  const data = await response.json();
-  if (data.allowed) {
-    state.authToken = data.token;
-    state.wardriveSessionId = data.session_id;
-    debugLog(`[GEOFENCE] Auth successful: session_id=${data.session_id}`);
-    return true;
-  }
-  debugWarn(`[GEOFENCE] Auth denied: ${data.reason || 'unknown'}`);
-  return false;
-  */
-  
-  debugLog("[GEOFENCE] Simulated auth success (actual request commented out)");
-  return true;
 }
 
 // ---- Key Derivation ----
