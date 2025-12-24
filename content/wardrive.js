@@ -4400,25 +4400,6 @@ document.addEventListener("visibilitychange", async () => {
 /**
  * Update Connect button state based on radio power selection
  */
-function updateConnectButtonState() {
-  const radioPowerSelected = getCurrentPowerSetting() !== "";
-  const isConnected = !!state.connection;
-  
-  if (!isConnected) {
-    // Only enable Connect if radio power is selected
-    connectBtn.disabled = !radioPowerSelected;
-    
-    // Update dynamic status based on power selection
-    if (!radioPowerSelected) {
-      debugLog("[UI] Radio power not selected - showing message in status bar");
-      setDynamicStatus("Select radio power to connect", STATUS_COLORS.warning);
-    } else {
-      debugLog("[UI] Radio power selected - clearing message from status bar");
-      setDynamicStatus("Idle");
-    }
-  }
-}
-
 // ---- Bind UI & init ----
 export async function onLoad() {
   debugLog("[INIT] wardrive.js onLoad() called - initializing");
