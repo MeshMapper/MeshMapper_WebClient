@@ -1,7 +1,7 @@
 # MeshCore GOME WarDriver - Development Guidelines
 
 ## Overview
-This document defines the coding standards and requirements for all changes to the MeshCore GOME WarDriver repository.  AI agents and contributors must follow these guidelines for every modification.
+This document defines the coding standards and requirements for all changes to the MeshCore GOME WarDriver repository.   AI agents and contributors must follow these guidelines for every modification.
 
 ---
 
@@ -9,7 +9,7 @@ This document defines the coding standards and requirements for all changes to t
 
 ### Debug Logging
 - **ALWAYS** include debug console logging for significant operations
-- Use the existing debug helper functions: 
+- Use the existing debug helper functions:  
   - `debugLog(message, ...args)` - For general debug information
   - `debugWarn(message, ... args)` - For warning conditions
   - `debugError(message, ... args)` - For error conditions
@@ -18,7 +18,7 @@ This document defines the coding standards and requirements for all changes to t
 
 #### Debug Log Tagging Convention
 
-All debug log messages **MUST** include a descriptive tag in square brackets immediately after `[DEBUG]` that identifies the subsystem or feature area. This enables easier filtering and understanding of debug output. 
+All debug log messages **MUST** include a descriptive tag in square brackets immediately after `[DEBUG]` that identifies the subsystem or feature area. This enables easier filtering and understanding [...]
 
 **Format:** `[DEBUG] [TAG] Message here`
 
@@ -84,9 +84,9 @@ When adding new status messages, include:
 - The exact status message text
 - When it appears (trigger condition)
 - The status color used
-- Any follow-up actions or states
+- Any follow-up actions or states
 
-### `docs/CONNECTION_WORKFLOW.md` Updates
+### docs/CONNECTION_WORKFLOW.md Updates
 When **modifying connect or disconnect logic**, you must:
 - Read `docs/CONNECTION_WORKFLOW.md` before making the change (to understand current intended behavior).
 - Update `docs/CONNECTION_WORKFLOW.md` so it remains accurate after the change:
@@ -94,10 +94,10 @@ When **modifying connect or disconnect logic**, you must:
   - Any new states, retries, timeouts, or error handling
   - Any UI impacts (buttons, indicators, status messages)
 
-### docs/PING_AUTO_PING_WORKFLOW.md Updates
+### docs/PING_WORKFLOW.md Updates
 When **modifying ping or auto-ping logic**, you must: 
-- Read `docs/PING_AUTO_PING_WORKFLOW.md` before making the change (to understand current intended behavior).
-- Update `docs/PING_AUTO_PING_WORKFLOW.md` so it remains accurate after the change:
+- Read `docs/PING_WORKFLOW. md` before making the change (to understand current intended behavior).
+- Update `docs/PING_WORKFLOW.md` so it remains accurate after the change:
   - Ping flows (manual `sendPing()`, auto-ping lifecycle)
   - Validation logic (geofence, distance, cooldown)
   - GPS acquisition and payload construction
@@ -105,6 +105,47 @@ When **modifying ping or auto-ping logic**, you must:
   - Control locking and cooldown management
   - Auto mode behavior (intervals, wake lock, page visibility)
   - Any UI impacts (buttons, status messages, countdown displays)
+
+### docs/FLOW_WARDRIVE_RX_DIAGRAM.md Updates
+When **modifying RX (receive) message handling logic**, you must: 
+- Read `docs/FLOW_WARDRIVE_RX_DIAGRAM.md` before making the change (to understand current intended behavior).
+- Update `docs/FLOW_WARDRIVE_RX_DIAGRAM.md` so it remains accurate after the change:
+  - Message receive flow and parsing
+  - Unified RX handler behavior
+  - Passive RX logging logic
+  - RX batch buffer operations
+  - Decryption handling
+  - Any UI impacts (passive RX display, session logs)
+
+### docs/FLOW_WARDRIVE_TX_DIAGRAM. md Updates
+When **modifying TX (transmit) message handling logic**, you must:
+- Read `docs/FLOW_WARDRIVE_TX_DIAGRAM.md` before making the change (to understand current intended behavior).
+- Update `docs/FLOW_WARDRIVE_TX_DIAGRAM.md` so it remains accurate after the change:
+  - Message transmission flow
+  - Ping payload construction and sending
+  - Channel selection and management
+  - BLE write operations
+  - Any UI impacts (status updates, button states)
+
+### docs/FLOW_WARDRIVE_API_QUEUE_DIAGRAM.md Updates
+When **modifying API queue or batch submission logic**, you must:
+- Read `docs/FLOW_WARDRIVE_API_QUEUE_DIAGRAM.md` before making the change (to understand current intended behavior).
+- Update `docs/FLOW_WARDRIVE_API_QUEUE_DIAGRAM.md` so it remains accurate after the change:
+  - Queue management (adding, processing, flushing)
+  - Batch submission to MeshMapper API
+  - Retry logic and error handling
+  - Capacity check operations
+  - Timing and throttling behavior
+  - Any UI impacts (queue status indicators)
+
+### docs/COVERAGE_TYPES.md Updates
+When **modifying coverage type definitions or classification logic**, you must:
+- Read `docs/COVERAGE_TYPES. md` before making the change (to understand current intended behavior).
+- Update `docs/COVERAGE_TYPES.md` so it remains accurate after the change:
+  - Coverage type definitions and criteria
+  - Classification logic for different coverage scenarios
+  - Any mapping to API payload values
+  - Any UI impacts (coverage type display)
 
 ---
 
