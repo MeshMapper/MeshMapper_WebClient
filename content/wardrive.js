@@ -4130,16 +4130,20 @@ document.addEventListener("visibilitychange", async () => {
   if (document.hidden) {
     debugLog("[UI] Page visibility changed to hidden");
     if (state.running) {
-      debugLog("[UI] Stopping auto ping due to page hidden");
+      debugLog("[UI] Stopping TX/RX Auto mode due to page hidden");
       stopAutoPing(true); // Ignore cooldown check when page is hidden
-      setDynamicStatus("Lost focus, auto mode stopped", STATUS_COLORS.warning);
+      setDynamicStatus("Lost focus, TX/RX Auto mode stopped", STATUS_COLORS.warning);
+    } else if (state.rxAutoRunning) {
+      debugLog("[UI] Stopping RX Auto mode due to page hidden");
+      stopRxAuto();
+      setDynamicStatus("Lost focus, RX Auto mode stopped", STATUS_COLORS.warning);
     } else {
       debugLog("[UI] Releasing wake lock due to page hidden");
       releaseWakeLock();
     }
   } else {
     debugLog("[UI] Page visibility changed to visible");
-    // On visible again, user can manually re-start Auto.
+    // On visible again, user can manually re-start auto modes.
   }
 });
 

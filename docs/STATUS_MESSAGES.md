@@ -408,10 +408,16 @@ These messages use a hybrid approach: **first display respects 500ms minimum**, 
 - **When**: User clicks "Stop RX" button
 - **Source**: `content/wardrive.js:rxAutoBtn click handler`
 
-##### Lost focus, auto mode stopped
-- **Message**: `"Lost focus, auto mode stopped"`
+##### Lost focus, TX/RX Auto mode stopped
+- **Message**: `"Lost focus, TX/RX Auto mode stopped"`
 - **Color**: Amber (warning)
 - **When**: Browser tab hidden while TX/RX Auto mode running
+- **Source**: `content/wardrive.js:visibilitychange handler`
+
+##### Lost focus, RX Auto mode stopped
+- **Message**: `"Lost focus, RX Auto mode stopped"`
+- **Color**: Amber (warning)
+- **When**: Browser tab hidden while RX Auto mode running
 - **Source**: `content/wardrive.js:visibilitychange handler`
 
 ##### Wait Xs before toggling auto mode

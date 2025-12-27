@@ -673,12 +673,16 @@ flowchart TD
 - GPS watch continues during auto mode, provides fresh data
 
 ### Page Visibility
-- When page becomes hidden during auto mode: 
-  - Auto mode stops immediately
+- When page becomes hidden during TX/RX Auto mode: 
+  - TX/RX Auto mode stops immediately
   - GPS watch stops
   - Wake lock released
-  - **Dynamic Status**: `"Lost focus, auto mode stopped"` (yellow)
-- User must manually restart auto mode when returning
+  - **Dynamic Status**: `"Lost focus, TX/RX Auto mode stopped"` (amber/warning)
+- When page becomes hidden during RX Auto mode:
+  - RX Auto mode stops immediately
+  - Wake lock released
+  - **Dynamic Status**: `"Lost focus, RX Auto mode stopped"` (amber/warning)
+- User must manually restart auto modes when returning
 
 ### RX Auto Mode Mutual Exclusivity
 - **TX/RX Auto** and **RX Auto** modes are mutually exclusive
@@ -695,6 +699,7 @@ flowchart TD
   - User clicks "RX Auto" button
 - RX listening stops when:
   - User clicks "Stop TX/RX" or "Stop RX", OR
+  - Browser tab becomes hidden (auto modes stop), OR
   - User disconnects BLE
 - RX log cleared on connect (new session), NOT on disconnect (user may want to review)
 
