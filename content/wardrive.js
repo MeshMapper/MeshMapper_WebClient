@@ -63,7 +63,7 @@ const MAP_REFRESH_DELAY_MS = 1000;             // Delay after API post to ensure
 const MIN_PAUSE_THRESHOLD_MS = 1000;           // Minimum timer value (1 second) to pause
 const MAX_REASONABLE_TIMER_MS = 5 * 60 * 1000; // Maximum reasonable timer value (5 minutes) to handle clock skew
 const RX_LOG_LISTEN_WINDOW_MS = 6000;         // Listen window for repeater echoes (6 seconds)
-const CHANNEL_GROUP_TEXT_HEADER = 0x15;       // Header byte for Meshtastic GroupText packets (0x15) - used exclusively for Session Log echo detection
+const CHANNEL_GROUP_TEXT_HEADER = 0x15;       // Header byte for MeshCore GroupText packets (0x15) - used exclusively for TX Log echo detection
 
 // Pre-computed channel hash and key for the wardriving channel
 // These will be computed once at startup and used for message correlation and decryption
@@ -150,7 +150,7 @@ const lastPingEl     = $("lastPing");
 const gpsInfoEl = document.getElementById("gpsInfo");
 const gpsAccEl = document.getElementById("gpsAcc");
 const distanceInfoEl = document.getElementById("distanceInfo"); // Distance from last ping
-const sessionPingsEl = document.getElementById("sessionPings"); // optional
+const txPingsEl = document.getElementById("txPings"); // optional
 const coverageFrameEl = document.getElementById("coverageFrame");
 setConnectButton(false);
 setConnStatus("Disconnected", STATUS_COLORS.error);
@@ -159,14 +159,14 @@ setConnStatus("Disconnected", STATUS_COLORS.error);
 const intervalSelect = $("intervalSelect"); // 15 / 30 / 60 seconds
 const powerSelect    = $("powerSelect");    // "", "0.3w", "0.6w", "1.0w"
 
-// Session Log selectors
+// TX Log selectors
 const logSummaryBar = $("logSummaryBar");
 const logBottomSheet = $("logBottomSheet");
 const logScrollContainer = $("logScrollContainer");
 const logCount = $("logCount");
 const logLastTime = $("logLastTime");
 const logLastSnr = $("logLastSnr");
-const sessionLogCopyBtn = $("sessionLogCopyBtn");
+const txLogCopyBtn = $("txLogCopyBtn");
 
 // RX Log selectors
 const rxLogSummaryBar = $("rxLogSummaryBar");
@@ -191,8 +191,8 @@ const errorLogEntries = $("errorLogEntries");
 const errorLogExpandArrow = $("errorLogExpandArrow");
 const errorLogCopyBtn = $("errorLogCopyBtn");
 
-// Session log state
-const sessionLogState = {
+// TX Log state
+const txLogState = {
   entries: [],  // Array of parsed log entries
   isExpanded: false,
   autoScroll: true
@@ -2149,7 +2149,7 @@ function startRepeaterTracking(payload, channelIdx) {
   state.repeaterTracking.channelIdx = channelIdx;
   state.repeaterTracking.repeaters.clear();
   
-  debugLog(`[TX LOG] Session Log tracking activated - unified handler will delegate echoes to Session Log`);
+  debugLog(`[TX LOG] TX Log tracking activated - unified handler will delegate echoes to TX Log`);
   
   // Note: The unified RX handler (started at connect) will automatically delegate to
   // handleSessionLogTracking() when isListening = true. No separate handler needed.
@@ -2157,7 +2157,7 @@ function startRepeaterTracking(payload, channelIdx) {
 }
 
 /**
- * Handle Session Log tracking for repeater echoes
+ * Handle TX Log tracking for repeater echoes
  * Called by unified RX handler when tracking is active
  * @param {Object} packet - Parsed packet from Packet.fromBytes
  * @param {Object} data - The LogRxData event data (contains lastSnr, lastRssi, raw)
@@ -2348,7 +2348,7 @@ function formatRepeaterTelemetry(repeaters) {
 
 /**
  * Unified RX log event handler - processes all incoming packets
- * Delegates to Session Log tracking when active, otherwise handles passive RX logging
+ * Delegates to TX Log tracking when active, otherwise handles passive RX logging
  * @param {Object} data - The LogRxData event data (contains lastSnr, lastRssi, raw)
  */
 async function handleUnifiedRxLogEvent(data) {
@@ -2361,14 +2361,14 @@ async function handleUnifiedRxLogEvent(data) {
     // Log header for debugging (informational for all packet processing)
     debugLog(`[UNIFIED RX] Packet header: 0x${packet.header.toString(16).padStart(2, '0')}`);
     
-    // DELEGATION: If Session Log is actively tracking, delegate to it first
-    // Session Log requires header validation (CHANNEL_GROUP_TEXT_HEADER) and will handle validation internally
+    // DELEGATION: If TX Log is actively tracking, delegate to it first
+    // TX Log requires header validation (CHANNEL_GROUP_TEXT_HEADER) and will handle validation internally
     if (state.repeaterTracking.isListening) {
-      debugLog(`[UNIFIED RX] Session Log is tracking - delegating to Session Log handler`);
+      debugLog(`[UNIFIED RX] TX Log is tracking - delegating to TX Log handler`);
       const wasTracked = await handleSessionLogTracking(packet, data);
       
       if (wasTracked) {
-        debugLog(`[UNIFIED RX] Packet was an echo and tracked by Session Log`);
+        debugLog(`[UNIFIED RX] Packet was an echo and tracked by TX Log`);
         return; // Echo handled, done
       }
       
@@ -2385,7 +2385,7 @@ async function handleUnifiedRxLogEvent(data) {
 }
 
 /**
- * Handle passive RX logging - monitors all incoming packets not handled by Session Log
+ * Handle passive RX logging - monitors all incoming packets not handled by TX Log
  * Extracts the LAST hop from the path (direct repeater) and records observation
  * @param {Object} packet - Parsed packet from Packet.fromBytes
  * @param {Object} data - The LogRxData event data (contains lastSnr, lastRssi, raw)
@@ -2435,7 +2435,7 @@ async function handlePassiveRxLogging(packet, data) {
 
 
 /**
- * Start unified RX listening - handles both Session Log tracking and passive RX logging
+ * Start unified RX listening - handles both TX Log tracking and passive RX logging
  */
 function startUnifiedRxListening() {
   if (state.passiveRxTracking.isListening) {
@@ -2669,7 +2669,7 @@ function queueApiPost(entry) {
   debugLog(`[RX BATCH API] RX message queued: repeater=${entry.repeater_id}, snr=${entry.snr_avg.toFixed(1)}, location=${entry.location.lat.toFixed(5)},${entry.location.lng.toFixed(5)}`);
 }
 
-// ---- Mobile Session Log Bottom Sheet ----
+// ---- Mobile TX Log Bottom Sheet ----
 
 /**
  * Parse log entry string into structured data
@@ -2809,7 +2809,7 @@ function createLogEntryElement(entry) {
 function updateLogSummary() {
   if (!logCount || !logLastTime || !logLastSnr) return;
   
-  const count = sessionLogState.entries.length;
+  const count = txLogState.entries.length;
   logCount.textContent = count === 1 ? '1 ping' : `${count} pings`;
   
   if (count === 0) {
@@ -2819,7 +2819,7 @@ function updateLogSummary() {
     return;
   }
   
-  const lastEntry = sessionLogState.entries[count - 1];
+  const lastEntry = txLogState.entries[count - 1];
   const date = new Date(lastEntry.timestamp);
   logLastTime.textContent = date.toLocaleTimeString();
   
@@ -2837,35 +2837,35 @@ function updateLogSummary() {
 }
 
 /**
- * Render all log entries to the session log
+ * Render all log entries to the TX log
  */
 function renderLogEntries() {
-  if (!sessionPingsEl) return;
+  if (!txPingsEl) return;
   
-  debugLog(`[UI] Rendering ${sessionLogState.entries.length} log entries`);
-  sessionPingsEl.innerHTML = '';
+  debugLog(`[UI] Rendering ${txLogState.entries.length} log entries`);
+  txPingsEl.innerHTML = '';
   
-  if (sessionLogState.entries.length === 0) {
+  if (txLogState.entries.length === 0) {
     // Show placeholder when no entries
     const placeholder = document.createElement('div');
     placeholder.className = 'text-xs text-slate-500 italic text-center py-4';
     placeholder.textContent = 'No pings logged yet';
-    sessionPingsEl.appendChild(placeholder);
+    txPingsEl.appendChild(placeholder);
     debugLog(`[UI] Rendered placeholder (no entries)`);
     return;
   }
   
   // Render newest first
-  const entries = [...sessionLogState.entries].reverse();
+  const entries = [...txLogState.entries].reverse();
   
   entries.forEach((entry, index) => {
     const element = createLogEntryElement(entry);
-    sessionPingsEl.appendChild(element);
-    debugLog(`[UI] Appended log entry ${index + 1}/${entries.length} to sessionPingsEl`);
+    txPingsEl.appendChild(element);
+    debugLog(`[UI] Appended log entry ${index + 1}/${entries.length} to txPingsEl`);
   });
   
   // Auto-scroll to top (newest)
-  if (sessionLogState.autoScroll && logScrollContainer) {
+  if (txLogState.autoScroll && logScrollContainer) {
     logScrollContainer.scrollTop = 0;
     debugLog(`[UI] Auto-scrolled to top of log container`);
   }
@@ -2874,13 +2874,13 @@ function renderLogEntries() {
 }
 
 /**
- * Toggle session log expanded/collapsed
+ * Toggle TX log expanded/collapsed
  */
 function toggleBottomSheet() {
-  sessionLogState.isExpanded = !sessionLogState.isExpanded;
+  txLogState.isExpanded = !txLogState.isExpanded;
   
   if (logBottomSheet) {
-    if (sessionLogState.isExpanded) {
+    if (txLogState.isExpanded) {
       logBottomSheet.classList.add('open');
       logBottomSheet.classList.remove('hidden');
     } else {
@@ -2892,7 +2892,7 @@ function toggleBottomSheet() {
   // Toggle arrow rotation
   const logExpandArrow = document.getElementById('logExpandArrow');
   if (logExpandArrow) {
-    if (sessionLogState.isExpanded) {
+    if (txLogState.isExpanded) {
       logExpandArrow.classList.add('expanded');
     } else {
       logExpandArrow.classList.remove('expanded');
@@ -2900,21 +2900,21 @@ function toggleBottomSheet() {
   }
   
   // Toggle copy button and status visibility
-  if (sessionLogState.isExpanded) {
+  if (txLogState.isExpanded) {
     // Hide status elements, show copy button
     if (logLastSnr) logLastSnr.classList.add('hidden');
-    if (sessionLogCopyBtn) sessionLogCopyBtn.classList.remove('hidden');
+    if (txLogCopyBtn) txLogCopyBtn.classList.remove('hidden');
     debugLog('[TX LOG] Expanded - showing copy button, hiding status');
   } else {
     // Show status elements, hide copy button
     if (logLastSnr) logLastSnr.classList.remove('hidden');
-    if (sessionLogCopyBtn) sessionLogCopyBtn.classList.add('hidden');
+    if (txLogCopyBtn) txLogCopyBtn.classList.add('hidden');
     debugLog('[TX LOG] Collapsed - hiding copy button, showing status');
   }
 }
 
 /**
- * Add entry to session log
+ * Add entry to TX log
  * @param {string} timestamp - ISO timestamp
  * @param {string} lat - Latitude
  * @param {string} lon - Longitude
@@ -2925,7 +2925,7 @@ function addLogEntry(timestamp, lat, lon, eventsStr) {
   const entry = parseLogEntry(logLine);
   
   if (entry) {
-    sessionLogState.entries.push(entry);
+    txLogState.entries.push(entry);
     renderLogEntries();
     updateLogSummary();
   }
@@ -2935,7 +2935,7 @@ function addLogEntry(timestamp, lat, lon, eventsStr) {
  * Clear all TX Log entries (called on new connection)
  */
 function clearTxLog() {
-  sessionLogState.entries = [];
+  txLogState.entries = [];
   renderLogEntries();
   updateLogSummary();
   debugLog("[TX LOG] TX Log cleared");
@@ -3399,15 +3399,15 @@ function addErrorLogEntry(message, source = null) {
 // ---- CSV Export Functions ----
 
 /**
- * Convert Session Log to CSV format
+ * Convert TX Log to CSV format
  * Columns: Timestamp,Latitude,Longitude,Repeater1_ID,Repeater1_SNR,Repeater2_ID,Repeater2_SNR,...
  * @returns {string} CSV formatted string
  */
-function sessionLogToCSV() {
-  debugLog('[TX LOG] Converting session log to CSV format');
+function txLogToCSV() {
+  debugLog('[TX LOG] Converting TX log to CSV format');
   
-  if (sessionLogState.entries.length === 0) {
-    debugWarn('[TX LOG] No session log entries to export');
+  if (txLogState.entries.length === 0) {
+    debugWarn('[TX LOG] No TX log entries to export');
     return 'Timestamp,Latitude,Longitude,Repeats\n';
   }
   
@@ -3415,7 +3415,7 @@ function sessionLogToCSV() {
   const header = 'Timestamp,Latitude,Longitude,Repeats\n';
   
   // Build CSV rows
-  const rows = sessionLogState.entries.map(entry => {
+  const rows = txLogState.entries.map(entry => {
     let row = `${entry.timestamp},${entry.lat},${entry.lon}`;
     
     // Combine all repeater data into single Repeats column
@@ -3433,7 +3433,7 @@ function sessionLogToCSV() {
   });
   
   const csv = header + rows.join('\n');
-  debugLog(`[TX LOG] CSV export complete: ${sessionLogState.entries.length} entries`);
+  debugLog(`[TX LOG] CSV export complete: ${txLogState.entries.length} entries`);
   return csv;
 }
 
@@ -3494,7 +3494,7 @@ function errorLogToCSV() {
 
 /**
  * Copy log data to clipboard as CSV
- * @param {string} logType - Type of log: 'session', 'rx', or 'error'
+ * @param {string} logType - Type of log: 'tx', 'rx', or 'error'
  * @param {HTMLButtonElement} button - The button element that triggered the copy
  */
 async function copyLogToCSV(logType, button) {
@@ -3505,8 +3505,9 @@ async function copyLogToCSV(logType, button) {
     let logTag;
     
     switch (logType) {
-      case 'session':
-        csv = sessionLogToCSV();
+      case 'tx':
+      case 'session': // Backward compatibility
+        csv = txLogToCSV();
         logTag = '[TX LOG]';
         break;
       case 'rx':
@@ -3665,7 +3666,7 @@ async function getGpsCoordinatesForPing(isAutoMode) {
 
 /**
  * Log ping information to the UI with repeater telemetry
- * Creates a session log entry that will be updated with repeater data
+ * Creates a TX log entry that will be updated with repeater data
  * @param {string} payload - The ping message
  * @param {number} lat - Latitude
  * @param {number} lon - Longitude
@@ -3688,7 +3689,7 @@ function logPingToUI(payload, lat, lon) {
     eventsStr: '...'
   };
   
-  // Add to session log (this will handle both mobile and desktop)
+  // Add to TX log (this will handle both mobile and desktop)
   addLogEntry(logData.timestamp, logData.lat, logData.lon, logData.eventsStr);
   
   return logData;
@@ -3704,8 +3705,8 @@ function updatePingLogWithRepeaters(logData, repeaters) {
   
   const repeaterStr = formatRepeaterTelemetry(repeaters);
   
-  // Find and update the entry in sessionLogState
-  const entryIndex = sessionLogState.entries.findIndex(
+  // Find and update the entry in txLogState
+  const entryIndex = txLogState.entries.findIndex(
     e => e.timestamp === logData.timestamp && e.lat === logData.lat && e.lon === logData.lon
   );
   
@@ -3715,7 +3716,7 @@ function updatePingLogWithRepeaters(logData, repeaters) {
     const updatedEntry = parseLogEntry(logLine);
     
     if (updatedEntry) {
-      sessionLogState.entries[entryIndex] = updatedEntry;
+      txLogState.entries[entryIndex] = updatedEntry;
       renderLogEntries();
       updateLogSummary();
     }
@@ -4589,10 +4590,10 @@ export async function onLoad() {
     });
   });
 
-  // Session Log event listener
+  // TX Log event listener
   if (logSummaryBar) {
     logSummaryBar.addEventListener("click", () => {
-      debugLog("[UI] Log summary bar clicked - toggling session log");
+      debugLog("[UI] Log summary bar clicked - toggling TX log");
       toggleBottomSheet();
     });
   }
@@ -4614,11 +4615,11 @@ export async function onLoad() {
   }
 
   // Copy button event listeners
-  if (sessionLogCopyBtn) {
-    sessionLogCopyBtn.addEventListener("click", (e) => {
+  if (txLogCopyBtn) {
+    txLogCopyBtn.addEventListener("click", (e) => {
       e.stopPropagation(); // Prevent triggering the summary bar toggle
       debugLog("[TX LOG] Copy button clicked");
-      copyLogToCSV('session', sessionLogCopyBtn);
+      copyLogToCSV('tx', txLogCopyBtn);
     });
   }
 
