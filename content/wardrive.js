@@ -2152,7 +2152,7 @@ function startRepeaterTracking(payload, channelIdx) {
   debugLog(`[TX LOG] TX Log tracking activated - unified handler will delegate echoes to TX Log`);
   
   // Note: The unified RX handler (started at connect) will automatically delegate to
-  // handleSessionLogTracking() when isListening = true. No separate handler needed.
+  // handleTxLogTracking() when isListening = true. No separate handler needed.
   // The 7-second timeout to stop listening is managed by the caller (sendPing function)
 }
 
@@ -2163,7 +2163,7 @@ function startRepeaterTracking(payload, channelIdx) {
  * @param {Object} data - The LogRxData event data (contains lastSnr, lastRssi, raw)
  * @returns {boolean} True if packet was an echo and tracked, false otherwise
  */
-async function handleSessionLogTracking(packet, data) {
+async function handleTxLogTracking(packet, data) {
   const originalPayload = state.repeaterTracking.sentPayload;
   const channelIdx = state.repeaterTracking.channelIdx;
   const expectedChannelHash = WARDRIVING_CHANNEL_HASH;
@@ -2365,7 +2365,7 @@ async function handleUnifiedRxLogEvent(data) {
     // TX Log requires header validation (CHANNEL_GROUP_TEXT_HEADER) and will handle validation internally
     if (state.repeaterTracking.isListening) {
       debugLog(`[UNIFIED RX] TX Log is tracking - delegating to TX Log handler`);
-      const wasTracked = await handleSessionLogTracking(packet, data);
+      const wasTracked = await handleTxLogTracking(packet, data);
       
       if (wasTracked) {
         debugLog(`[UNIFIED RX] Packet was an echo and tracked by TX Log`);
@@ -2815,7 +2815,7 @@ function updateLogSummary() {
   if (count === 0) {
     logLastTime.textContent = 'No data';
     logLastSnr.textContent = '—';
-    debugLog('[TX LOG] Session log summary updated: no entries');
+    debugLog('[TX LOG] TX log summary updated: no entries');
     return;
   }
   
@@ -2825,7 +2825,7 @@ function updateLogSummary() {
   
   // Count total heard repeats in the latest ping
   const heardCount = lastEntry.events.length;
-  debugLog(`[TX LOG] Session log summary updated: ${count} total pings, latest ping heard ${heardCount} repeats`);
+  debugLog(`[TX LOG] TX log summary updated: ${count} total pings, latest ping heard ${heardCount} repeats`);
   
   if (heardCount > 0) {
     logLastSnr.textContent = heardCount === 1 ? '1 Repeat' : `${heardCount} Repeats`;
@@ -3506,7 +3506,6 @@ async function copyLogToCSV(logType, button) {
     
     switch (logType) {
       case 'tx':
-      case 'session': // Backward compatibility
         csv = txLogToCSV();
         logTag = '[TX LOG]';
         break;
