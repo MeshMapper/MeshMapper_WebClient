@@ -99,8 +99,10 @@ const RX_BATCH_MIN_WAIT_MS = 2000;     // Min wait to collect burst RX events
 
 // API Batch Queue Configuration
 const API_BATCH_MAX_SIZE = 50;              // Maximum messages per batch POST
-const API_BATCH_FLUSH_INTERVAL_MS = 30000;  // Flush every 30 seconds
-const API_TX_FLUSH_DELAY_MS = 3000;         // Flush 3 seconds after TX ping
+
+// Map Refresh Service Configuration
+const MAP_REFRESH_INTERVAL_MS = 5000;  // Refresh map every 5 seconds
+const MAP_REFRESH_DISTANCE_M = 25;     // Or when user moves 25 meters
 
 // MeshMapper API Configuration
 const MESHMAPPER_API_URL = "https://yow.meshmapper.net/wardriving-api.php";
@@ -141,8 +143,9 @@ const statusEl       = $("status");
 const deviceInfoEl   = $("deviceInfo");
 const channelInfoEl  = $("channelInfo");
 const connectBtn     = $("connectBtn");
-const sendPingBtn    = $("sendPingBtn");
-const autoToggleBtn  = $("autoToggleBtn");
+const txPingBtn      = $("txPingBtn");
+const txRxAutoBtn    = $("txRxAutoBtn");
+const rxAutoBtn      = $("rxAutoBtn");
 const lastPingEl     = $("lastPing");
 const gpsInfoEl = document.getElementById("gpsInfo");
 const gpsAccEl = document.getElementById("gpsAcc");
@@ -217,7 +220,8 @@ const state = {
   connection: null,
   channel: null,
   autoTimerId: null,
-  running: false,
+  txRxAutoRunning: false,    // Renamed from 'running'
+  rxAutoRunning: false,      // NEW
   wakeLock: null,
   geoWatchId: null,
   lastFix: null, // { lat, lon, accM, tsMs }
@@ -257,11 +261,24 @@ const state = {
   rxBatchBuffer: new Map()        // Map<repeaterId, {firstLocation, firstTimestamp, samples, timeoutId}>
 };
 
+// RX Subscription State
+const rxSubscription = {
+  mode: null,              // null | 'txPing' | 'txRxAuto' | 'rxAuto'
+  inEchoWindow: false,     // true during 6s window after TX ping
+  echoWindowTimerId: null, // timer ID for echo window
+};
+
+// Map Refresh Service State
+const mapRefreshService = {
+  timerId: null,              // 5-second interval timer
+  lastRefreshLocation: null,  // { lat, lon } of last refresh
+  isRunning: false,
+};
+
 // API Batch Queue State
 const apiQueue = {
   messages: [],           // Array of pending payloads
-  flushTimerId: null,     // Timer ID for periodic flush (30s)
-  txFlushTimerId: null,   // Timer ID for TX-triggered flush (3s)
+  flushTimerId: null,     // Timer ID for periodic flush (dynamic interval)
   isProcessing: false     // Lock to prevent concurrent flush operations
 };
 
@@ -410,7 +427,7 @@ function createCountdownTimer(getEndTime, getStatusMessage) {
 const autoCountdownTimer = createCountdownTimer(
   () => state.nextAutoPingTime,
   (remainingSec) => {
-    if (!state.running) return null;
+    if (!state.txRxAutoRunning) return null;
     if (remainingSec === 0) {
       return { message: "Sending auto ping", color: STATUS_COLORS.info };
     }
@@ -512,11 +529,11 @@ function resumeAutoCountdown() {
  * @returns {void}
  */
 function handleManualPingBlockedDuringAutoMode() {
-  if (state.running) {
-    debugLog("[AUTO] Manual ping blocked during auto mode - resuming auto countdown");
+  if (state.txRxAutoRunning) {
+    debugLog("[TX/RX AUTO] Manual ping blocked during auto mode - resuming auto countdown");
     const resumed = resumeAutoCountdown();
     if (!resumed) {
-      debugLog("[AUTO] No paused countdown to resume, scheduling new auto ping");
+      debugLog("[TX/RX AUTO] No paused countdown to resume, scheduling new auto ping");
       scheduleNextAutoPing();
     }
   }
@@ -561,9 +578,18 @@ function startCooldown() {
 function updateControlsForCooldown() {
   const connected = !!state.connection;
   const inCooldown = isInCooldown();
-  debugLog(`[UI] updateControlsForCooldown: connected=${connected}, inCooldown=${inCooldown}, pingInProgress=${state.pingInProgress}`);
-  sendPingBtn.disabled = !connected || inCooldown || state.pingInProgress;
-  autoToggleBtn.disabled = !connected || inCooldown || state.pingInProgress;
+  const anyAutoRunning = state.txRxAutoRunning || state.rxAutoRunning;
+  
+  debugLog(`[UI] updateControlsForCooldown: connected=${connected}, inCooldown=${inCooldown}, pingInProgress=${state.pingInProgress}, anyAutoRunning=${anyAutoRunning}`);
+  
+  // TX Ping button disabled when not connected, in cooldown, or ping in progress
+  txPingBtn.disabled = !connected || inCooldown || state.pingInProgress;
+  
+  // TX/RX Auto button disabled when not connected, in cooldown, ping in progress, or RX Auto is running
+  txRxAutoBtn.disabled = !connected || inCooldown || state.pingInProgress || state.rxAutoRunning;
+  
+  // RX Auto button disabled when not connected, in cooldown, ping in progress, or TX/RX Auto is running
+  rxAutoBtn.disabled = !connected || inCooldown || state.pingInProgress || state.txRxAutoRunning;
 }
 
 /**
@@ -632,6 +658,69 @@ function cleanupAllTimers() {
   }
 }
 
+// ---- RX Subscription Management ----
+/**
+ * Subscribe a mode to receive RX events
+ * @param {string} mode - 'txPing' | 'txRxAuto' | 'rxAuto'
+ */
+function subscribeToRx(mode) {
+  debugLog(`[UNIFIED RX] Subscribing to RX events: mode=${mode}`);
+  
+  // Unsubscribe any existing mode first
+  unsubscribeFromRx();
+  
+  // Set the new subscription mode
+  rxSubscription.mode = mode;
+  
+  debugLog(`[UNIFIED RX] RX subscription active: mode=${mode}`);
+}
+
+/**
+ * Unsubscribe from RX events
+ */
+function unsubscribeFromRx() {
+  if (rxSubscription.mode) {
+    debugLog(`[UNIFIED RX] Unsubscribing from RX events: mode=${rxSubscription.mode}`);
+  }
+  
+  // Clear subscription state
+  rxSubscription.mode = null;
+  stopEchoWindow();
+}
+
+/**
+ * Start the 6-second echo window for TX ping tracking
+ */
+function startEchoWindow() {
+  debugLog(`[UNIFIED RX] Starting 6s echo window`);
+  
+  rxSubscription.inEchoWindow = true;
+  
+  // Clear any existing timer
+  if (rxSubscription.echoWindowTimerId) {
+    clearTimeout(rxSubscription.echoWindowTimerId);
+  }
+  
+  // Set a 6-second timer
+  rxSubscription.echoWindowTimerId = setTimeout(() => {
+    debugLog(`[UNIFIED RX] Echo window expired`);
+    rxSubscription.inEchoWindow = false;
+    rxSubscription.echoWindowTimerId = null;
+  }, 6000);
+}
+
+/**
+ * Stop the echo window
+ */
+function stopEchoWindow() {
+  if (rxSubscription.echoWindowTimerId) {
+    debugLog(`[UNIFIED RX] Stopping echo window`);
+    clearTimeout(rxSubscription.echoWindowTimerId);
+    rxSubscription.echoWindowTimerId = null;
+  }
+  rxSubscription.inEchoWindow = false;
+}
+
 function enableControls(connected) {
   connectBtn.disabled     = false;
   channelInfoEl.textContent = CHANNEL_NAME;
@@ -642,16 +731,91 @@ function enableControls(connected) {
   // No need to show/hide the controls anymore
 }
 function updateAutoButton() {
-  if (state.running) {
-    autoToggleBtn.textContent = "Stop Auto Ping";
-    autoToggleBtn.classList.remove("bg-indigo-600","hover:bg-indigo-500");
-    autoToggleBtn.classList.add("bg-amber-600","hover:bg-amber-500");
+  // Update TX/RX Auto button
+  if (state.txRxAutoRunning) {
+    txRxAutoBtn.textContent = "Stop TX/RX";
+    txRxAutoBtn.classList.remove("bg-indigo-600","hover:bg-indigo-500");
+    txRxAutoBtn.classList.add("bg-amber-600","hover:bg-amber-500");
   } else {
-    autoToggleBtn.textContent = "Start Auto Ping";
-    autoToggleBtn.classList.add("bg-indigo-600","hover:bg-indigo-500");
-    autoToggleBtn.classList.remove("bg-amber-600","hover:bg-amber-500");
+    txRxAutoBtn.textContent = "TX/RX Auto";
+    txRxAutoBtn.classList.add("bg-indigo-600","hover:bg-indigo-500");
+    txRxAutoBtn.classList.remove("bg-amber-600","hover:bg-amber-500");
+  }
+  
+  // Update RX Auto button
+  if (state.rxAutoRunning) {
+    rxAutoBtn.textContent = "Stop RX";
+    rxAutoBtn.classList.remove("bg-indigo-600","hover:bg-indigo-500");
+    rxAutoBtn.classList.add("bg-amber-600","hover:bg-amber-500");
+  } else {
+    rxAutoBtn.textContent = "RX Auto";
+    rxAutoBtn.classList.add("bg-indigo-600","hover:bg-indigo-500");
+    rxAutoBtn.classList.remove("bg-amber-600","hover:bg-amber-500");
   }
 }
+
+/**
+ * Disable interval and power controls during auto mode
+ */
+function disableIntervalAndPowerControls() {
+  debugLog("[UI] Disabling interval and power controls (auto mode active)");
+  
+  // Get all interval radio buttons
+  const intervalRadios = document.querySelectorAll('input[name="interval"]');
+  intervalRadios.forEach(radio => {
+    radio.disabled = true;
+    // Find parent label and apply visual feedback
+    const label = radio.closest('label');
+    if (label) {
+      label.style.opacity = '0.4';
+      label.style.cursor = 'not-allowed';
+    }
+  });
+  
+  // Get all power radio buttons
+  const powerRadios = document.querySelectorAll('input[name="power"]');
+  powerRadios.forEach(radio => {
+    radio.disabled = true;
+    // Find parent label and apply visual feedback
+    const label = radio.closest('label');
+    if (label) {
+      label.style.opacity = '0.4';
+      label.style.cursor = 'not-allowed';
+    }
+  });
+}
+
+/**
+ * Enable interval and power controls when auto mode stops
+ */
+function enableIntervalAndPowerControls() {
+  debugLog("[UI] Enabling interval and power controls (auto mode stopped)");
+  
+  // Get all interval radio buttons
+  const intervalRadios = document.querySelectorAll('input[name="interval"]');
+  intervalRadios.forEach(radio => {
+    radio.disabled = false;
+    // Find parent label and restore visual feedback
+    const label = radio.closest('label');
+    if (label) {
+      label.style.opacity = '';
+      label.style.cursor = 'pointer';
+    }
+  });
+  
+  // Get all power radio buttons
+  const powerRadios = document.querySelectorAll('input[name="power"]');
+  powerRadios.forEach(radio => {
+    radio.disabled = false;
+    // Find parent label and restore visual feedback
+    const label = radio.closest('label');
+    if (label) {
+      label.style.opacity = '';
+      label.style.cursor = 'pointer';
+    }
+  });
+}
+
 function buildCoverageEmbedUrl(lat, lon) {
   const base =
     "https://yow.meshmapper.net/embed.php?cov_grid=1&fail_grid=1&pings=0&repeaters=1&rep_coverage=0&grid_lines=0&dir=1&meters=1500";
@@ -1499,18 +1663,18 @@ async function postApiAndRefreshMap(lat, lon, accuracy, heardRepeats) {
     
     // Update status based on current mode
     if (state.connection) {
-      if (state.running) {
+      if (state.txRxAutoRunning) {
         // Check if we should resume a paused auto countdown (manual ping during auto mode)
         const resumed = resumeAutoCountdown();
         if (!resumed) {
           // No paused timer to resume, schedule new auto ping (this was an auto ping)
-          debugLog("[AUTO] Scheduling next auto ping");
+          debugLog("[TX/RX AUTO] Scheduling next auto ping");
           scheduleNextAutoPing();
         } else {
-          debugLog("[AUTO] Resumed auto countdown after manual ping");
+          debugLog("[TX/RX AUTO] Resumed auto countdown after manual ping");
         }
       } else {
-        debugLog("[AUTO] Setting dynamic status to show queue size");
+        debugLog("[TX/RX AUTO] Setting dynamic status to show queue size");
         // Status already set by queueApiMessage()
       }
     }
@@ -1702,7 +1866,7 @@ async function flushApiQueue() {
     } else {
       debugLog(`[API QUEUE] Batch post successful: ${txCount} TX, ${rxCount} RX`);
       // Clear status after successful post
-      if (state.connection && !state.running) {
+      if (state.connection && !state.txRxAutoRunning) {
         setDynamicStatus("Idle");
       }
     }
@@ -1885,7 +2049,7 @@ function startRepeaterTracking(payload, channelIdx) {
   state.repeaterTracking.channelIdx = channelIdx;
   state.repeaterTracking.repeaters.clear();
   
-  debugLog(`[SESSION LOG] Session Log tracking activated - unified handler will delegate echoes to Session Log`);
+  debugLog(`[TX LOG] Session Log tracking activated - unified handler will delegate echoes to Session Log`);
   
   // Note: The unified RX handler (started at connect) will automatically delegate to
   // handleSessionLogTracking() when isListening = true. No separate handler needed.
@@ -1904,33 +2068,33 @@ async function handleSessionLogTracking(packet, data) {
   const channelIdx = state.repeaterTracking.channelIdx;
   const expectedChannelHash = WARDRIVING_CHANNEL_HASH;
   try {
-    debugLog(`[SESSION LOG] Processing rx_log entry: SNR=${data.lastSnr}, RSSI=${data.lastRssi}`);
+    debugLog(`[TX LOG] Processing rx_log entry: SNR=${data.lastSnr}, RSSI=${data.lastRssi}`);
     
     // VALIDATION STEP 1: Header validation for echo detection
     // Only GroupText packets (CHANNEL_GROUP_TEXT_HEADER) can be echoes of our channel messages
     if (packet.header !== CHANNEL_GROUP_TEXT_HEADER) {
-      debugLog(`[SESSION LOG] Ignoring: header validation failed (header=0x${packet.header.toString(16).padStart(2, '0')})`);
+      debugLog(`[TX LOG] Ignoring: header validation failed (header=0x${packet.header.toString(16).padStart(2, '0')})`);
       return false;
     }
     
-    debugLog(`[SESSION LOG] Header validation passed: 0x${packet.header.toString(16).padStart(2, '0')}`);
+    debugLog(`[TX LOG] Header validation passed: 0x${packet.header.toString(16).padStart(2, '0')}`);
     
     // VALIDATION STEP 2: Validate this message is for our channel by comparing channel hash
     // Channel message payload structure: [1 byte channel_hash][2 bytes MAC][encrypted message]
     if (packet.payload.length < 3) {
-      debugLog(`[SESSION LOG] Ignoring: payload too short to contain channel hash`);
+      debugLog(`[TX LOG] Ignoring: payload too short to contain channel hash`);
       return false;
     }
     
     const packetChannelHash = packet.payload[0];
-    debugLog(`[SESSION LOG] Message correlation check: packet_channel_hash=0x${packetChannelHash.toString(16).padStart(2, '0')}, expected=0x${expectedChannelHash.toString(16).padStart(2, '0')}`);
+    debugLog(`[TX LOG] Message correlation check: packet_channel_hash=0x${packetChannelHash.toString(16).padStart(2, '0')}, expected=0x${expectedChannelHash.toString(16).padStart(2, '0')}`);
     
     if (packetChannelHash !== expectedChannelHash) {
-      debugLog(`[SESSION LOG] Ignoring: channel hash mismatch (packet=0x${packetChannelHash.toString(16).padStart(2, '0')}, expected=0x${expectedChannelHash.toString(16).padStart(2, '0')})`);
+      debugLog(`[TX LOG] Ignoring: channel hash mismatch (packet=0x${packetChannelHash.toString(16).padStart(2, '0')}, expected=0x${expectedChannelHash.toString(16).padStart(2, '0')})`);
       return false;
     }
     
-    debugLog(`[SESSION LOG] Channel hash match confirmed - this is a message on our channel`);
+    debugLog(`[TX LOG] Channel hash match confirmed - this is a message on our channel`);
     
     // VALIDATION STEP 3: Decrypt and verify message content matches what we sent
     // This ensures we're tracking echoes of OUR specific ping, not other messages on the channel
@@ -1974,7 +2138,7 @@ async function handleSessionLogTracking(packet, data) {
     // For channel messages, the path contains repeater hops
     // Each hop in the path is 1 byte (repeater ID)
     if (packet.path.length === 0) {
-      debugLog(`[SESSION LOG] Ignoring: no path (direct transmission, not a repeater echo)`);
+      debugLog(`[TX LOG] Ignoring: no path (direct transmission, not a repeater echo)`);
       return false;
     }
     
@@ -2020,11 +2184,11 @@ async function handleSessionLogTracking(packet, data) {
     }
     
     // Successfully tracked this echo
-    debugLog(`[SESSION LOG] ✅ Echo tracked successfully`);
+    debugLog(`[TX LOG] ✅ Echo tracked successfully`);
     return true;
     
   } catch (error) {
-    debugError(`[SESSION LOG] Error processing rx_log entry: ${error.message}`, error);
+    debugError(`[TX LOG] Error processing rx_log entry: ${error.message}`, error);
     return false;
   }
 }
@@ -2551,7 +2715,7 @@ function updateLogSummary() {
   if (count === 0) {
     logLastTime.textContent = 'No data';
     logLastSnr.textContent = '—';
-    debugLog('[SESSION LOG] Session log summary updated: no entries');
+    debugLog('[TX LOG] Session log summary updated: no entries');
     return;
   }
   
@@ -2561,7 +2725,7 @@ function updateLogSummary() {
   
   // Count total heard repeats in the latest ping
   const heardCount = lastEntry.events.length;
-  debugLog(`[SESSION LOG] Session log summary updated: ${count} total pings, latest ping heard ${heardCount} repeats`);
+  debugLog(`[TX LOG] Session log summary updated: ${count} total pings, latest ping heard ${heardCount} repeats`);
   
   if (heardCount > 0) {
     logLastSnr.textContent = heardCount === 1 ? '1 Repeat' : `${heardCount} Repeats`;
@@ -2640,12 +2804,12 @@ function toggleBottomSheet() {
     // Hide status elements, show copy button
     if (logLastSnr) logLastSnr.classList.add('hidden');
     if (sessionLogCopyBtn) sessionLogCopyBtn.classList.remove('hidden');
-    debugLog('[SESSION LOG] Expanded - showing copy button, hiding status');
+    debugLog('[TX LOG] Expanded - showing copy button, hiding status');
   } else {
     // Show status elements, hide copy button
     if (logLastSnr) logLastSnr.classList.remove('hidden');
     if (sessionLogCopyBtn) sessionLogCopyBtn.classList.add('hidden');
-    debugLog('[SESSION LOG] Collapsed - hiding copy button, showing status');
+    debugLog('[TX LOG] Collapsed - hiding copy button, showing status');
   }
 }
 
@@ -3120,10 +3284,10 @@ function addErrorLogEntry(message, source = null) {
  * @returns {string} CSV formatted string
  */
 function sessionLogToCSV() {
-  debugLog('[SESSION LOG] Converting session log to CSV format');
+  debugLog('[TX LOG] Converting session log to CSV format');
   
   if (sessionLogState.entries.length === 0) {
-    debugWarn('[SESSION LOG] No session log entries to export');
+    debugWarn('[TX LOG] No session log entries to export');
     return 'Timestamp,Latitude,Longitude,Repeats\n';
   }
   
@@ -3149,7 +3313,7 @@ function sessionLogToCSV() {
   });
   
   const csv = header + rows.join('\n');
-  debugLog(`[SESSION LOG] CSV export complete: ${sessionLogState.entries.length} entries`);
+  debugLog(`[TX LOG] CSV export complete: ${sessionLogState.entries.length} entries`);
   return csv;
 }
 
@@ -3223,7 +3387,7 @@ async function copyLogToCSV(logType, button) {
     switch (logType) {
       case 'session':
         csv = sessionLogToCSV();
-        logTag = '[SESSION LOG]';
+        logTag = '[TX LOG]';
         break;
       case 'rx':
         csv = rxLogToCSV();
@@ -3300,7 +3464,7 @@ async function getGpsCoordinatesForPing(isAutoMode) {
   if (isAutoMode) {
     // Auto mode: validate GPS freshness before sending
     if (!state.lastFix) {
-      debugWarn("[AUTO] Auto ping skipped: no GPS fix available yet");
+      debugWarn("[TX/RX AUTO] Auto ping skipped: no GPS fix available yet");
       setDynamicStatus("Waiting for GPS fix", STATUS_COLORS.warning);
       return null;
     }
@@ -3483,12 +3647,12 @@ async function sendPing(manual = false) {
     }
 
     // Handle countdown timers based on ping type
-    if (manual && state.running) {
+    if (manual && state.txRxAutoRunning) {
       // Manual ping during auto mode: pause the auto countdown
       debugLog("[PING] Manual ping during auto mode - pausing auto countdown");
       pauseAutoCountdown();
       setDynamicStatus("Sending manual ping", STATUS_COLORS.info);
-    } else if (!manual && state.running) {
+    } else if (!manual && state.txRxAutoRunning) {
       // Auto ping: stop the countdown timer to avoid status conflicts
       stopAutoCountdown();
       setDynamicStatus("Sending auto ping", STATUS_COLORS.info);
@@ -3498,11 +3662,11 @@ async function sendPing(manual = false) {
     }
 
     // Get GPS coordinates
-    const coords = await getGpsCoordinatesForPing(!manual && state.running);
+    const coords = await getGpsCoordinatesForPing(!manual && state.txRxAutoRunning);
     if (!coords) {
       // GPS not available, message already shown
       // For auto mode, schedule next attempt
-      if (!manual && state.running) {
+      if (!manual && state.txRxAutoRunning) {
         scheduleNextAutoPing();
       }
       // For manual ping during auto mode, resume the paused countdown
@@ -3527,7 +3691,7 @@ async function sendPing(manual = false) {
         setDynamicStatus("Ping skipped, outside of geofenced region", STATUS_COLORS.warning);
         // If auto mode is running, resume the paused countdown
         handleManualPingBlockedDuringAutoMode();
-      } else if (state.running) {
+      } else if (state.txRxAutoRunning) {
         // Auto ping: schedule next ping and show countdown with skip message
         scheduleNextAutoPing();
       }
@@ -3549,7 +3713,7 @@ async function sendPing(manual = false) {
         setDynamicStatus("Ping skipped, too close to last ping", STATUS_COLORS.warning);
         // If auto mode is running, resume the paused countdown
         handleManualPingBlockedDuringAutoMode();
-      } else if (state.running) {
+      } else if (state.txRxAutoRunning) {
         // Auto ping: schedule next ping and show countdown with skip message
         scheduleNextAutoPing();
       }
@@ -3633,15 +3797,15 @@ async function sendPing(manual = false) {
       // Update status and start next timer IMMEDIATELY (before API post)
       // This is the key change: we don't wait for API to complete
       if (state.connection) {
-        if (state.running) {
+        if (state.txRxAutoRunning) {
           // Check if we should resume a paused auto countdown (manual ping during auto mode)
           const resumed = resumeAutoCountdown();
           if (!resumed) {
             // No paused timer to resume, schedule new auto ping (this was an auto ping)
-            debugLog("[AUTO] Scheduling next auto ping immediately after RX window");
+            debugLog("[TX/RX AUTO] Scheduling next auto ping immediately after RX window");
             scheduleNextAutoPing();
           } else {
-            debugLog("[AUTO] Resumed auto countdown after manual ping");
+            debugLog("[TX/RX AUTO] Resumed auto countdown after manual ping");
           }
         } else {
           debugLog("[UI] Setting dynamic status to Idle (manual mode)");
@@ -3686,18 +3850,18 @@ async function sendPing(manual = false) {
 }
 
 // ---- Auto mode ----
-function stopAutoPing(stopGps = false) {
-  debugLog(`[AUTO] stopAutoPing called (stopGps=${stopGps})`);
+function stopTxRxAuto(stopGps = false) {
+  debugLog(`[TX/RX AUTO] stopAutoPing called (stopGps=${stopGps})`);
   // Check if we're in cooldown before stopping (unless stopGps is true for disconnect)
   if (!stopGps && isInCooldown()) {
     const remainingSec = getRemainingCooldownSeconds();
-    debugLog(`[AUTO] Auto ping stop blocked by cooldown (${remainingSec}s remaining)`);
+    debugLog(`[TX/RX AUTO] Auto ping stop blocked by cooldown (${remainingSec}s remaining)`);
     setDynamicStatus(`Wait ${remainingSec}s before toggling auto mode`, STATUS_COLORS.warning);
     return;
   }
   
   if (state.autoTimerId) {
-    debugLog("[AUTO] Clearing auto ping timer");
+    debugLog("[TX/RX AUTO] Clearing auto ping timer");
     clearTimeout(state.autoTimerId);
     state.autoTimerId = null;
   }
@@ -3712,38 +3876,39 @@ function stopAutoPing(stopGps = false) {
     stopGeoWatch();
   }
   
-  state.running = false;
+  state.txRxAutoRunning = false;
   updateAutoButton();
   releaseWakeLock();
-  debugLog("[AUTO] Auto ping stopped");
+  enableIntervalAndPowerControls();
+  debugLog("[TX/RX AUTO] Auto ping stopped");
 }
 function scheduleNextAutoPing() {
-  if (!state.running) {
-    debugLog("[AUTO] Not scheduling next auto ping - auto mode not running");
+  if (!state.txRxAutoRunning) {
+    debugLog("[TX/RX AUTO] Not scheduling next auto ping - auto mode not running");
     return;
   }
   
   const intervalMs = getSelectedIntervalMs();
-  debugLog(`[AUTO] Scheduling next auto ping in ${intervalMs}ms`);
+  debugLog(`[TX/RX AUTO] Scheduling next auto ping in ${intervalMs}ms`);
   
   // Start countdown immediately (skipReason may be set if ping was skipped)
   startAutoCountdown(intervalMs);
   
   // Schedule the next ping
   state.autoTimerId = setTimeout(() => {
-    if (state.running) {
+    if (state.txRxAutoRunning) {
       // Clear skip reason before next attempt
       state.skipReason = null;
-      debugLog("[AUTO] Auto ping timer fired, sending ping");
+      debugLog("[TX/RX AUTO] Auto ping timer fired, sending ping");
       sendPing(false).catch(console.error);
     }
   }, intervalMs);
 }
 
-function startAutoPing() {
-  debugLog("[AUTO] startAutoPing called");
+function startTxRxAuto() {
+  debugLog("[TX/RX AUTO] startAutoPing called");
   if (!state.connection) {
-    debugError("[AUTO] Cannot start auto ping - not connected");
+    debugError("[TX/RX AUTO] Cannot start auto ping - not connected");
     alert("Connect to a MeshCore device first.");
     return;
   }
@@ -3751,14 +3916,14 @@ function startAutoPing() {
   // Check if we're in cooldown
   if (isInCooldown()) {
     const remainingSec = getRemainingCooldownSeconds();
-    debugLog(`[AUTO] Auto ping start blocked by cooldown (${remainingSec}s remaining)`);
+    debugLog(`[TX/RX AUTO] Auto ping start blocked by cooldown (${remainingSec}s remaining)`);
     setDynamicStatus(`Wait ${remainingSec}s before toggling auto mode`, STATUS_COLORS.warning);
     return;
   }
   
   // Clean up any existing auto-ping timer (but keep GPS watch running)
   if (state.autoTimerId) {
-    debugLog("[AUTO] Clearing existing auto ping timer");
+    debugLog("[TX/RX AUTO] Clearing existing auto ping timer");
     clearTimeout(state.autoTimerId);
     state.autoTimerId = null;
   }
@@ -3768,19 +3933,86 @@ function startAutoPing() {
   state.skipReason = null;
   
   // Start GPS watch for continuous updates
-  debugLog("[AUTO] Starting GPS watch for auto mode");
+  debugLog("[TX/RX AUTO] Starting GPS watch for auto mode");
   startGeoWatch();
   
-  state.running = true;
+  state.txRxAutoRunning = true;
   updateAutoButton();
+  disableIntervalAndPowerControls();
 
   // Acquire wake lock for auto mode
-  debugLog("[AUTO] Acquiring wake lock for auto mode");
+  debugLog("[TX/RX AUTO] Acquiring wake lock for auto mode");
   acquireWakeLock().catch(console.error);
 
   // Send first ping immediately
-  debugLog("[AUTO] Sending initial auto ping");
+  debugLog("[TX/RX AUTO] Sending initial auto ping");
   sendPing(false).catch(console.error);
+}
+
+// ---- RX Auto Mode ----
+function stopRxAuto(stopGps = false) {
+  debugLog(`[RX AUTO] stopRxAuto called (stopGps=${stopGps})`);
+  
+  // Check if we're in cooldown before stopping (unless stopGps is true for disconnect)
+  if (!stopGps && isInCooldown()) {
+    const remainingSec = getRemainingCooldownSeconds();
+    debugLog(`[RX AUTO] RX Auto stop blocked by cooldown (${remainingSec}s remaining)`);
+    setDynamicStatus(`Wait ${remainingSec}s before toggling auto mode`, STATUS_COLORS.warning);
+    return;
+  }
+  
+  // Unsubscribe from RX events
+  unsubscribeFromRx();
+  
+  // Clear skip reason
+  state.skipReason = null;
+  
+  // Only stop GPS watch when disconnecting or page hidden, not during normal stop
+  if (stopGps) {
+    stopGeoWatch();
+  }
+  
+  state.rxAutoRunning = false;
+  updateAutoButton();
+  releaseWakeLock();
+  enableIntervalAndPowerControls();
+  debugLog("[RX AUTO] RX Auto stopped");
+}
+
+function startRxAuto() {
+  debugLog("[RX AUTO] startRxAuto called");
+  if (!state.connection) {
+    debugError("[RX AUTO] Cannot start RX Auto - not connected");
+    alert("Connect to a MeshCore device first.");
+    return;
+  }
+  
+  // Check if we're in cooldown
+  if (isInCooldown()) {
+    const remainingSec = getRemainingCooldownSeconds();
+    debugLog(`[RX AUTO] RX Auto start blocked by cooldown (${remainingSec}s remaining)`);
+    setDynamicStatus(`Wait ${remainingSec}s before toggling auto mode`, STATUS_COLORS.warning);
+    return;
+  }
+  
+  // Start GPS watch for continuous updates
+  debugLog("[RX AUTO] Starting GPS watch for RX Auto mode");
+  startGeoWatch();
+  
+  state.rxAutoRunning = true;
+  updateAutoButton();
+  disableIntervalAndPowerControls();
+  
+  // Acquire wake lock for RX Auto mode
+  debugLog("[RX AUTO] Acquiring wake lock for RX Auto mode");
+  acquireWakeLock().catch(console.error);
+  
+  // Subscribe to RX events in rxAuto mode
+  subscribeToRx('rxAuto');
+  
+  // Set status
+  setDynamicStatus("RX Auto running", STATUS_COLORS.success);
+  debugLog("[RX AUTO] RX Auto started");
 }
 
 // ---- BLE connect / disconnect ----
@@ -3942,7 +4174,7 @@ async function connect() {
       state.disconnectReason = null; // Reset disconnect reason
       state.channelSetupErrorMessage = null; // Clear error message
       state.bleDisconnectErrorMessage = null; // Clear error message
-      stopAutoPing(true); // Ignore cooldown check on disconnect
+      stopTxRxAuto(true); // Ignore cooldown check on disconnect
       enableControls(false);
       updateAutoButton();
       stopGeoWatch();
@@ -4058,10 +4290,14 @@ async function disconnect() {
 document.addEventListener("visibilitychange", async () => {
   if (document.hidden) {
     debugLog("[UI] Page visibility changed to hidden");
-    if (state.running) {
-      debugLog("[UI] Stopping auto ping due to page hidden");
-      stopAutoPing(true); // Ignore cooldown check when page is hidden
-      setDynamicStatus("Lost focus, auto mode stopped", STATUS_COLORS.warning);
+    if (state.txRxAutoRunning) {
+      debugLog("[UI] Stopping TX/RX Auto due to page hidden");
+      stopTxRxAuto(true); // Ignore cooldown check when page is hidden
+      setDynamicStatus("Lost focus, TX/RX Auto mode stopped", STATUS_COLORS.warning);
+    } else if (state.rxAutoRunning) {
+      debugLog("[UI] Stopping RX Auto due to page hidden");
+      stopRxAuto(true); // Ignore cooldown check when page is hidden
+      setDynamicStatus("Lost focus, RX Auto mode stopped", STATUS_COLORS.warning);
     } else {
       debugLog("[UI] Releasing wake lock due to page hidden");
       releaseWakeLock();
@@ -4116,17 +4352,26 @@ export async function onLoad() {
       setDynamicStatus(e.message || "Connection failed", STATUS_COLORS.error);
     }
   });
-  sendPingBtn.addEventListener("click", () => {
-    debugLog("[UI] Manual ping button clicked");
+  txPingBtn.addEventListener("click", () => {
+    debugLog("[UI] TX Ping button clicked");
     sendPing(true).catch(console.error);
   });
-  autoToggleBtn.addEventListener("click", () => {
-    debugLog("[UI] Auto toggle button clicked");
-    if (state.running) {
-      stopAutoPing();
-      setDynamicStatus("Auto mode stopped", STATUS_COLORS.idle);
+  txRxAutoBtn.addEventListener("click", () => {
+    debugLog("[UI] TX/RX Auto toggle button clicked");
+    if (state.txRxAutoRunning) {
+      stopTxRxAuto();
+      setDynamicStatus("TX/RX Auto mode stopped", STATUS_COLORS.idle);
     } else {
-      startAutoPing();
+      startTxRxAuto();
+    }
+  });
+  rxAutoBtn.addEventListener("click", () => {
+    debugLog("[UI] RX Auto toggle button clicked");
+    if (state.rxAutoRunning) {
+      stopRxAuto();
+      setDynamicStatus("RX Auto mode stopped", STATUS_COLORS.idle);
+    } else {
+      startRxAuto();
     }
   });
 
@@ -4202,7 +4447,7 @@ export async function onLoad() {
   if (sessionLogCopyBtn) {
     sessionLogCopyBtn.addEventListener("click", (e) => {
       e.stopPropagation(); // Prevent triggering the summary bar toggle
-      debugLog("[SESSION LOG] Copy button clicked");
+      debugLog("[TX LOG] Copy button clicked");
       copyLogToCSV('session', sessionLogCopyBtn);
     });
   }
