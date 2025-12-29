@@ -833,6 +833,127 @@ function scheduleCoverageRefresh(lat, lon, delayMs = 0) {
     coverageFrameEl.src = url;
   }, delayMs);
 }
+
+// ---- Map Refresh Service ----
+/**
+ * Refresh the coverage map with current GPS location
+ * Called by map refresh service on time/distance triggers
+ */
+function refreshCoverageMap() {
+  if (!state.lastFix) {
+    debugLog("[MAP] No GPS fix available for map refresh");
+    return;
+  }
+  
+  const { lat, lon } = state.lastFix;
+  debugLog(`[MAP] Refreshing coverage map: lat=${lat.toFixed(5)}, lon=${lon.toFixed(5)}`);
+  
+  const url = buildCoverageEmbedUrl(lat, lon);
+  if (coverageFrameEl) {
+    coverageFrameEl.src = url;
+  }
+}
+
+/**
+ * Check if map should refresh based on trigger type
+ * @param {string} trigger - 'timer' | 'gps'
+ */
+function checkAndRefreshMap(trigger) {
+  if (!mapRefreshService.isRunning) {
+    debugLog(`[MAP] Map refresh service not running, skipping refresh (trigger=${trigger})`);
+    return;
+  }
+  
+  if (!state.lastFix) {
+    debugLog(`[MAP] No GPS fix available, skipping refresh (trigger=${trigger})`);
+    return;
+  }
+  
+  const { lat, lon } = state.lastFix;
+  
+  // For timer trigger, always refresh
+  if (trigger === 'timer') {
+    debugLog(`[MAP] Timer trigger - refreshing map`);
+    refreshCoverageMap();
+    mapRefreshService.lastRefreshLocation = { lat, lon };
+    return;
+  }
+  
+  // For GPS trigger, check distance
+  if (trigger === 'gps' && mapRefreshService.lastRefreshLocation) {
+    const distance = haversineDistance(
+      mapRefreshService.lastRefreshLocation.lat,
+      mapRefreshService.lastRefreshLocation.lon,
+      lat,
+      lon
+    );
+    
+    if (distance >= MAP_REFRESH_DISTANCE_M) {
+      debugLog(`[MAP] GPS distance trigger (${distance.toFixed(1)}m >= ${MAP_REFRESH_DISTANCE_M}m) - refreshing map`);
+      refreshCoverageMap();
+      mapRefreshService.lastRefreshLocation = { lat, lon };
+    } else {
+      debugLog(`[MAP] GPS distance ${distance.toFixed(1)}m < ${MAP_REFRESH_DISTANCE_M}m, skipping refresh`);
+    }
+  } else if (trigger === 'gps') {
+    // First GPS update, set location and refresh
+    debugLog(`[MAP] First GPS update - refreshing map`);
+    refreshCoverageMap();
+    mapRefreshService.lastRefreshLocation = { lat, lon };
+  }
+}
+
+/**
+ * Called from GPS watch when position updates
+ * Triggers map refresh if user moved 25m from last refresh
+ */
+function onGpsPositionUpdateForMap() {
+  checkAndRefreshMap('gps');
+}
+
+/**
+ * Start the background map refresh service
+ * Refreshes map every 5s or when user moves 25m
+ */
+function startMapRefreshService() {
+  if (mapRefreshService.isRunning) {
+    debugLog("[MAP] Map refresh service already running");
+    return;
+  }
+  
+  debugLog("[MAP] Starting map refresh service (5s interval, 25m movement)");
+  mapRefreshService.isRunning = true;
+  mapRefreshService.lastRefreshLocation = null;
+  
+  // Start 5-second interval timer
+  mapRefreshService.timerId = setInterval(() => {
+    checkAndRefreshMap('timer');
+  }, MAP_REFRESH_INTERVAL_MS);
+  
+  // Do initial refresh
+  checkAndRefreshMap('timer');
+}
+
+/**
+ * Stop the background map refresh service
+ */
+function stopMapRefreshService() {
+  if (!mapRefreshService.isRunning) {
+    debugLog("[MAP] Map refresh service not running");
+    return;
+  }
+  
+  debugLog("[MAP] Stopping map refresh service");
+  
+  if (mapRefreshService.timerId) {
+    clearInterval(mapRefreshService.timerId);
+    mapRefreshService.timerId = null;
+  }
+  
+  mapRefreshService.isRunning = false;
+  mapRefreshService.lastRefreshLocation = null;
+}
+
 function setConnectButton(connected) {
   if (!connectBtn) return;
   if (connected) {
@@ -1157,6 +1278,7 @@ function startGeoWatch() {
       state.gpsState = "acquired";
       updateGpsUi();
       updateDistanceUi(); // Update distance when GPS position changes
+      onGpsPositionUpdateForMap(); // Trigger map refresh if distance threshold met
     },
     (err) => {
       debugError(`[GPS] GPS watch error: ${err.code} - ${err.message}`);
@@ -1705,11 +1827,6 @@ function queueApiMessage(payload, wardriveType) {
     startFlushTimer();
   }
   
-  // If TX type: start/reset 3-second flush timer
-  if (wardriveType === "TX") {
-    scheduleTxFlush();
-  }
-  
   // If queue reaches max size: flush immediately
   if (apiQueue.messages.length >= API_BATCH_MAX_SIZE) {
     debugLog(`[API QUEUE] Queue reached max size (${API_BATCH_MAX_SIZE}), flushing immediately`);
@@ -1720,30 +1837,12 @@ function queueApiMessage(payload, wardriveType) {
 }
 
 /**
- * Schedule flush 3 seconds after TX ping
- * Resets timer if called again (coalesces rapid TX pings)
- */
-function scheduleTxFlush() {
-  debugLog(`[API QUEUE] Scheduling TX flush in ${API_TX_FLUSH_DELAY_MS}ms`);
-  
-  // Clear existing TX flush timer if present
-  if (apiQueue.txFlushTimerId) {
-    clearTimeout(apiQueue.txFlushTimerId);
-    debugLog(`[API QUEUE] Cleared previous TX flush timer`);
-  }
-  
-  // Schedule new TX flush
-  apiQueue.txFlushTimerId = setTimeout(() => {
-    debugLog(`[API QUEUE] TX flush timer fired`);
-    flushApiQueue();
-  }, API_TX_FLUSH_DELAY_MS);
-}
-
-/**
- * Start the 30-second periodic flush timer
+ * Start the periodic flush timer with dynamic interval
+ * Uses war-drive interval (15s/30s/60s) from user settings
  */
 function startFlushTimer() {
-  debugLog(`[API QUEUE] Starting periodic flush timer (${API_BATCH_FLUSH_INTERVAL_MS}ms)`);
+  const intervalMs = getSelectedIntervalMs();
+  debugLog(`[API QUEUE] Starting periodic flush timer (${intervalMs}ms - dynamic from war-drive interval)`);
   
   // Clear existing timer if present
   if (apiQueue.flushTimerId) {
@@ -1756,26 +1855,27 @@ function startFlushTimer() {
       debugLog(`[API QUEUE] Periodic flush timer fired, flushing ${apiQueue.messages.length} messages`);
       flushApiQueue();
     }
-  }, API_BATCH_FLUSH_INTERVAL_MS);
+  }, intervalMs);
 }
 
 /**
- * Stop all flush timers (periodic and TX)
+ * Stop the periodic flush timer
  */
-function stopFlushTimers() {
-  debugLog(`[API QUEUE] Stopping all flush timers`);
+function stopFlushTimer() {
+  debugLog(`[API QUEUE] Stopping flush timer`);
   
   if (apiQueue.flushTimerId) {
     clearInterval(apiQueue.flushTimerId);
     apiQueue.flushTimerId = null;
     debugLog(`[API QUEUE] Periodic flush timer stopped`);
   }
-  
-  if (apiQueue.txFlushTimerId) {
-    clearTimeout(apiQueue.txFlushTimerId);
-    apiQueue.txFlushTimerId = null;
-    debugLog(`[API QUEUE] TX flush timer stopped`);
-  }
+}
+
+/**
+ * Stop all flush timers - legacy wrapper for compatibility
+ */
+function stopFlushTimers() {
+  stopFlushTimer();
 }
 
 /**
@@ -2829,6 +2929,26 @@ function addLogEntry(timestamp, lat, lon, eventsStr) {
     renderLogEntries();
     updateLogSummary();
   }
+}
+
+/**
+ * Clear all TX Log entries (called on new connection)
+ */
+function clearSessionLog() {
+  sessionLogState.entries = [];
+  renderLogEntries();
+  updateLogSummary();
+  debugLog("[TX LOG] TX Log cleared");
+}
+
+/**
+ * Clear all RX Log entries (called on new connection)
+ */
+function clearRxLog() {
+  rxLogState.entries = [];
+  renderRxLogEntries();
+  updateRxLogSummary();
+  debugLog("[RX LOG] RX Log cleared");
 }
 
 // ---- RX Log UI Functions ----
@@ -4098,6 +4218,17 @@ async function connect() {
         debugLog("[BLE] Starting GPS initialization");
         await primeGpsOnce();
         
+        // Start always-on services
+        debugLog("[BLE] Starting always-on background services");
+        startMapRefreshService(); // Map refresh every 5s or 25m movement
+        startFlushTimer(); // API queue flush at war-drive interval
+        
+        // Clear TX Log and RX Log for new session
+        debugLog("[TX LOG] Clearing TX Log for new session");
+        clearSessionLog();
+        debugLog("[RX LOG] Clearing RX Log for new session");
+        clearRxLog();
+        
         // Connection complete, show Connected status in connection bar
         setConnStatus("Connected", STATUS_COLORS.success);
         setDynamicStatus("Idle"); // Clear dynamic status to em dash
@@ -4230,6 +4361,21 @@ async function disconnect() {
   // Set connection bar to "Disconnecting" - will remain until cleanup completes
   setConnStatus("Disconnecting", STATUS_COLORS.info);
   setDynamicStatus("Idle"); // Clear dynamic status
+  
+  // Stop any active auto modes first
+  if (state.txRxAutoRunning) {
+    debugLog("[BLE] Stopping TX/RX Auto mode before disconnect");
+    stopTxRxAuto(true); // Pass true to stop GPS watch
+  }
+  if (state.rxAutoRunning) {
+    debugLog("[BLE] Stopping RX Auto mode before disconnect");
+    stopRxAuto(true); // Pass true to stop GPS watch
+  }
+  
+  // Stop always-on background services
+  debugLog("[BLE] Stopping always-on background services");
+  stopMapRefreshService();
+  stopUnifiedRxListening();
 
   // 1. CRITICAL: Flush API queue FIRST (session_id still valid)
   if (apiQueue.messages.length > 0) {
