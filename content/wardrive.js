@@ -2153,10 +2153,6 @@ async function handlePassiveRxLogging(packet, data) {
     
     const lat = state.lastFix.lat;
     const lon = state.lastFix.lon;
-    const timestamp = new Date().toISOString();
-    
-    // Add entry to RX log (including RSSI, path length, and header for CSV export)
-    addRxLogEntry(repeaterId, data.lastSnr, data.lastRssi, packet.path.length, packet.header, lat, lon, timestamp);
     
     debugLog(`[PASSIVE RX] ✅ Observation logged: repeater=${repeaterId}, snr=${data.lastSnr}, location=${lat.toFixed(5)},${lon.toFixed(5)}`);
     
@@ -2403,6 +2399,10 @@ function queueApiPost(entry) {
   // Queue message instead of posting immediately
   queueApiMessage(payload, "RX");
   debugLog(`[RX BATCH API] RX message queued: repeater=${entry.repeater_id}, snr=${entry.snr_avg.toFixed(1)}, location=${entry.location.lat.toFixed(5)},${entry.location.lng.toFixed(5)}`);
+  
+  // Add aggregated entry to RX log UI
+  const timestamp = new Date(entry.timestamp_start).toISOString();
+  addRxLogEntry(entry.repeater_id, entry.snr_avg, null, null, null, entry.location.lat, entry.location.lng, timestamp);
 }
 
 // ---- Mobile Session Log Bottom Sheet ----
