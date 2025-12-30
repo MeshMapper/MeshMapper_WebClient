@@ -2898,8 +2898,8 @@ function toggleRxLogBottomSheet() {
  * @param {string} repeaterId - Repeater ID (hex)
  * @param {number} snr - Signal-to-noise ratio
  * @param {number} rssi - Received Signal Strength Indicator
- * @param {number} pathLength - Number of hops in packet path
- * @param {number} header - Packet header byte
+ * @param {number|string} pathLength - Number of hops in packet path (or aggregated string like "3|4")
+ * @param {number|string} header - Packet header byte (or aggregated string like "0x15|0x12")
  * @param {number} lat - Latitude
  * @param {number} lon - Longitude
  * @param {string} timestamp - ISO timestamp
@@ -3178,7 +3178,7 @@ function sessionLogToCSV() {
 
 /**
  * Convert RX Log to CSV format
- * Columns: Timestamp,RepeaterID,SNR,RSSI,PathLength
+ * Columns: Timestamp,RepeaterID,SNR,RSSI,PathLength,Header
  * @returns {string} CSV formatted string
  */
 function rxLogToCSV() {
@@ -3186,17 +3186,18 @@ function rxLogToCSV() {
   
   if (rxLogState.entries.length === 0) {
     debugWarn('[PASSIVE RX UI] No RX log entries to export');
-    return 'Timestamp,RepeaterID,SNR,RSSI,PathLength\n';
+    return 'Timestamp,RepeaterID,SNR,RSSI,PathLength,Header\n';
   }
   
-  const header = 'Timestamp,RepeaterID,SNR,RSSI,PathLength\n';
+  const header = 'Timestamp,RepeaterID,SNR,RSSI,PathLength,Header\n';
   
   const rows = rxLogState.entries.map(entry => {
     // Handle potentially missing fields from old entries
     const snr = entry.snr !== undefined ? entry.snr.toFixed(2) : '';
     const rssi = entry.rssi !== undefined ? entry.rssi : '';
     const pathLength = entry.pathLength !== undefined ? entry.pathLength : '';
-    return `${entry.timestamp},${entry.repeaterId},${snr},${rssi},${pathLength}`;
+    const headerVal = entry.header !== undefined ? entry.header : '';
+    return `${entry.timestamp},${entry.repeaterId},${snr},${rssi},${pathLength},${headerVal}`;
   });
   
   const csv = header + rows.join('\n');
