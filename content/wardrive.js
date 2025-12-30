@@ -59,7 +59,6 @@ const GPS_WATCH_MAX_AGE_MS = 60000;            // Maximum age for GPS watch data
 const MESHMAPPER_DELAY_MS = 7000;              // Delay MeshMapper API call by 7 seconds
 const COOLDOWN_MS = 7000;                      // Cooldown period for manual ping and auto toggle
 const STATUS_UPDATE_DELAY_MS = 100;            // Brief delay to ensure "Ping sent" status is visible
-const MAP_REFRESH_DELAY_MS = 1000;             // Delay after API post to ensure backend updated
 const MIN_PAUSE_THRESHOLD_MS = 1000;           // Minimum timer value (1 second) to pause
 const MAX_REASONABLE_TIMER_MS = 5 * 60 * 1000; // Maximum reasonable timer value (5 minutes) to handle clock skew
 const RX_LOG_LISTEN_WINDOW_MS = 6000;         // Listen window for repeater echoes (6 seconds)
@@ -90,7 +89,7 @@ const OTTAWA_CENTER_LON = -75.6972; // Parliament Hill longitude
 const OTTAWA_GEOFENCE_RADIUS_M = 150000; // 150 km in meters
 
 // Distance-Based Ping Filtering
-const MIN_PING_DISTANCE_M = 25; // Minimum distance (25m) between pings
+const MIN_PING_DISTANCE_M = 100; // Minimum distance (100m) between pings
 
 // Passive RX Log Batch Configuration
 const RX_BATCH_DISTANCE_M = 25;        // Distance trigger for flushing batch (separate from MIN_PING_DISTANCE_M for independent tuning)
