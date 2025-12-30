@@ -89,7 +89,7 @@ const OTTAWA_CENTER_LON = -75.6972; // Parliament Hill longitude
 const OTTAWA_GEOFENCE_RADIUS_M = 150000; // 150 km in meters
 
 // Distance-Based Ping Filtering
-const MIN_PING_DISTANCE_M = 100; // Minimum distance (100m) between pings
+const MIN_PING_DISTANCE_M = 500; // Minimum distance (500m) between pings
 
 // Passive RX Log Batch Configuration
 const RX_BATCH_DISTANCE_M = 25;        // Distance trigger for flushing batch (separate from MIN_PING_DISTANCE_M for independent tuning)
