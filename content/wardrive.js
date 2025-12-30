@@ -4051,6 +4051,7 @@ function startTxRxAuto() {
   
   state.txRxAutoRunning = true;
   updateAutoButton();
+  updateControlsForCooldown(); // Disable RX Auto button while TX/RX Auto is running
   disableIntervalAndPowerControls();
   
   // Subscribe to RX events for TX/RX Auto mode
@@ -4120,6 +4121,7 @@ function startRxAuto() {
   
   state.rxAutoRunning = true;
   updateAutoButton();
+  updateControlsForCooldown(); // Disable TX/RX Auto button while RX Auto is running
   disableIntervalAndPowerControls();
   
   // Acquire wake lock for RX Auto mode
