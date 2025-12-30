@@ -2360,8 +2360,9 @@ async function handlePassiveRxLogging(packet, data) {
     
     // Check if any auto mode is subscribed to RX events
     // Only log observations when TX/RX Auto OR RX Auto is active
-    if (!rxSubscription.mode) {
-      debugLog(`[PASSIVE RX] No RX subscription active - skipping observation (auto modes OFF)`);
+    // Manual TX pings (mode='txPing') should NOT enable passive RX logging
+    if (!rxSubscription.mode || rxSubscription.mode === 'txPing') {
+      debugLog(`[PASSIVE RX] No RX subscription active or manual ping mode - skipping observation (auto modes OFF)`);
       return;
     }
     
