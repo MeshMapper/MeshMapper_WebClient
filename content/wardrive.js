@@ -1086,8 +1086,6 @@ async function releaseWakeLock() {
  * @returns {number} Distance in meters
  */
 function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
-  debugLog(`[GEOFENCE] Calculating Haversine distance: (${lat1.toFixed(5)}, ${lon1.toFixed(5)}) to (${lat2.toFixed(5)}, ${lon2.toFixed(5)})`);
-  
   const R = 6371000; // Earth's radius in meters
   const toRad = (deg) => (deg * Math.PI) / 180;
   
@@ -1102,7 +1100,6 @@ function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   const distance = R * c;
   
-  debugLog(`[GEOFENCE] Haversine distance calculated: ${distance.toFixed(2)}m`);
   return distance;
 }
 
