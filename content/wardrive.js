@@ -2325,7 +2325,7 @@ function flushBatch(repeaterId, trigger) {
   
   // Calculate RSSI average (filter out undefined/null values)
   const rssiValues = batch.samples.map(s => s.rssi).filter(v => v !== undefined && v !== null);
-  const rssiAvg = rssiValues.length > 0 ? rssiValues.reduce((sum, val) => sum + val, 0) / rssiValues.length : 0;
+  const rssiAvg = rssiValues.length > 0 ? rssiValues.reduce((sum, val) => sum + val, 0) / rssiValues.length : null;
   
   // Collect unique pathLength values and join with | (filter out undefined/null)
   const uniquePathLengths = [...new Set(batch.samples.map(s => s.pathLength).filter(v => v !== undefined && v !== null))];
@@ -2333,7 +2333,11 @@ function flushBatch(repeaterId, trigger) {
   
   // Collect unique header values (as hex strings) and join with | (filter out undefined/null)
   const uniqueHeaders = [...new Set(batch.samples.map(s => s.header).filter(v => v !== undefined && v !== null))];
-  const headerStr = uniqueHeaders.map(h => '0x' + h.toString(16).padStart(2, '0')).join('|');
+  const headerStr = uniqueHeaders.map(h => {
+    const hexStr = h.toString(16);
+    // Use dynamic padding: at least 2 chars, but more if needed
+    return '0x' + hexStr.padStart(Math.max(2, hexStr.length), '0');
+  }).join('|');
   
   const sampleCount = batch.samples.length;
   const timestampStart = batch.firstTimestamp;
@@ -2346,7 +2350,7 @@ function flushBatch(repeaterId, trigger) {
     snr_avg: parseFloat(snrAvg.toFixed(3)),
     snr_max: parseFloat(snrMax.toFixed(3)),
     snr_min: parseFloat(snrMin.toFixed(3)),
-    rssi_avg: parseFloat(rssiAvg.toFixed(3)),
+    rssi_avg: rssiAvg !== null ? parseFloat(rssiAvg.toFixed(3)) : null,
     path_length: pathLengthStr,
     header: headerStr,
     sample_count: sampleCount,
@@ -2357,7 +2361,7 @@ function flushBatch(repeaterId, trigger) {
   
   debugLog(`[RX BATCH] Aggregated entry for repeater ${repeaterId}:`, entry);
   debugLog(`[RX BATCH]   snr_avg=${snrAvg.toFixed(3)}, snr_max=${snrMax.toFixed(3)}, snr_min=${snrMin.toFixed(3)}`);
-  debugLog(`[RX BATCH]   rssi_avg=${rssiAvg.toFixed(3)}, path_length=${pathLengthStr}, header=${headerStr}`);
+  debugLog(`[RX BATCH]   rssi_avg=${rssiAvg !== null ? rssiAvg.toFixed(3) : 'N/A'}, path_length=${pathLengthStr}, header=${headerStr}`);
   debugLog(`[RX BATCH]   sample_count=${sampleCount}, duration=${((timestampEnd - timestampStart) / 1000).toFixed(1)}s`);
   
   // Queue for API posting
@@ -2897,7 +2901,7 @@ function toggleRxLogBottomSheet() {
  * Add entry to RX log
  * @param {string} repeaterId - Repeater ID (hex)
  * @param {number} snr - Signal-to-noise ratio
- * @param {number} rssi - Received Signal Strength Indicator
+ * @param {number|null} rssi - Received Signal Strength Indicator (null if no data)
  * @param {number|string} pathLength - Number of hops in packet path (or aggregated string like "3|4")
  * @param {number|string} header - Packet header byte (or aggregated string like "0x15|0x12")
  * @param {number} lat - Latitude
