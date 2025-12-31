@@ -3435,29 +3435,33 @@ function txLogToCSV() {
 }
 
 /**
- * Convert RX Log to CSV format
- * Columns: Timestamp,RepeaterID,SNR,RSSI,PathLength,Header
- * @returns {string} CSV formatted string
+ * Export RX log entries to CSV (used by the copy button)
+ * Columns: Timestamp,RepeaterId,Lat,Lon,SNR,SampleCount,PathLength,Header
  */
 function rxLogToCSV() {
-  debugLog('[PASSIVE RX UI] Converting RX log to CSV format');
-  
-  if (rxLogState.entries.length === 0) {
+  if (!rxLogState || !Array.isArray(rxLogState.entries) || rxLogState.entries.length === 0) {
     debugWarn('[PASSIVE RX UI] No RX log entries to export');
-    return 'Timestamp,RepeaterID,SNR,RSSI,PathLength,Header\n';
+    return 'Timestamp,RepeaterId,Lat,Lon,SNR,SampleCount,PathLength,Header\n';
   }
-  
-  const header = 'Timestamp,RepeaterID,SNR,RSSI,PathLength,Header\n';
-  
+
+  const header = 'Timestamp,RepeaterId,Lat,Lon,SNR,SampleCount,PathLength,Header\n';
+
   const rows = rxLogState.entries.map(entry => {
-    // Handle potentially missing fields from old entries
-    const snr = entry.snr !== undefined ? entry.snr.toFixed(2) : '';
-    const rssi = entry.rssi !== undefined ? entry.rssi : '';
-    const pathLength = entry.pathLength !== undefined ? entry.pathLength : '';
-    const headerVal = entry.header !== undefined ? entry.header : '';
-    return `${entry.timestamp},${entry.repeaterId},${snr},${rssi},${pathLength},${headerVal}`;
+    // normalize fields
+    const ts = entry.timestamp || '';
+    const repeater = (entry.repeaterId || '').toString().replace(/"/g, '""');
+    const lat = (typeof entry.lat === 'number') ? entry.lat.toFixed(5) : (entry.lat || '');
+    const lon = (typeof entry.lon === 'number') ? entry.lon.toFixed(5) : (entry.lon || '');
+    const snr = (typeof entry.snr !== 'undefined') ? entry.snr : '';
+    const sampleCount = (typeof entry.sample_count !== 'undefined') ? entry.sample_count :
+                        (typeof entry.sampleCount !== 'undefined' ? entry.sampleCount : 1);
+    const pathLength = (typeof entry.pathLength !== 'undefined') ? entry.pathLength : '';
+    const headerField = (entry.header || '').toString().replace(/"/g, '""');
+
+    // Quote repeater and header to be safe
+    return `${ts},"${repeater}",${lat},${lon},${snr},${sampleCount},${pathLength},"${headerField}"`;
   });
-  
+
   const csv = header + rows.join('\n');
   debugLog(`[PASSIVE RX UI] CSV export complete: ${rxLogState.entries.length} entries`);
   return csv;
