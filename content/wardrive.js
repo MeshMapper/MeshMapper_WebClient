@@ -3169,6 +3169,7 @@ function toggleRxLogBottomSheet() {
  * @param {number} lat - Latitude
  * @param {number} lon - Longitude
  * @param {string} timestamp - ISO timestamp
+ * @param {number} [sampleCount=1] - Number of samples aggregated in this entry
  */
 function addRxLogEntry(repeaterId, snr, rssi, pathLength, header, lat, lon, timestamp, sampleCount = 1) {
   const entry = {
