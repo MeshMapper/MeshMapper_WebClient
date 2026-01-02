@@ -1357,21 +1357,22 @@ function bytesToHex(bytes) {
  * @param {string} heardByte - The "heard" byte (first for TX, last for RX) as hex string
  * @returns {Object} Debug data object
  */
-function buildDebugData(rawPacketData, heardByte) {
-  const { raw, lastSnr, lastRssi, packet } = rawPacketData;
-  
-  // Convert path array to hex string (from parsed packet object)
-  const parsedPathHex = packet.path.map(byte => byte.toString(16).padStart(2, '0').toUpperCase()).join('');
+function buildDebugData(metadata, heardByte, repeaterId) {
+  // Convert path bytes to hex string - these are the ACTUAL bytes used
+  const parsedPathHex = Array.from(metadata.pathBytes)
+    .map(byte => byte.toString(16).padStart(2, '0').toUpperCase())
+    .join('');
   
   return {
-    raw_packet: bytesToHex(raw),  // Send complete raw packet as hex string
-    raw_snr: lastSnr,
-    raw_rssi: lastRssi,
-    parsed_header: packet.header.toString(16).padStart(2, '0').toUpperCase(),
-    parsed_path_length: packet.path.length,
-    parsed_path: parsedPathHex,
-    parsed_payload: bytesToHex(packet.payload),
-    parsed_heard: heardByte
+    raw_packet: bytesToHex(metadata.raw),
+    raw_snr: metadata.snr,
+    raw_rssi: metadata.rssi,
+    parsed_header: metadata.header.toString(16).padStart(2, '0').toUpperCase(),
+    parsed_path_length: metadata.pathLength,
+    parsed_path: parsedPathHex,  // ACTUAL raw bytes
+    parsed_payload: bytesToHex(metadata.encryptedPayload),
+    parsed_heard: heardByte,
+    repeaterId: repeaterId
   };
 }
 
@@ -1416,10 +1417,9 @@ async function postToMeshMapperAPI(lat, lon, heardRepeats) {
       const debugDataArray = [];
       
       for (const repeater of state.tempTxRepeaterData) {
-        if (repeater.rawPacketData) {
+        if (repeater.metadata) {
           const heardByte = repeater.repeaterId;  // First byte of path
-          const debugData = buildDebugData(repeater.rawPacketData, heardByte);
-          debugData.repeaterId = repeater.repeaterId;  // Add repeater ID
+          const debugData = buildDebugData(repeater.metadata, heardByte, repeater.repeaterId);
           debugDataArray.push(debugData);
           debugLog(`[API QUEUE] 🐛 Added debug data for TX repeater: ${repeater.repeaterId}`);
         }
@@ -1811,6 +1811,48 @@ async function computeChannelHash(channelSecret) {
 }
 
 /**
+ * Parse RX packet metadata from raw bytes
+ * Single source of truth for header/path extraction
+ * @param {Object} data - LogRxData event data (contains lastSnr, lastRssi, raw)
+ * @returns {Object} Parsed metadata object
+ */
+function parseRxPacketMetadata(data) {
+  debugLog(`[RX PARSE] Starting metadata parsing`);
+  
+  // Extract header byte from raw[0]
+  const header = data.raw[0];
+  
+  // Extract path length from header upper 4 bits: (header >> 4) & 0x0F
+  const pathLength = (header >> 4) & 0x0F;
+  
+  // Extract raw path bytes as array: raw.slice(1, 1 + pathLength)
+  const pathBytes = Array.from(data.raw.slice(1, 1 + pathLength));
+  
+  // Derive first hop (for TX repeater ID): pathBytes[0]
+  const firstHop = pathBytes.length > 0 ? pathBytes[0] : null;
+  
+  // Derive last hop (for RX repeater ID): pathBytes[pathLength - 1]
+  const lastHop = pathBytes.length > 0 ? pathBytes[pathLength - 1] : null;
+  
+  // Extract encrypted payload: raw.slice(1 + pathLength)
+  const encryptedPayload = data.raw.slice(1 + pathLength);
+  
+  debugLog(`[RX PARSE] Parsed metadata: header=0x${header.toString(16).padStart(2, '0')}, pathLength=${pathLength}, firstHop=${firstHop ? '0x' + firstHop.toString(16).padStart(2, '0') : 'null'}, lastHop=${lastHop ? '0x' + lastHop.toString(16).padStart(2, '0') : 'null'}`);
+  
+  return {
+    raw: data.raw,                     // Full raw packet bytes
+    header: header,                    // Header byte
+    pathLength: pathLength,            // Number of hops
+    pathBytes: pathBytes,              // Raw path bytes array
+    firstHop: firstHop,                // First hop ID (TX)
+    lastHop: lastHop,                  // Last hop ID (RX)
+    snr: data.lastSnr,                 // SNR value
+    rssi: data.lastRssi,               // RSSI value
+    encryptedPayload: encryptedPayload // Rest of packet
+  };
+}
+
+/**
  * Decrypt GroupText payload and extract message text
  * Payload structure: [1 byte channel_hash][2 bytes MAC][encrypted data]
  * Encrypted data: [4 bytes timestamp][1 byte flags][message text]
@@ -1963,34 +2005,34 @@ function startRepeaterTracking(payload, channelIdx) {
 /**
  * Handle Session Log tracking for repeater echoes
  * Called by unified RX handler when tracking is active
- * @param {Object} packet - Parsed packet from Packet.fromBytes
+ * @param {Object} metadata - Parsed metadata from parseRxPacketMetadata()
  * @param {Object} data - The LogRxData event data (contains lastSnr, lastRssi, raw)
  * @returns {boolean} True if packet was an echo and tracked, false otherwise
  */
-async function handleSessionLogTracking(packet, data) {
+async function handleSessionLogTracking(metadata, data) {
   const originalPayload = state.repeaterTracking.sentPayload;
   const channelIdx = state.repeaterTracking.channelIdx;
   const expectedChannelHash = WARDRIVING_CHANNEL_HASH;
   try {
-    debugLog(`[SESSION LOG] Processing rx_log entry: SNR=${data.lastSnr}, RSSI=${data.lastRssi}`);
+    debugLog(`[SESSION LOG] Processing rx_log entry: SNR=${metadata.snr}, RSSI=${metadata.rssi}`);
     
     // VALIDATION STEP 1: Header validation for echo detection
     // Only GroupText packets (CHANNEL_GROUP_TEXT_HEADER) can be echoes of our channel messages
-    if (packet.header !== CHANNEL_GROUP_TEXT_HEADER) {
-      debugLog(`[SESSION LOG] Ignoring: header validation failed (header=0x${packet.header.toString(16).padStart(2, '0')})`);
+    if (metadata.header !== CHANNEL_GROUP_TEXT_HEADER) {
+      debugLog(`[SESSION LOG] Ignoring: header validation failed (header=0x${metadata.header.toString(16).padStart(2, '0')})`);
       return false;
     }
     
-    debugLog(`[SESSION LOG] Header validation passed: 0x${packet.header.toString(16).padStart(2, '0')}`);
+    debugLog(`[SESSION LOG] Header validation passed: 0x${metadata.header.toString(16).padStart(2, '0')}`);
     
     // VALIDATION STEP 2: Validate this message is for our channel by comparing channel hash
     // Channel message payload structure: [1 byte channel_hash][2 bytes MAC][encrypted message]
-    if (packet.payload.length < 3) {
+    if (metadata.encryptedPayload.length < 3) {
       debugLog(`[SESSION LOG] Ignoring: payload too short to contain channel hash`);
       return false;
     }
     
-    const packetChannelHash = packet.payload[0];
+    const packetChannelHash = metadata.encryptedPayload[0];
     debugLog(`[SESSION LOG] Message correlation check: packet_channel_hash=0x${packetChannelHash.toString(16).padStart(2, '0')}, expected=0x${expectedChannelHash.toString(16).padStart(2, '0')}`);
     
     if (packetChannelHash !== expectedChannelHash) {
@@ -2006,7 +2048,7 @@ async function handleSessionLogTracking(packet, data) {
     
     if (WARDRIVING_CHANNEL_KEY) {
       debugLog(`[MESSAGE_CORRELATION] Channel key available, attempting decryption...`);
-      const decryptedMessage = await decryptGroupTextPayload(packet.payload, WARDRIVING_CHANNEL_KEY);
+      const decryptedMessage = await decryptGroupTextPayload(metadata.encryptedPayload, WARDRIVING_CHANNEL_KEY);
       
       if (decryptedMessage === null) {
         debugLog(`[MESSAGE_CORRELATION] ❌ REJECT: Failed to decrypt message`);
@@ -2041,7 +2083,7 @@ async function handleSessionLogTracking(packet, data) {
     // VALIDATION STEP 4: Check path length (repeater echo vs direct transmission)
     // For channel messages, the path contains repeater hops
     // Each hop in the path is 1 byte (repeater ID)
-    if (packet.path.length === 0) {
+    if (metadata.pathLength === 0) {
       debugLog(`[SESSION LOG] Ignoring: no path (direct transmission, not a repeater echo)`);
       return false;
     }
@@ -2050,49 +2092,39 @@ async function handleSessionLogTracking(packet, data) {
     // The path may contain multiple hops (e.g., [0x22, 0xd0, 0x5d, 0x46, 0x8b])
     // but we only care about the first repeater that echoed our message
     // Example: path [0x22, 0xd0, 0x5d] becomes "22" (only first hop)
-    const firstHopId = packet.path[0];
+    const firstHopId = metadata.firstHop;
     const pathHex = firstHopId.toString(16).padStart(2, '0');
     
-    debugLog(`[PING] Repeater echo accepted: first_hop=${pathHex}, SNR=${data.lastSnr}, full_path_length=${packet.path.length}`);
+    debugLog(`[PING] Repeater echo accepted: first_hop=${pathHex}, SNR=${metadata.snr}, full_path_length=${metadata.pathLength}`);
     
     // Check if we already have this path
     if (state.repeaterTracking.repeaters.has(pathHex)) {
       const existing = state.repeaterTracking.repeaters.get(pathHex);
-      debugLog(`[PING] Deduplication: path ${pathHex} already seen (existing SNR=${existing.snr}, new SNR=${data.lastSnr})`);
+      debugLog(`[PING] Deduplication: path ${pathHex} already seen (existing SNR=${existing.snr}, new SNR=${metadata.snr})`);
       
       // Keep the best (highest) SNR
-      if (data.lastSnr > existing.snr) {
-        debugLog(`[PING] Deduplication decision: updating path ${pathHex} with better SNR: ${existing.snr} -> ${data.lastSnr}`);
+      if (metadata.snr > existing.snr) {
+        debugLog(`[PING] Deduplication decision: updating path ${pathHex} with better SNR: ${existing.snr} -> ${metadata.snr}`);
         state.repeaterTracking.repeaters.set(pathHex, {
-          snr: data.lastSnr,
+          snr: metadata.snr,
           seenCount: existing.seenCount + 1,
-          rawPacketData: {  // Update with better SNR packet data
-            raw: data.raw,
-            lastSnr: data.lastSnr,
-            lastRssi: data.lastRssi,
-            packet: packet
-          }
+          metadata: metadata  // Store full metadata for debug mode
         });
         
         // Trigger incremental UI update since SNR changed
         updateCurrentLogEntryWithLiveRepeaters();
       } else {
-        debugLog(`[PING] Deduplication decision: keeping existing SNR for path ${pathHex} (existing ${existing.snr} >= new ${data.lastSnr})`);
+        debugLog(`[PING] Deduplication decision: keeping existing SNR for path ${pathHex} (existing ${existing.snr} >= new ${metadata.snr})`);
         // Still increment seen count
         existing.seenCount++;
       }
     } else {
       // New path
-      debugLog(`[PING] Adding new repeater echo: path=${pathHex}, SNR=${data.lastSnr}`);
+      debugLog(`[PING] Adding new repeater echo: path=${pathHex}, SNR=${metadata.snr}`);
       state.repeaterTracking.repeaters.set(pathHex, {
-        snr: data.lastSnr,
+        snr: metadata.snr,
         seenCount: 1,
-        rawPacketData: {  // Store for debug mode
-          raw: data.raw,
-          lastSnr: data.lastSnr,
-          lastRssi: data.lastRssi,
-          packet: packet
-        }
+        metadata: metadata  // Store full metadata for debug mode
       });
       
       // Trigger incremental UI update for the new repeater
@@ -2123,11 +2155,11 @@ function stopRepeaterTracking() {
   // No need to unregister handler - unified handler continues running
   // Just clear the tracking state
   
-  // Get the results with full data (including rawPacketData for debug mode)
+  // Get the results with full data (including metadata for debug mode)
   const repeaters = Array.from(state.repeaterTracking.repeaters.entries()).map(([id, data]) => ({
     repeaterId: id,
     snr: data.snr,
-    rawPacketData: data.rawPacketData  // Include for debug mode
+    metadata: data.metadata  // Include metadata for debug mode
   }));
   
   // Sort by repeater ID for deterministic output
@@ -2170,44 +2202,38 @@ function formatRepeaterTelemetry(repeaters) {
  */
 async function handleUnifiedRxLogEvent(data) {
   try {
-    debugLog(`[UNIFIED RX] Received rx_log entry: SNR=${data.lastSnr}, RSSI=${data.lastRssi}`);
+    // Parse metadata ONCE
+    const metadata = parseRxPacketMetadata(data);
     
-    // Parse the packet from raw data (once for both handlers)
-    const packet = Packet.fromBytes(data.raw);
+    debugLog(`[UNIFIED RX] Packet received: header=0x${metadata.header.toString(16)}, pathLength=${metadata.pathLength}`);
     
-    // Log header for debugging (informational for all packet processing)
-    debugLog(`[UNIFIED RX] Packet header: 0x${packet.header.toString(16).padStart(2, '0')}`);
-    
-    // DELEGATION: If Session Log is actively tracking, delegate to it first
-    // Session Log requires header validation (CHANNEL_GROUP_TEXT_HEADER) and will handle validation internally
+    // Route to TX tracking if active
     if (state.repeaterTracking.isListening) {
-      debugLog(`[UNIFIED RX] Session Log is tracking - delegating to Session Log handler`);
-      const wasTracked = await handleSessionLogTracking(packet, data);
-      
-      if (wasTracked) {
-        debugLog(`[UNIFIED RX] Packet was an echo and tracked by Session Log`);
-        return; // Echo handled, done
+      debugLog("[UNIFIED RX] TX tracking active - delegating to TX handler");
+      const wasEcho = await handleSessionLogTracking(metadata, data);
+      if (wasEcho) {
+        debugLog("[UNIFIED RX] Packet was TX echo, done");
+        return;
       }
-      
-      debugLog(`[UNIFIED RX] Packet was not an echo, continuing to Passive RX processing`);
     }
     
-    // DELEGATION: Handle passive RX logging for all other cases
-    // Passive RX accepts any packet regardless of header type
-    await handlePassiveRxLogging(packet, data);
-    
+    // Route to RX wardriving if active
+    if (state.passiveRxTracking.isListening) {
+      debugLog("[UNIFIED RX] RX wardriving active - delegating to RX handler");
+      await handlePassiveRxLogging(metadata, data);
+    }
   } catch (error) {
-    debugError(`[UNIFIED RX] Error processing rx_log entry: ${error.message}`, error);
+    debugError("[UNIFIED RX] Error processing rx_log entry", error);
   }
 }
 
 /**
  * Handle passive RX logging - monitors all incoming packets not handled by Session Log
  * Extracts the LAST hop from the path (direct repeater) and records observation
- * @param {Object} packet - Parsed packet from Packet.fromBytes
+ * @param {Object} metadata - Parsed metadata from parseRxPacketMetadata()
  * @param {Object} data - The LogRxData event data (contains lastSnr, lastRssi, raw)
  */
-async function handlePassiveRxLogging(packet, data) {
+async function handlePassiveRxLogging(metadata, data) {
   try {
     debugLog(`[PASSIVE RX] Processing packet for passive logging`);
     
@@ -2215,16 +2241,16 @@ async function handlePassiveRxLogging(packet, data) {
     // A packet's path array contains the sequence of repeater IDs that forwarded the message.
     // Packets with no path are direct transmissions (node-to-node) and don't provide
     // information about repeater coverage, so we skip them for RX wardriving purposes.
-    if (packet.path.length === 0) {
+    if (metadata.pathLength === 0) {
       debugLog(`[PASSIVE RX] Ignoring: no path (direct transmission, not via repeater)`);
       return;
     }
     
     // Extract LAST hop from path (the repeater that directly delivered to us)
-    const lastHopId = packet.path[packet.path.length - 1];
+    const lastHopId = metadata.lastHop;
     const repeaterId = lastHopId.toString(16).padStart(2, '0');
     
-    debugLog(`[PASSIVE RX] Packet heard via last hop: ${repeaterId}, SNR=${data.lastSnr}, path_length=${packet.path.length}`);
+    debugLog(`[PASSIVE RX] Packet heard via last hop: ${repeaterId}, SNR=${metadata.snr}, path_length=${metadata.pathLength}`);
     
     // Get current GPS location
     if (!state.lastFix) {
@@ -2237,27 +2263,19 @@ async function handlePassiveRxLogging(packet, data) {
     const timestamp = new Date().toISOString();
     
     // Add entry to RX log (including RSSI, path length, and header for CSV export)
-    addRxLogEntry(repeaterId, data.lastSnr, data.lastRssi, packet.path.length, packet.header, lat, lon, timestamp);
+    addRxLogEntry(repeaterId, metadata.snr, metadata.rssi, metadata.pathLength, metadata.header, lat, lon, timestamp);
     
-    debugLog(`[PASSIVE RX] ✅ Observation logged: repeater=${repeaterId}, snr=${data.lastSnr}, location=${lat.toFixed(5)},${lon.toFixed(5)}`);
-    
-    // Store raw packet data for API handling
-    const rawPacketData = {
-      raw: data.raw,
-      lastSnr: data.lastSnr,
-      lastRssi: data.lastRssi,
-      packet: packet
-    };
+    debugLog(`[PASSIVE RX] ✅ Observation logged: repeater=${repeaterId}, snr=${metadata.snr}, location=${lat.toFixed(5)},${lon.toFixed(5)}`);
     
     // Handle tracking for API (best SNR with distance trigger)
     handlePassiveRxForAPI(
       repeaterId, 
-      data.lastSnr, 
-      data.lastRssi, 
-      packet.path.length, 
-      packet.header, 
+      metadata.snr, 
+      metadata.rssi, 
+      metadata.pathLength, 
+      metadata.header, 
       { lat, lon }, 
-      rawPacketData
+      metadata
     );
     
   } catch (error) {
@@ -2342,9 +2360,9 @@ async function postRxLogToMeshMapperAPI(entries) {
  * @param {number} pathLength - Number of hops in the path
  * @param {number} header - Packet header byte
  * @param {Object} currentLocation - Current GPS location {lat, lon}
- * @param {Object} rawPacketData - Raw packet data for debug mode
+ * @param {Object} metadata - Parsed metadata for debug mode
  */
-function handlePassiveRxForAPI(repeaterId, snr, rssi, pathLength, header, currentLocation, rawPacketData) {
+function handlePassiveRxForAPI(repeaterId, snr, rssi, pathLength, header, currentLocation, metadata) {
   // Get or create buffer entry for this repeater
   let buffer = state.rxBatchBuffer.get(repeaterId);
   
@@ -2360,7 +2378,7 @@ function handlePassiveRxForAPI(repeaterId, snr, rssi, pathLength, header, curren
         lat: currentLocation.lat,
         lon: currentLocation.lon,
         timestamp: Date.now(),
-        rawPacketData
+        metadata: metadata  // Store full metadata for debug mode
       }
     };
     state.rxBatchBuffer.set(repeaterId, buffer);
@@ -2377,7 +2395,7 @@ function handlePassiveRxForAPI(repeaterId, snr, rssi, pathLength, header, curren
         lat: currentLocation.lat,
         lon: currentLocation.lon,
         timestamp: Date.now(),
-        rawPacketData
+        metadata: metadata  // Store full metadata for debug mode
       };
     } else {
       debugLog(`[RX BATCH] Ignoring worse SNR for repeater ${repeaterId}: current=${buffer.bestObservation.snr}, new=${snr}`);
@@ -2424,7 +2442,7 @@ function flushRepeater(repeaterId) {
     pathLength: best.pathLength,
     header: best.header,
     timestamp: best.timestamp,
-    rawPacketData: best.rawPacketData  // For future debug mode
+    metadata: best.metadata  // For debug mode
   };
   
   debugLog(`[RX BATCH] Posting repeater ${repeaterId}: snr=${best.snr}, location=${best.lat.toFixed(5)},${best.lon.toFixed(5)}`);
@@ -2488,16 +2506,14 @@ function queueApiPost(entry) {
   };
   
   // Add debug data if debug mode is enabled
-  if (state.debugMode && entry.rawPacketData) {
+  if (state.debugMode && entry.metadata) {
     debugLog(`[RX BATCH API] 🐛 Debug mode active - adding debug_data for RX`);
     
-    const packet = entry.rawPacketData.packet;
-    
     // For RX, parsed_heard is the LAST byte of path
-    const lastHopId = packet.path[packet.path.length - 1];
+    const lastHopId = entry.metadata.lastHop;
     const heardByte = lastHopId.toString(16).padStart(2, '0').toUpperCase();
     
-    const debugData = buildDebugData(entry.rawPacketData, heardByte);
+    const debugData = buildDebugData(entry.metadata, heardByte, entry.repeater_id);
     payload.debug_data = debugData;
     
     debugLog(`[RX BATCH API] 🐛 RX payload includes debug_data for repeater ${entry.repeater_id}`);
