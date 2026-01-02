@@ -148,7 +148,7 @@ const lastPingEl     = $("lastPing");
 const gpsInfoEl = document.getElementById("gpsInfo");
 const gpsAccEl = document.getElementById("gpsAcc");
 const distanceInfoEl = document.getElementById("distanceInfo"); // Distance from last ping
-const sessionPingsEl = document.getElementById("sessionPings"); // optional - TODO: rename to txPings
+const txPingsEl = document.getElementById("txPings"); // TX log container
 const coverageFrameEl = document.getElementById("coverageFrame");
 setConnectButton(false);
 setConnStatus("Disconnected", STATUS_COLORS.error);
@@ -574,10 +574,7 @@ function updateControlsForCooldown() {
   txRxAutoBtn.disabled = !connected || inCooldown || state.pingInProgress || state.rxAutoRunning;
   
   // RX Auto button - disabled when TX/RX Auto running (no cooldown restriction for RX-only mode)
-  // Note: rxAutoBtn will be added to HTML and needs to be defined at the top of the file
-  if (typeof rxAutoBtn !== 'undefined') {
-    rxAutoBtn.disabled = !connected || state.txRxAutoRunning;
-  }
+  rxAutoBtn.disabled = !connected || state.txRxAutoRunning;
 }
 
 /**
@@ -665,16 +662,14 @@ function updateAutoButton() {
   }
   
   // Update RX Auto button
-  if (typeof rxAutoBtn !== 'undefined') {
-    if (state.rxAutoRunning) {
-      rxAutoBtn.textContent = "Stop RX";
-      rxAutoBtn.classList.remove("bg-indigo-600","hover:bg-indigo-500");
-      rxAutoBtn.classList.add("bg-amber-600","hover:bg-amber-500");
-    } else {
-      rxAutoBtn.textContent = "RX Auto";
-      rxAutoBtn.classList.add("bg-indigo-600","hover:bg-indigo-500");
-      rxAutoBtn.classList.remove("bg-amber-600","hover:bg-amber-500");
-    }
+  if (state.rxAutoRunning) {
+    rxAutoBtn.textContent = "Stop RX";
+    rxAutoBtn.classList.remove("bg-indigo-600","hover:bg-indigo-500");
+    rxAutoBtn.classList.add("bg-amber-600","hover:bg-amber-500");
+  } else {
+    rxAutoBtn.textContent = "RX Auto";
+    rxAutoBtn.classList.add("bg-indigo-600","hover:bg-indigo-500");
+    rxAutoBtn.classList.remove("bg-amber-600","hover:bg-amber-500");
   }
 }
 function buildCoverageEmbedUrl(lat, lon) {
@@ -2734,17 +2729,17 @@ function updateTxLogSummary() {
  * Render all log entries to the session log
  */
 function renderTxLogEntries() {
-  if (!sessionPingsEl) return;
+  if (!txPingsEl) return;
   
   debugLog(`[UI] Rendering ${txLogState.entries.length} log entries`);
-  sessionPingsEl.innerHTML = '';
+  txPingsEl.innerHTML = '';
   
   if (txLogState.entries.length === 0) {
     // Show placeholder when no entries
     const placeholder = document.createElement('div');
     placeholder.className = 'text-xs text-slate-500 italic text-center py-4';
     placeholder.textContent = 'No pings logged yet';
-    sessionPingsEl.appendChild(placeholder);
+    txPingsEl.appendChild(placeholder);
     debugLog(`[UI] Rendered placeholder (no entries)`);
     return;
   }
@@ -2754,8 +2749,8 @@ function renderTxLogEntries() {
   
   entries.forEach((entry, index) => {
     const element = createLogEntryElement(entry);
-    sessionPingsEl.appendChild(element);
-    debugLog(`[UI] Appended log entry ${index + 1}/${entries.length} to sessionPingsEl`);
+    txPingsEl.appendChild(element);
+    debugLog(`[UI] Appended log entry ${index + 1}/${entries.length} to txPingsEl`);
   });
   
   // Auto-scroll to top (newest)
