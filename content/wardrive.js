@@ -1842,8 +1842,7 @@ function parseRxPacketMetadata(data) {
   
   // Dump entire raw packet for debugging BEFORE parsing
   const rawHex = Array.from(data.raw).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
-  debugLog(`[RX PARSE] << ENTIRE RAW PACKET >>`);
-  debugLog(`[RX PARSE] ${rawHex}`);
+  debugLog(`[RX PARSE] RAW Packet: ${rawHex}`);
   
   // Extract header byte from raw[0]
   const header = data.raw[0];
