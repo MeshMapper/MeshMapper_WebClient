@@ -1846,40 +1846,46 @@ async function computeChannelHash(channelSecret) {
 function parseRxPacketMetadata(data) {
   debugLog(`[RX PARSE] Starting metadata parsing`);
   
-  // Dump entire raw packet for debugging BEFORE parsing
-  const rawHex = Array.from(data.raw).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+  // Dump entire raw packet
+  const rawHex = Array.from(data. raw).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
   debugLog(`[RX PARSE] RAW Packet: ${rawHex}`);
   
   // Extract header byte from raw[0]
   const header = data.raw[0];
+  const routeType = header & 0x03;
   
-  // Extract path length from raw[1] (separate byte, NOT from header bits)
-  const pathLength = data.raw[1];
+  // Calculate offset for Path Length based on route type
+  let pathLengthOffset = 1;
+  if (routeType === 0x00 || routeType === 0x03) {  // TransportFlood or TransportDirect
+    pathLengthOffset = 5;  // Skip 4-byte transport codes
+  }
   
-  // Extract raw path bytes:  raw[2] through raw[2 + pathLength - 1]
-  const pathBytes = Array.from(data.raw. slice(2, 2 + pathLength));
+  // Extract path length from calculated offset
+  const pathLength = data.raw[pathLengthOffset];
   
-  // Derive first hop (for TX repeater ID): pathBytes[0]
+  // Path data starts after path length byte
+  const pathDataOffset = pathLengthOffset + 1;
+  const pathBytes = Array.from(data.raw.slice(pathDataOffset, pathDataOffset + pathLength));
+  
+  // Derive first and last hops
   const firstHop = pathBytes. length > 0 ? pathBytes[0] : null;
-  
-  // Derive last hop (for RX repeater ID): pathBytes[pathLength - 1]
   const lastHop = pathBytes.length > 0 ? pathBytes[pathLength - 1] : null;
   
-  // Extract encrypted payload:  raw[2 + pathLength] onward
-  const encryptedPayload = data.raw.slice(2 + pathLength);
+  // Extract encrypted payload after path data
+  const encryptedPayload = data.raw.slice(pathDataOffset + pathLength);
   
   debugLog(`[RX PARSE] Parsed metadata: header=0x${header.toString(16).padStart(2, '0')}, pathLength=${pathLength}, firstHop=${firstHop ?  '0x' + firstHop. toString(16).padStart(2, '0') : 'null'}, lastHop=${lastHop ? '0x' + lastHop.toString(16).padStart(2, '0') : 'null'}`);
   
   return {
-    raw:  data.raw,                     // Full raw packet bytes
-    header:  header,                    // Header byte
-    pathLength:  pathLength,            // Number of hops
-    pathBytes: pathBytes,              // Raw path bytes array
-    firstHop: firstHop,                // First hop ID (TX)
-    lastHop: lastHop,                  // Last hop ID (RX)
-    snr: data.lastSnr,                 // SNR value
-    rssi: data.lastRssi,               // RSSI value
-    encryptedPayload: encryptedPayload // Rest of packet
+    raw: data.raw,
+    header:  header,
+    pathLength: pathLength,
+    pathBytes: pathBytes,
+    firstHop: firstHop,
+    lastHop: lastHop,
+    snr: data.lastSnr,
+    rssi: data.lastRssi,
+    encryptedPayload: encryptedPayload
   };
 }
 
