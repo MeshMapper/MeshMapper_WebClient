@@ -190,6 +190,15 @@ Key methods on `Connection` class:
 - **Async/await** - Preferred over `.then()` chains
 - **Error handling** - Wrap BLE/API calls in try-catch, log with `debugError()`
 
+### AI Prompt Formatting
+When generating prompts for AI agents or subagents, always format them in markdown code blocks using four backticks (````markdown) to prevent accidentally closing the code block when the prompt itself contains triple backticks (```):
+
+````markdown
+Example prompt for AI agent:
+- Task description here
+- Can safely include ```code examples``` without breaking the outer block
+````
+
 ## Key Files Reference
 
 - `content/wardrive.js:connect()` (line ~2020) - 10-step connection workflow
