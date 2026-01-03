@@ -264,6 +264,7 @@ const state = {
   disconnectReason: null, // Tracks the reason for disconnection (e.g., "app_down", "capacity_full", "public_key_error", "channel_setup_error", "ble_disconnect_error", "session_id_error", "normal", or API reason codes like "outofdate")
   channelSetupErrorMessage: null, // Error message from channel setup failure
   bleDisconnectErrorMessage: null, // Error message from BLE disconnect failure
+  pendingApiPosts: [], // Array of pending background API post promises
   txTracking: {
     isListening: false,           // Whether we're currently listening for TX echoes
     sentTimestamp: null,          // Timestamp when the ping was sent
@@ -1550,6 +1551,12 @@ async function postApiInBackground(lat, lon, accuracy, heardRepeats) {
   // Hidden 3-second delay before API POST (no user-facing status message)
   debugLog("[API QUEUE] Starting 3-second delay before API POST");
   await new Promise(resolve => setTimeout(resolve, 3000));
+  
+  // Check if we're still connected before posting (disconnect may have happened during delay)
+  if (!state.connection || !state.wardriveSessionId) {
+    debugLog("[API QUEUE] Skipping background API post - disconnected or no session_id");
+    return;
+  }
   
   debugLog("[API QUEUE] 3-second delay complete, posting to API");
   try {
@@ -4091,12 +4098,21 @@ async function sendPing(manual = false) {
         const { lat: apiLat, lon: apiLon, accuracy: apiAccuracy } = capturedCoords;
         debugLog(`[API QUEUE] Backgrounding API post for coordinates: lat=${apiLat.toFixed(5)}, lon=${apiLon.toFixed(5)}, accuracy=${apiAccuracy}m`);
         
-        // Post to API in background (async, fire-and-forget with error handling)
-        postApiInBackground(apiLat, apiLon, apiAccuracy, heardRepeatsStr).catch(error => {
+        // Post to API in background and track the promise
+        const apiPromise = postApiInBackground(apiLat, apiLon, apiAccuracy, heardRepeatsStr).catch(error => {
           debugError(`[API QUEUE] Background API post failed: ${error.message}`, error);
           // Show error to user only if API fails
           setDynamicStatus("Error: API post failed", STATUS_COLORS.error);
+        }).finally(() => {
+          // Remove from pending list when complete
+          const index = state.pendingApiPosts.indexOf(apiPromise);
+          if (index > -1) {
+            state.pendingApiPosts.splice(index, 1);
+          }
         });
+        
+        // Track this promise so disconnect can wait for it
+        state.pendingApiPosts.push(apiPromise);
       } else {
         // This should never happen as coordinates are always captured before ping
         debugError(`[API QUEUE] CRITICAL: No captured ping coordinates available for API post - this indicates a logic error`);
@@ -4548,14 +4564,22 @@ async function disconnect() {
   setConnStatus("Disconnecting", STATUS_COLORS.info);
   setDynamicStatus("Idle"); // Clear dynamic status
 
-  // 1. CRITICAL: Flush API queue FIRST (session_id still valid)
+  // 1. CRITICAL: Wait for pending background API posts (session_id still valid)
+  if (state.pendingApiPosts.length > 0) {
+    debugLog(`[BLE] Waiting for ${state.pendingApiPosts.length} pending background API posts to complete`);
+    await Promise.allSettled(state.pendingApiPosts);
+    state.pendingApiPosts = [];
+    debugLog(`[BLE] All pending background API posts completed`);
+  }
+
+  // 2. Flush API queue (session_id still valid)
   if (apiQueue.messages.length > 0) {
     debugLog(`[BLE] Flushing ${apiQueue.messages.length} queued messages before disconnect`);
     await flushApiQueue();
   }
   stopFlushTimers();
 
-  // 2. THEN release capacity slot if we have a public key
+  // 3. THEN release capacity slot if we have a public key
   if (state.devicePublicKey) {
     try {
       debugLog("[BLE] Releasing capacity slot");
@@ -4566,7 +4590,7 @@ async function disconnect() {
     }
   }
 
-  // 3. Delete the wardriving channel before disconnecting
+  // 4. Delete the wardriving channel before disconnecting
   try {
     if (state.channel && typeof state.connection.deleteChannel === "function") {
       debugLog(`[BLE] Deleting channel ${CHANNEL_NAME} at index ${state.channel.channelIdx}`);
