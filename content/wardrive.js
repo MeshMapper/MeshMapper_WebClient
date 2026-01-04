@@ -262,6 +262,7 @@ const state = {
   devicePublicKey: null, // Hex string of device's public key (used for capacity check)
   deviceModel: null, // Manufacturer/model string exposed by companion
   lastNoiseFloor: null, // Most recent noise floor read from companion (dBm) or 'ERR'
+  noiseFloorUpdateTimer: null, // Timer for periodic noise floor updates (5s interval)
   deviceName: null,
   wardriveSessionId: null, // Session ID from capacity check API (used for all MeshMapper API posts)
   debugMode: false, // Whether debug mode is enabled by MeshMapper API
@@ -972,12 +973,56 @@ function updateDeviceInfoDisplay(name) {
     noiseText = String(state.lastNoiseFloor);
   }
 
-  // Show only Noise in the connection bar's info span
+  // Show only noise value (label is in HTML)
   debugLog(`[UI] Setting noise display: ${noiseText}`);
-  deviceInfoEl.textContent = `Noise: ${noiseText}`;
+  deviceInfoEl.textContent = noiseText;
 }
 
+/**
+ * Start periodic noise floor updates (5 second interval)
+ * Only called if feature is supported by firmware
+ */
+function startNoiseFloorUpdates() {
+  // Clear any existing timer
+  stopNoiseFloorUpdates();
+  
+  // Start periodic updates every 5 seconds
+  state.noiseFloorUpdateTimer = setInterval(async () => {
+    if (!state.connection) {
+      debugLog("[BLE] No connection, stopping noise floor updates");
+      stopNoiseFloorUpdates();
+      return;
+    }
+    
+    try {
+      debugLog("[BLE] Fetching noise floor (5s periodic update)");
+      const stats = await state.connection.getRadioStats(5000);
+      if (stats && typeof stats.noiseFloor !== 'undefined') {
+        state.lastNoiseFloor = stats.noiseFloor;
+        debugLog(`[BLE] Noise floor updated: ${state.lastNoiseFloor}`);
+        updateDeviceInfoDisplay();
+      } else {
+        debugWarn(`[BLE] Radio stats response missing noiseFloor field: ${JSON.stringify(stats)}`);
+      }
+    } catch (e) {
+      debugWarn(`[BLE] Periodic noise floor update failed: ${e && e.message ? e.message : String(e)}`);
+      // Don't update state.lastNoiseFloor on error - keep showing last known value
+    }
+  }, 5000);
+  
+  debugLog("[BLE] Noise floor update timer started (5s interval)");
+}
 
+/**
+ * Stop periodic noise floor updates
+ */
+function stopNoiseFloorUpdates() {
+  if (state.noiseFloorUpdateTimer) {
+    clearInterval(state.noiseFloorUpdateTimer);
+    state.noiseFloorUpdateTimer = null;
+    debugLog("[BLE] Noise floor update timer stopped");
+  }
+}
 
 // ---- Geolocation ----
 async function getCurrentPosition() {
@@ -4456,6 +4501,15 @@ async function connect() {
       debugLog("[UI] Updating device info display after stats fetch on connect");
       updateDeviceInfoDisplay();
       updateDeviceInfoDisplay(selfInfo?.name);
+      
+      // Start periodic noise floor updates if feature is supported
+      if (state.lastNoiseFloor !== null) {
+        startNoiseFloorUpdates();
+        debugLog("[BLE] Started periodic noise floor updates (5s interval)");
+      } else {
+        debugLog("[BLE] Noise floor updates not started (feature unsupported by firmware)");
+      }
+      
       updateAutoButton();
       try { 
         await conn.syncDeviceTime?.(); 
@@ -4583,8 +4637,12 @@ async function connect() {
       setConnectButton(false);
       if (deviceNameEl) deviceNameEl.textContent = "—";
       if (deviceModelEl) deviceModelEl.textContent = "-";
-      // Reset noise display to placeholder
-      if (deviceInfoEl) deviceInfoEl.textContent = "Noise: -";
+      
+      // Stop periodic noise floor updates
+      stopNoiseFloorUpdates();
+      
+      // Reset noise display to placeholder (just value, label is in HTML)
+      if (deviceInfoEl) deviceInfoEl.textContent = "-";
       debugLog("[BLE] Clearing device model, name, and noise floor on disconnect");
       state.deviceModel = null;
       state.deviceName = null;
