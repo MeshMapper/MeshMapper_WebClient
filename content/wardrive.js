@@ -3963,21 +3963,21 @@ async function sendPing(manual = false) {
       setDynamicStatus("Sending manual ping", STATUS_COLORS.info);
     }
     // Refresh radio stats (noise floor) before attempting ping so UI shows fresh value
-    if (state.connection) {
+    if (state.connection && state.lastNoiseFloor !== null) {
+      // Only attempt refresh if firmware supports it (detected on connect)
       debugLog("[PING] Refreshing radio stats before ping");
       try {
-        const stats = await state.connection.getRadioStats(10000);
+        const stats = await state.connection.getRadioStats(5000);
         debugLog(`[PING] getRadioStats returned: ${JSON.stringify(stats)}`);
         if (stats && typeof stats.noiseFloor !== 'undefined') {
           state.lastNoiseFloor = stats.noiseFloor;
           debugLog(`[PING] Radio stats refreshed before ping: noiseFloor=${state.lastNoiseFloor}`);
         } else {
           debugWarn(`[PING] Radio stats response missing noiseFloor field: ${JSON.stringify(stats)}`);
-          state.lastNoiseFloor = null;
         }
       } catch (e) {
-        debugError(`[BLE] getRadioStats failed before ping: ${e && e.message ? e.message : String(e)}`);
-        state.lastNoiseFloor = 'ERR';
+        // Silently skip on error - firmware might not support it
+        debugLog(`[PING] getRadioStats skipped: ${e && e.message ? e.message : String(e)}`);
       }
       debugLog("[UI] Updating device info display after pre-ping stats refresh");
       updateDeviceInfoDisplay(deviceNameEl?.textContent);
@@ -4434,7 +4434,7 @@ async function connect() {
       // Immediately attempt to read radio stats (noise floor) on connect
       debugLog("[BLE] Requesting radio stats on connect");
       try {
-        const stats = await conn.getRadioStats(10000);
+        const stats = await conn.getRadioStats(5000);
         debugLog(`[BLE] getRadioStats returned: ${JSON.stringify(stats)}`);
         if (stats && typeof stats.noiseFloor !== 'undefined') {
           state.lastNoiseFloor = stats.noiseFloor;
@@ -4444,8 +4444,13 @@ async function connect() {
           state.lastNoiseFloor = null;
         }
       } catch (e) {
-        debugError(`[BLE] getRadioStats failed on connect: ${e && e.message ? e.message : String(e)}`);
-        state.lastNoiseFloor = 'ERR';
+        // Timeout likely means firmware doesn't support GetStats command yet
+        if (e && e.message && e.message.includes('timeout')) {
+          debugLog(`[BLE] getRadioStats not supported by companion firmware (timeout)`);
+        } else {
+          debugWarn(`[BLE] getRadioStats failed on connect: ${e && e.message ? e.message : String(e)}`);
+        }
+        state.lastNoiseFloor = null; // Show '--' instead of 'ERR' for unsupported feature
       }
       // Update connection bar display (deviceNameEl already set)
       debugLog("[UI] Updating device info display after stats fetch on connect");
