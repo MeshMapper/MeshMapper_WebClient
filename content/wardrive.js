@@ -3967,14 +3967,16 @@ async function sendPing(manual = false) {
       debugLog("[PING] Refreshing radio stats before ping");
       try {
         const stats = await state.connection.getRadioStats(10000);
+        debugLog(`[PING] getRadioStats returned: ${JSON.stringify(stats)}`);
         if (stats && typeof stats.noiseFloor !== 'undefined') {
           state.lastNoiseFloor = stats.noiseFloor;
+          debugLog(`[PING] Radio stats refreshed before ping: noiseFloor=${state.lastNoiseFloor}`);
         } else {
+          debugWarn(`[PING] Radio stats response missing noiseFloor field: ${JSON.stringify(stats)}`);
           state.lastNoiseFloor = null;
         }
-        debugLog(`[PING] Radio stats refreshed before ping: noiseFloor=${state.lastNoiseFloor}`);
       } catch (e) {
-        debugError(`[BLE] getRadioStats failed before ping: ${e && e.message ? e.message : e}`);
+        debugError(`[BLE] getRadioStats failed before ping: ${e && e.message ? e.message : String(e)}`);
         state.lastNoiseFloor = 'ERR';
       }
       debugLog("[UI] Updating device info display after pre-ping stats refresh");
@@ -4432,15 +4434,17 @@ async function connect() {
       // Immediately attempt to read radio stats (noise floor) on connect
       debugLog("[BLE] Requesting radio stats on connect");
       try {
-        const stats = await conn.getRadioStats(10000).catch(e => { throw e; });
+        const stats = await conn.getRadioStats(10000);
+        debugLog(`[BLE] getRadioStats returned: ${JSON.stringify(stats)}`);
         if (stats && typeof stats.noiseFloor !== 'undefined') {
           state.lastNoiseFloor = stats.noiseFloor;
+          debugLog(`[BLE] Radio stats acquired on connect: noiseFloor=${state.lastNoiseFloor}`);
         } else {
+          debugWarn(`[BLE] Radio stats response missing noiseFloor field: ${JSON.stringify(stats)}`);
           state.lastNoiseFloor = null;
         }
-        debugLog(`[BLE] Radio stats acquired on connect: noiseFloor=${state.lastNoiseFloor}`);
       } catch (e) {
-        debugError(`[BLE] getRadioStats failed on connect: ${e && e.message ? e.message : e}`);
+        debugError(`[BLE] getRadioStats failed on connect: ${e && e.message ? e.message : String(e)}`);
         state.lastNoiseFloor = 'ERR';
       }
       // Update connection bar display (deviceNameEl already set)
