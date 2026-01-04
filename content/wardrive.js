@@ -965,7 +965,7 @@ function updateDeviceInfoDisplay(name) {
   // Determine noise display value
   let noiseText = "-";
   if (state.lastNoiseFloor === null) {
-    noiseText = "--";
+    noiseText = "Firmware 1.11+";
   } else if (state.lastNoiseFloor === 'ERR') {
     noiseText = "ERR";
   } else {
