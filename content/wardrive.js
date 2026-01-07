@@ -1021,6 +1021,9 @@ function updateSlotsDisplay(zone) {
     slotsDisplay.textContent = `Full (0/${slots_max})`;
     slotsDisplay.className = "font-medium text-amber-300";
     
+    // Update location display to amber (slots full)
+    locationDisplay.className = "font-medium text-amber-300";
+    
     // Show warning in dynamic status bar (yellow, not blocking - user can still connect for RX)
     const warnMsg = `No TX wardriving slots for ${code}. RX only.`;
     setDynamicStatus(warnMsg, STATUS_COLORS.warning);
@@ -1030,6 +1033,10 @@ function updateSlotsDisplay(zone) {
   } else {
     slotsDisplay.textContent = `${slots_available} available`;
     slotsDisplay.className = "font-medium text-emerald-300";
+    
+    // Update location display to green (slots available)
+    locationDisplay.className = "font-medium text-emerald-300";
+    
     debugLog(`[UI] Slots display: ${slots_available} available (${slots_available}/${slots_max})`);
     
     // Slots available - clear warning and show Idle (only if disconnected)
