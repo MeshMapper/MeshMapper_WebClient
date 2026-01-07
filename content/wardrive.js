@@ -1051,12 +1051,9 @@ function updateSlotsDisplay(zone) {
     
     debugLog(`[UI] Slots display: ${slots_available} available (${slots_available}/${slots_max})`);
     
-    // Slots available - clear warning and show Idle (only if disconnected)
-    if (!state.connection) {
-      setDynamicStatus("Idle", STATUS_COLORS.idle);
-    }
-    
     // Re-check connect button state now that slots are available
+    // Note: updateConnectButtonState() will set the appropriate status message
+    // based on both zone status AND antenna selection
     updateConnectButtonState();
   }
 }
