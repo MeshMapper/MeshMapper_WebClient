@@ -997,7 +997,6 @@ function updateDistanceUi() {
  * @param {string} name - Device name to show
  */
 function updateDeviceInfoDisplay(name) {
-  if (!deviceInfoEl) return;
   debugLog(`[UI] updateDeviceInfoDisplay called with name="${name}"`);
   const displayName = name || state.deviceName || deviceNameEl?.textContent || "[No device]";
   // Update device name element
