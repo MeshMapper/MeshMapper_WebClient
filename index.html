@@ -120,6 +120,11 @@
             Radio Power <span id="powerLabelStatus"></span>
           </label>
           
+          <!-- Placeholder when disconnected -->
+          <div id="powerPlaceholder" style="display: flex; align-items: center; justify-content: center; padding: 0.5rem 0.75rem; border-radius: 0.5rem; border: 1px solid #475569; background-color: rgba(71, 85, 105, 0.1);">
+            <span class="text-sm font-medium text-slate-500">Waiting for connection...</span>
+          </div>
+          
           <!-- Auto-configured power display (shown when auto-set) -->
           <div id="powerAutoDisplay" class="hidden" style="align-items: center; gap: 0.5rem;">
             <div style="flex: 1; display: flex; align-items: center; justify-content: center; padding: 0.5rem 0.75rem; border-radius: 0.5rem; border: 1px solid #10b981; background-color: rgba(16, 185, 129, 0.1);">
@@ -151,9 +156,13 @@
           </div>
         </div>
 
-        <!-- Permissions & Status -->
+        <!-- Device Info -->
         <div class="space-y-2">
-          <label class="block text-xs font-medium text-slate-400 uppercase tracking-wide">Permissions & Status</label>
+          <label class="block text-xs font-medium text-slate-400 uppercase tracking-wide">Device Info</label>
+          <div class="flex items-center gap-2 text-sm">
+            <span class="text-slate-300">Model:</span>
+            <span id="deviceModel" class="font-medium">-</span>
+          </div>
           <div class="flex flex-wrap gap-4 text-sm">
             <div class="flex items-center gap-2">
               <span class="text-slate-300">Location:</span>
@@ -163,10 +172,6 @@
               <span class="text-slate-300">Channel:</span>
               <span id="channelInfo" class="font-medium">-</span>
             </div>
-          </div>
-          <div class="flex items-center gap-2 text-sm">
-            <span class="text-slate-300">Model:</span>
-            <span id="deviceModel" class="font-medium">-</span>
           </div>
         </div>
       </section>

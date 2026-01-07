@@ -4516,11 +4516,15 @@ async function autoSetPowerLevel() {
       powerRadio.checked = true;
       state.autoPowerSet = true;
       
-      // Show auto-configured power display, hide manual selection
+      // Show auto-configured power display, hide manual selection and placeholder
+      const powerPlaceholder = document.getElementById("powerPlaceholder");
       const powerAutoDisplay = document.getElementById("powerAutoDisplay");
       const powerManualSelection = document.getElementById("powerManualSelection");
       const powerAutoValue = document.getElementById("powerAutoValue");
       
+      if (powerPlaceholder) {
+        powerPlaceholder.style.display = "none";
+      }
       if (powerAutoDisplay) {
         powerAutoDisplay.classList.remove("hidden");
         powerAutoDisplay.style.display = "flex";
@@ -4565,10 +4569,14 @@ async function autoSetPowerLevel() {
     debugError(`[DEVICE MODEL] Unknown device: ${state.deviceModel}`);
     state.autoPowerSet = false;
     
-    // Hide auto-configured power display, show manual selection
+    // Hide auto-configured power display and placeholder, show manual selection
+    const powerPlaceholder = document.getElementById("powerPlaceholder");
     const powerAutoDisplay = document.getElementById("powerAutoDisplay");
     const powerManualSelection = document.getElementById("powerManualSelection");
     
+    if (powerPlaceholder) {
+      powerPlaceholder.style.display = "none";
+    }
     if (powerAutoDisplay) {
       powerAutoDisplay.classList.add("hidden");
       powerAutoDisplay.style.display = "none";
@@ -4846,11 +4854,15 @@ async function connect() {
       state.bleDisconnectErrorMessage = null; // Clear error message
       state.autoPowerSet = false; // Reset auto-power flag
       
-      // Hide both power displays and clear label
+      // Show placeholder, hide both power displays and clear label
+      const powerPlaceholder = document.getElementById("powerPlaceholder");
       const powerAutoDisplay = document.getElementById("powerAutoDisplay");
       const powerManualSelection = document.getElementById("powerManualSelection");
       const powerLabelStatus = document.getElementById("powerLabelStatus");
       
+      if (powerPlaceholder) {
+        powerPlaceholder.style.display = "flex";
+      }
       if (powerAutoDisplay) {
         powerAutoDisplay.classList.add("hidden");
         powerAutoDisplay.style.display = "none";
