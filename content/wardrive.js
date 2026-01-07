@@ -4597,8 +4597,7 @@ async function autoSetPowerLevel() {
       deviceModelEl.textContent = "Unknown";
     }
     
-    // Set persistent status message until user selects power
-    setDynamicStatus("Unknown device - select power manually", STATUS_COLORS.warning, true);
+    // Don't show status message here - will be shown after connection completes
     
     debugLog("[DEVICE MODEL] Auto-power skipped, user must select power manually");
   }
@@ -4616,12 +4615,7 @@ async function connect() {
   
   // Set connection bar to "Connecting" - will remain until GPS init completes
   setConnStatus("Connecting", STATUS_COLORS.info);
-  // Don't clear dynamic status if it's showing a warning (e.g., "Unknown device" message)
-  const currentStatus = document.getElementById("status");
-  const isWarning = currentStatus && currentStatus.classList.contains("text-amber-400");
-  if (!isWarning) {
-    setDynamicStatus("Idle"); // Clear dynamic status only if not showing a warning
-  }
+  setDynamicStatus("Idle"); // Clear dynamic status
 
   try {
     debugLog("[BLE] Opening BLE connection...");
