@@ -174,6 +174,10 @@ const gpsAccEl = document.getElementById("gpsAcc");
 const distanceInfoEl = document.getElementById("distanceInfo"); // Distance from last ping
 const txPingsEl = document.getElementById("txPings"); // TX log container
 const coverageFrameEl = document.getElementById("coverageFrame");
+
+// Track last connection status to avoid logging spam (declared here to avoid TDZ with setConnStatus call below)
+let lastConnStatusText = null;
+
 setConnectButton(false);
 setConnStatus("Disconnected", STATUS_COLORS.error);
 
@@ -675,7 +679,7 @@ function cleanupAllTimers() {
 }
 
 function enableControls(connected) {
-  connectBtn.disabled     = false;
+  setConnectButtonDisabled(false);
   channelInfoEl.textContent = CHANNEL_NAME;
   updateControlsForCooldown();
   
@@ -723,6 +727,22 @@ function scheduleCoverageRefresh(lat, lon, delayMs = 0) {
     coverageFrameEl.src = url;
   }, delayMs);
 }
+
+/**
+ * Set Connect button visual disabled state
+ * Updates opacity and cursor to indicate whether button is clickable
+ * @param {boolean} disabled - Whether button should appear disabled
+ */
+function setConnectButtonDisabled(disabled) {
+  if (!connectBtn) return;
+  connectBtn.disabled = disabled;
+  if (disabled) {
+    connectBtn.classList.add("opacity-50", "cursor-not-allowed");
+  } else {
+    connectBtn.classList.remove("opacity-50", "cursor-not-allowed");
+  }
+}
+
 function setConnectButton(connected) {
   if (!connectBtn) return;
   if (connected) {
@@ -759,9 +779,6 @@ function setConnectButton(connected) {
  * @param {string} text - Connection status text (one of the four states above)
  * @param {string} color - Status color class from STATUS_COLORS
  */
-// Track last connection status to avoid logging spam
-let lastConnStatusText = null;
-
 function setConnStatus(text, color) {
   const connectionStatusEl = document.getElementById("connectionStatus");
   const statusIndicatorEl = document.getElementById("statusIndicator");
@@ -963,7 +980,7 @@ async function performAppLaunchZoneCheck() {
   debugLog("[GEO AUTH] [INIT] Performing app launch zone check");
   
   // Disable Connect button initially
-  connectBtn.disabled = true;
+  setConnectButtonDisabled(true);
   debugLog("[GEO AUTH] [INIT] Connect button disabled during zone check");
   
   // Show "Checking zone..." status
@@ -1023,7 +1040,7 @@ async function performAppLaunchZoneCheck() {
     
     // Enable Connect button only if in valid zone
     if (result.success && result.in_zone) {
-      connectBtn.disabled = false;
+      setConnectButtonDisabled(false);
       debugLog("[GEO AUTH] [INIT] ✅ Connect button enabled (in valid zone)");
       
       // Start 30s slot refresh timer (disconnected mode)
@@ -1047,14 +1064,14 @@ async function performAppLaunchZoneCheck() {
       }, 30000); // 30 seconds
       debugLog("[GEO AUTH] [INIT] Started 30s slot refresh timer");
     } else {
-      connectBtn.disabled = true;
+      setConnectButtonDisabled(true);
       debugLog("[GEO AUTH] [INIT] ❌ Connect button remains disabled (not in valid zone or check failed)");
     }
     
   } catch (err) {
     debugError(`[GEO AUTH] [INIT] Exception during app launch zone check: ${err.message}`);
     updateZoneStatusUI(null, "error");
-    connectBtn.disabled = true;
+    setConnectButtonDisabled(true);
   }
 }
 
@@ -5005,7 +5022,7 @@ async function connect() {
     alert("Web Bluetooth not supported in this browser.");
     return;
   }
-  connectBtn.disabled = true;
+  setConnectButtonDisabled(true);
   
   // Hide zone status to make room for device name/noise floor
   zoneStatus.classList.add("hidden");
@@ -5043,7 +5060,7 @@ async function connect() {
       // Keep "Connecting" status visible during the full connection process
       // Don't show "Connected" until everything is complete
       setConnectButton(true);
-      connectBtn.disabled = false;
+      setConnectButtonDisabled(false);
       const selfInfo = await conn.getSelfInfo();
       debugLog(`[BLE] Device info: ${selfInfo?.name || "[No device]"}`);
       
@@ -5360,7 +5377,7 @@ async function connect() {
     debugError(`[BLE] BLE connection failed: ${e.message}`, e);
     setConnStatus("Disconnected", STATUS_COLORS.error);
     setDynamicStatus("Connection failed", STATUS_COLORS.error);
-    connectBtn.disabled = false;
+    setConnectButtonDisabled(false);
   }
 }
 async function disconnect() {
@@ -5370,7 +5387,7 @@ async function disconnect() {
     return;
   }
 
-  connectBtn.disabled = true;
+  setConnectButtonDisabled(true);
   
   // Set disconnectReason to "normal" if not already set (for user-initiated disconnects)
   if (state.disconnectReason === null || state.disconnectReason === undefined) {
@@ -5470,7 +5487,7 @@ async function disconnect() {
     state.disconnectReason = "ble_disconnect_error"; // Mark specific disconnect reason
     state.bleDisconnectErrorMessage = e.message || "Disconnect failed"; // Store error message
   } finally {
-    connectBtn.disabled = false;
+    setConnectButtonDisabled(false);
   }
 }
 
@@ -5524,7 +5541,7 @@ function updateConnectButtonState() {
   
   if (!isConnected) {
     // Only enable Connect if external antenna is selected
-    connectBtn.disabled = !externalAntennaSelected;
+    setConnectButtonDisabled(!externalAntennaSelected);
     
     // Update dynamic status based on selection
     if (!externalAntennaSelected) {

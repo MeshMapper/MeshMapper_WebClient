@@ -48,9 +48,9 @@
         <!-- Connection Status Bar -->
         <div id="connectionBar" class="bg-slate-800/80 border border-slate-700 rounded-t-xl rounded-b-none px-4 py-0.5 flex items-center justify-between">
           <div class="flex items-center gap-2 text-sm">
-            <span id="statusIndicator" class="text-base">●</span>
+            <span id="statusIndicator" class="text-base text-red-400">●</span>
             <span id="connectionStatus" class="font-medium text-red-300">Disconnected</span>
-            <span id="zoneStatus" class="text-xs text-slate-400 hidden"></span>
+            <span id="zoneStatus" class="text-xs text-slate-400"></span>
           </div>
           <div class="flex items-center gap-3">
             <span id="noiseDisplay" class="text-sm text-slate-300"></span>
@@ -156,8 +156,8 @@
         <div class="space-y-2">
           <label class="block text-xs font-medium text-slate-400 uppercase tracking-wide">Status Info</label>
           
-          <!-- Model and Channel (responsive grid: stack on mobile, side-by-side on tablet+) -->
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <!-- Model and Channel (always 2 columns) -->
+          <div class="grid grid-cols-2 gap-2">
             <div class="flex items-center gap-2 text-sm">
               <span class="text-slate-300">Model:</span>
               <span id="deviceModel" class="font-medium">—</span>
@@ -168,8 +168,8 @@
             </div>
           </div>
           
-          <!-- Location and Slots (responsive grid: stack on mobile, side-by-side on tablet+) -->
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <!-- Location and Slots (always 2 columns) -->
+          <div class="grid grid-cols-2 gap-2">
             <div class="flex items-center gap-2 text-sm">
               <span class="text-slate-300">Location:</span>
               <span id="locationDisplay" class="font-medium">—</span>
