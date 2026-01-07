@@ -1828,9 +1828,11 @@ function buildPayload(lat, lon) {
  * @returns {string} Device name or default identifier
  */
 function getDeviceIdentifier() {
-  const nameText = deviceNameEl?.textContent;
-  if (!nameText || nameText === "—") return MESHMAPPER_DEFAULT_WHO;
-  return nameText || MESHMAPPER_DEFAULT_WHO;
+  // Use state.deviceName which is set during connect from selfInfo.name
+  if (state.deviceName && state.deviceName !== "[No device]") {
+    return state.deviceName;
+  }
+  return MESHMAPPER_DEFAULT_WHO;
 }
 
 // ---- Geo-Auth Zone Checking ----
