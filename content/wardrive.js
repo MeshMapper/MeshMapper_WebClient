@@ -4565,8 +4565,8 @@ async function autoSetPowerLevel() {
     }
     
   } else {
-    // Unknown device - log error and require manual selection
-    debugError(`[DEVICE MODEL] Unknown device: ${state.deviceModel}`);
+    // Unknown device - log info and require manual selection
+    debugLog(`[DEVICE MODEL] Unknown device: ${state.deviceModel}`);
     state.autoPowerSet = false;
     
     // Hide auto-configured power display and placeholder, show manual selection
@@ -4616,7 +4616,12 @@ async function connect() {
   
   // Set connection bar to "Connecting" - will remain until GPS init completes
   setConnStatus("Connecting", STATUS_COLORS.info);
-  setDynamicStatus("Idle"); // Clear dynamic status
+  // Don't clear dynamic status if it's showing a warning (e.g., "Unknown device" message)
+  const currentStatus = document.getElementById("status");
+  const isWarning = currentStatus && currentStatus.classList.contains("text-amber-400");
+  if (!isWarning) {
+    setDynamicStatus("Idle"); // Clear dynamic status only if not showing a warning
+  }
 
   try {
     debugLog("[BLE] Opening BLE connection...");
