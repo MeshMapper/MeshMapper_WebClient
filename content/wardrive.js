@@ -5546,7 +5546,7 @@ async function disconnect() {
     state.disconnectReason = "ble_disconnect_error"; // Mark specific disconnect reason
     state.bleDisconnectErrorMessage = e.message || "Disconnect failed"; // Store error message
   } finally {
-    setConnectButtonDisabled(false);
+    updateConnectButtonState();  // Re-check zone and antenna requirements
   }
 }
 
