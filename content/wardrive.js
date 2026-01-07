@@ -5262,6 +5262,7 @@ export async function onLoad() {
       const modal = document.getElementById("overrideModal");
       if (modal) {
         modal.classList.remove("hidden");
+        modal.style.display = "flex";
       }
     });
   }
@@ -5307,6 +5308,7 @@ export async function onLoad() {
     overrideModalCancel.addEventListener("click", () => {
       debugLog("[UI] Override canceled via custom modal");
       overrideModal.classList.add("hidden");
+      overrideModal.style.display = "none";
     });
   }
   
@@ -5316,6 +5318,7 @@ export async function onLoad() {
       if (e.target === overrideModal) {
         debugLog("[UI] Override modal closed via backdrop click");
         overrideModal.classList.add("hidden");
+        overrideModal.style.display = "none";
       }
     });
   }
