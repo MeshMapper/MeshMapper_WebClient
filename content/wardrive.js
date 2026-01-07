@@ -4627,6 +4627,22 @@ async function connect() {
   }
   connectBtn.disabled = true;
   
+  // CLEAR all logs immediately on connect (new session)
+  txLogState.entries = [];
+  renderTxLogEntries(true);
+  updateTxLogSummary();
+  
+  rxLogState.entries = [];
+  rxLogState.dropCount = 0;
+  renderRxLogEntries(true);
+  updateRxLogSummary();
+  
+  errorLogState.entries = [];
+  renderErrorLogEntries(true);
+  updateErrorLogSummary();
+  
+  debugLog("[BLE] All logs cleared on connect start (new session)");
+  
   // Set connection bar to "Connecting" - will remain until GPS init completes
   setConnStatus("Connecting", STATUS_COLORS.info);
   setDynamicStatus("Idle"); // Clear dynamic status
@@ -4749,22 +4765,6 @@ async function connect() {
         // Start unified RX listening after channel setup
         startUnifiedRxListening();
         debugLog("[BLE] Unified RX listener started on connect");
-        
-        // CLEAR all logs on connect (new session)
-        txLogState.entries = [];
-        renderTxLogEntries(true);
-        updateTxLogSummary();
-        
-        rxLogState.entries = [];
-        rxLogState.dropCount = 0;
-        renderRxLogEntries(true);
-        updateRxLogSummary();
-        
-        errorLogState.entries = [];
-        renderErrorLogEntries(true);
-        updateErrorLogSummary();
-        
-        debugLog("[BLE] All logs cleared on connect (new session)");
         
         // GPS initialization
         debugLog("[BLE] Starting GPS initialization");
