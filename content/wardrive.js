@@ -4503,7 +4503,7 @@ async function autoSetPowerLevel() {
   if (deviceConfig) {
     // Known device - auto-configure power
     debugLog(`[DEVICE MODEL] Known device found: ${deviceConfig.shortName}`);
-    debugLog(`[DEVICE MODEL] Auto-configuring power to ${deviceConfig.power}w`);
+    debugLog(`[DEVICE MODEL] Auto-configuring power to ${deviceConfig.power.toFixed(1)}w`);
     
     // Select the matching power radio button
     // Format power value to match HTML format exactly (e.g., 1.0 → "1.0w", 0.3 → "0.3w")
