@@ -5260,11 +5260,18 @@ export async function onLoad() {
       
       // Show custom confirmation modal
       const modal = document.getElementById("overrideModal");
+      debugLog(`[UI] Modal element lookup result: ${modal ? 'found' : 'NOT FOUND'}`);
       if (modal) {
+        debugLog(`[UI] Modal current display: ${modal.style.display}, classes: ${modal.className}`);
         modal.classList.remove("hidden");
         modal.style.display = "flex";
+        debugLog(`[UI] Modal after show - display: ${modal.style.display}, classes: ${modal.className}`);
+      } else {
+        debugError("[UI] overrideModal element not found in DOM!");
       }
     });
+  } else {
+    debugError("[UI] powerOverrideBtn element not found!");
   }
   
   // Add event listeners to modal buttons
