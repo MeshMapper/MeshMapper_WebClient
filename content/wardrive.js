@@ -319,7 +319,8 @@ const statusMessageState = {
   pendingMessage: null,     // Pending message to display after minimum visibility
   pendingTimer: null,       // Timer for pending message
   currentText: '',          // Current status text
-  currentColor: ''          // Current status color
+  currentColor: '',         // Current status color
+  outsideZoneError: null    // Persistent "outside zone" error message (blocks other messages until cleared)
 };
 
 /**
@@ -841,11 +842,19 @@ function setConnStatus(text, color) {
  * Connection status words (Connected/Connecting/Disconnecting/Disconnected) are blocked
  * and replaced with em dash (—) placeholder.
  * 
+ * When outsideZoneError is set, all other messages are blocked until the error is cleared.
+ * 
  * @param {string} text - Status message text (null/empty shows "—")
  * @param {string} color - Status color class from STATUS_COLORS
  * @param {boolean} immediate - If true, bypass minimum visibility (for countdown timers)
  */
 function setDynamicStatus(text, color = STATUS_COLORS.idle, immediate = false) {
+  // If outside zone error is active, block all other messages (except clearing it)
+  if (statusMessageState.outsideZoneError && text !== statusMessageState.outsideZoneError) {
+    debugLog(`[UI] Dynamic status blocked by persistent outside zone error: "${text}"`);
+    return;
+  }
+  
   // Normalize empty/null/whitespace to em dash
   if (!text || text.trim() === '') {
     text = '—';
@@ -888,6 +897,13 @@ function updateZoneStatusUI(zoneData) {
     const slotsText = `Zone: ${zone.code}`;
     const statusColor = atCapacity ? "text-amber-300" : "text-emerald-300";
     
+    // Clear persistent outside zone error if it was set
+    if (statusMessageState.outsideZoneError) {
+      debugLog(`[GEO AUTH] [UI] Clearing persistent outside zone error - now in zone ${zone.code}`);
+      statusMessageState.outsideZoneError = null;
+      setDynamicStatus("—", STATUS_COLORS.idle); // Clear the dynamic status bar
+    }
+    
     zoneStatus.textContent = slotsText;
     zoneStatus.className = `text-xs ${statusColor}`;
     
@@ -905,8 +921,19 @@ function updateZoneStatusUI(zoneData) {
     const nearest = zoneData.nearest_zone;
     const distText = `Outside zone (${nearest.distance_km}km to ${nearest.code})`;
     
-    zoneStatus.textContent = distText;
-    zoneStatus.className = "text-xs text-yellow-400";
+    // Clear zone status in connection bar (don't show distance there)
+    zoneStatus.textContent = "";
+    zoneStatus.className = "text-xs text-slate-400";
+    
+    // Set persistent outside zone error - blocks all other dynamic status messages
+    statusMessageState.outsideZoneError = distText;
+    debugLog(`[GEO AUTH] [UI] Set persistent outside zone error: "${distText}"`);
+    
+    // Show error in dynamic status bar (red) - this overrides "Select external antenna" message
+    setDynamicStatus(distText, STATUS_COLORS.error);
+    
+    // Log as error
+    debugError(`[GEO AUTH] [UI] ${distText}`);
     
     locationDisplay.textContent = "—";
     locationDisplay.className = "font-medium text-slate-400";
