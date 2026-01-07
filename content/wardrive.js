@@ -730,6 +730,30 @@ function scheduleCoverageRefresh(lat, lon, delayMs = 0) {
 }
 
 /**
+ * Update map and GPS overlay after a zone check
+ * - Updates GPS coordinates and accuracy on the map overlay
+ * - Refreshes the map iframe with new coordinates
+ * @param {Object} coords - Coordinates object with lat, lon, accuracy properties
+ */
+function updateMapOnZoneCheck(coords) {
+  if (!coords) return;
+  
+  const { lat, lon, accuracy } = coords;
+  
+  // Update GPS overlay
+  if (gpsInfoEl) {
+    gpsInfoEl.textContent = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+  }
+  if (gpsAccEl && accuracy) {
+    gpsAccEl.textContent = `±${Math.round(accuracy)}m`;
+  }
+  
+  // Refresh map iframe with new coordinates
+  scheduleCoverageRefresh(lat, lon);
+  debugLog(`[GEO AUTH] Map updated: lat=${lat.toFixed(5)}, lon=${lon.toFixed(5)}, accuracy=${accuracy ? Math.round(accuracy) + 'm' : 'N/A'}`);
+}
+
+/**
  * Set Connect button visual disabled state
  * Updates opacity and cursor to indicate whether button is clickable
  * @param {boolean} disabled - Whether button should appear disabled
@@ -1038,6 +1062,7 @@ function startSlotRefreshTimer() {
         if (result.success && result.zone) {
           state.currentZone = result.zone;
           updateSlotsDisplay(result.zone);
+          updateMapOnZoneCheck(coords);  // Update map and GPS overlay
           debugLog(`[GEO AUTH] [SLOT REFRESH] Updated slots: ${result.zone.slots_available}/${result.zone.slots_max}`);
         } else if (result && !result.success) {
           // Handle error states (outofdate, etc.) - this will disable button and clear currentZone
@@ -1112,21 +1137,8 @@ async function performAppLaunchZoneCheck() {
     // Update UI with result
     updateZoneStatusUI(result, null);
     
-    // Center map on checked location
-    try {
-      if (coverageFrameEl && coverageFrameEl.contentWindow) {
-        debugLog(`[GEO AUTH] [INIT] Centering map on checked location: ${coords.lat.toFixed(6)}, ${coords.lon.toFixed(6)}`);
-        coverageFrameEl.contentWindow.postMessage({
-          type: "centerMap",
-          lat: coords.lat,
-          lon: coords.lon
-        }, "*");
-      } else {
-        debugWarn("[GEO AUTH] [INIT] Cannot center map: iframe not available");
-      }
-    } catch (mapErr) {
-      debugWarn(`[GEO AUTH] [INIT] Failed to center map: ${mapErr.message}`);
-    }
+    // Update map and GPS overlay with zone check coordinates
+    updateMapOnZoneCheck(coords);
     
     // Enable Connect button only if in valid zone AND external antenna selected
     if (result.success && result.in_zone) {
@@ -1193,20 +1205,8 @@ async function handleZoneCheckOnMove(newCoords) {
       // Update UI with new zone status
       updateZoneStatusUI(result, null);
       
-      // Center map on new location
-      try {
-        const iframe = coverageFrame.querySelector("iframe");
-        if (iframe && iframe.contentWindow) {
-          debugLog(`[GEO AUTH] [GPS MOVEMENT] Centering map on new location: ${newCoords.lat.toFixed(6)}, ${newCoords.lon.toFixed(6)}`);
-          iframe.contentWindow.postMessage({
-            type: "centerMap",
-            lat: newCoords.lat,
-            lon: newCoords.lon
-          }, "*");
-        }
-      } catch (mapErr) {
-        debugWarn(`[GEO AUTH] [GPS MOVEMENT] Failed to center map: ${mapErr.message}`);
-      }
+      // Update map and GPS overlay with new coordinates
+      updateMapOnZoneCheck(newCoords);
       
     } catch (err) {
       debugError(`[GEO AUTH] [GPS MOVEMENT] Exception during zone recheck: ${err.message}`);
