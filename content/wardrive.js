@@ -1069,38 +1069,37 @@ function startSlotRefreshTimer() {
   }
   
   state.slotRefreshTimerId = setInterval(async () => {
-    debugLog("[GEO AUTH] [SLOT REFRESH] 30s timer triggered (disconnected mode)");
-    // Continue checking even when outside zone, so we can detect returning to zone
-    if (!state.connection) {
-      // Re-check zone to refresh slots or detect zone re-entry
-      const coords = await getValidGpsForZoneCheck();
-      if (coords) {
-        const result = await checkZoneStatus(coords);
-        if (result.success && result.in_zone && result.zone) {
-          // In zone (or returned to zone) - update slots display
-          const wasOutside = !state.currentZone;
-          state.currentZone = result.zone;
-          state.lastZoneCheckCoords = { lat: coords.lat, lon: coords.lon };
-          updateZoneStatusUI(result);
-          updateMapOnZoneCheck(coords);  // Update map and GPS overlay
-          if (wasOutside) {
-            debugLog(`[GEO AUTH] [SLOT REFRESH] ✅ Returned to zone: ${result.zone.name}, slots: ${result.zone.slots_available}/${result.zone.slots_max}`);
-          } else {
-            debugLog(`[GEO AUTH] [SLOT REFRESH] Updated slots: ${result.zone.slots_available}/${result.zone.slots_max}`);
-          }
-        } else if (result.success && !result.in_zone) {
-          // Outside zone - update UI to show outside zone status
-          state.currentZone = null;
-          state.lastZoneCheckCoords = { lat: coords.lat, lon: coords.lon };
-          updateZoneStatusUI(result);
-          updateMapOnZoneCheck(coords);
-          debugLog(`[GEO AUTH] [SLOT REFRESH] Outside zone, nearest: ${result.nearest_zone?.name} at ${result.nearest_zone?.distance_km}km`);
-        } else if (result && !result.success) {
-          // Handle error states (outofdate, etc.) - this will disable button and clear currentZone
-          state.currentZone = null;
-          updateZoneStatusUI(result);
-          debugLog(`[GEO AUTH] [SLOT REFRESH] Zone check failed: ${result.reason || 'unknown'}`);
+    const mode = state.connection ? "connected" : "disconnected";
+    debugLog(`[GEO AUTH] [SLOT REFRESH] 30s timer triggered (${mode} mode)`);
+    // Continue checking even while connected to keep slot display current
+    // Re-check zone to refresh slots or detect zone re-entry
+    const coords = await getValidGpsForZoneCheck();
+    if (coords) {
+      const result = await checkZoneStatus(coords);
+      if (result.success && result.in_zone && result.zone) {
+        // In zone (or returned to zone) - update slots display
+        const wasOutside = !state.currentZone;
+        state.currentZone = result.zone;
+        state.lastZoneCheckCoords = { lat: coords.lat, lon: coords.lon };
+        updateZoneStatusUI(result);
+        updateMapOnZoneCheck(coords);  // Update map and GPS overlay
+        if (wasOutside) {
+          debugLog(`[GEO AUTH] [SLOT REFRESH] ✅ Returned to zone: ${result.zone.name}, slots: ${result.zone.slots_available}/${result.zone.slots_max}`);
+        } else {
+          debugLog(`[GEO AUTH] [SLOT REFRESH] Updated slots: ${result.zone.slots_available}/${result.zone.slots_max}`);
         }
+      } else if (result.success && !result.in_zone) {
+        // Outside zone - update UI to show outside zone status
+        state.currentZone = null;
+        state.lastZoneCheckCoords = { lat: coords.lat, lon: coords.lon };
+        updateZoneStatusUI(result);
+        updateMapOnZoneCheck(coords);
+        debugLog(`[GEO AUTH] [SLOT REFRESH] Outside zone, nearest: ${result.nearest_zone?.name} at ${result.nearest_zone?.distance_km}km`);
+      } else if (result && !result.success) {
+        // Handle error states (outofdate, etc.) - this will disable button and clear currentZone
+        state.currentZone = null;
+        updateZoneStatusUI(result);
+        debugLog(`[GEO AUTH] [SLOT REFRESH] Zone check failed: ${result.reason || 'unknown'}`);
       }
     }
   }, 30000); // 30 seconds
@@ -2050,7 +2049,9 @@ async function requestAuth(reason) {
 
     // Handle HTTP-level errors with known error codes in body
     if (!response.ok) {
-      debugError(`[AUTH] API returned error status ${response.status}`);
+      const serverMsg = data?.message || 'No message';
+      addErrorLogEntry(`API returned error status ${response.status}: ${serverMsg}`, "AUTH");
+      debugError(`[AUTH] API returned error status ${response.status}: ${serverMsg}`);
       
       // Check if server returned a known error code
       if (data && data.reason && REASON_MESSAGES[data.reason]) {
@@ -2062,9 +2063,10 @@ async function requestAuth(reason) {
         return true; // Allow disconnect to proceed
       }
       
-      // Unknown error - fail closed for connect
+      // Unknown error - fail closed for connect, include server message
       if (reason === "connect") {
-        debugError("[AUTH] Failing closed (denying connection) due to unknown API error");
+        addErrorLogEntry(`Auth failed: ${data?.reason || 'unknown'} - ${serverMsg}`, "AUTH");
+        debugError(`[AUTH] Failing closed (denying connection) due to unknown API error: ${data?.reason || 'unknown'}`);
         state.disconnectReason = "app_down";
         return false;
       }
@@ -5390,6 +5392,19 @@ async function connect() {
         // Note: Settings are NOT locked on connect - only when auto mode starts
         // This allows users to change power after connection if device was unknown
         
+        // Immediate zone check after connect to update slot display
+        debugLog("[GEO AUTH] Performing zone check after successful connect");
+        const coords = await getValidGpsForZoneCheck();
+        if (coords) {
+          const result = await checkZoneStatus(coords);
+          if (result.success && result.zone) {
+            state.currentZone = result.zone;
+            state.lastZoneCheckCoords = { lat: coords.lat, lon: coords.lon };
+            updateZoneStatusUI(result);
+            debugLog(`[GEO AUTH] Post-connect zone check: ${result.zone.name}, slots: ${result.zone.slots_available}/${result.zone.slots_max}`);
+          }
+        }
+        
         debugLog("[BLE] Full connection process completed successfully");
       } catch (e) {
         debugError(`[CHANNEL] Channel setup failed: ${e.message}`, e);
@@ -5661,10 +5676,26 @@ async function disconnect() {
       debugWarn("[BLE] No known disconnect method on connection object");
     }
     
-    // Restart 30s slot refresh timer (disconnected mode)
+    // Restart 30s slot refresh timer
     startSlotRefreshTimer();
     
-    // Note: Zone status will refresh via 30s timer or next GPS movement check (100m)
+    // Immediate zone check after disconnect to update slot display
+    debugLog("[GEO AUTH] Performing zone check after disconnect");
+    const coords = await getValidGpsForZoneCheck();
+    if (coords) {
+      const result = await checkZoneStatus(coords);
+      if (result.success && result.zone) {
+        state.currentZone = result.zone;
+        state.lastZoneCheckCoords = { lat: coords.lat, lon: coords.lon };
+        updateZoneStatusUI(result);
+        debugLog(`[GEO AUTH] Post-disconnect zone check: ${result.zone.name}, slots: ${result.zone.slots_available}/${result.zone.slots_max}`);
+      } else if (result.success && !result.in_zone) {
+        state.currentZone = null;
+        state.lastZoneCheckCoords = { lat: coords.lat, lon: coords.lon };
+        updateZoneStatusUI(result);
+        debugLog(`[GEO AUTH] Post-disconnect zone check: outside zone, nearest: ${result.nearest_zone?.name}`);
+      }
+    }
     
   } catch (e) {
     debugError(`[BLE] BLE disconnect failed: ${e.message}`, e);
