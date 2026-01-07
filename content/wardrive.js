@@ -995,7 +995,7 @@ function updateSlotsDisplay(zone) {
   
   if (at_capacity || slots_available === 0) {
     slotsDisplay.textContent = `Full (0/${slots_max})`;
-    slotsDisplay.className = "font-medium text-red-400";
+    slotsDisplay.className = "font-medium text-red-300";
     
     // Show persistent error in dynamic status bar
     const errorMsg = `No TX wardriving slots for ${code}. RX only.`;
