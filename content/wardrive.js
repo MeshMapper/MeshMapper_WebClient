@@ -4578,8 +4578,9 @@ async function autoSetPowerLevel() {
     }
     
   } else {
-    // Unknown device - log info and require manual selection
+    // Unknown device - log to error log and require manual selection
     debugLog(`[DEVICE MODEL] Unknown device: ${state.deviceModel}`);
+    addErrorLogEntry(`Unknown device: ${state.deviceModel}`, "DEVICE MODEL");
     state.autoPowerSet = false;
     
     // Hide auto-configured power display and placeholder, show manual selection
