@@ -4766,7 +4766,14 @@ async function connect() {
         
         // Connection complete, show Connected status in connection bar
         setConnStatus("Connected", STATUS_COLORS.success);
-        setDynamicStatus("Idle"); // Clear dynamic status to em dash
+        
+        // If device is unknown and power not selected, restore warning message
+        if (!state.autoPowerSet && !getCurrentPowerSetting()) {
+          setDynamicStatus("Unknown device - select power manually", STATUS_COLORS.warning, true);
+          debugLog("[BLE] Connection complete - restored unknown device warning");
+        } else {
+          setDynamicStatus("Idle"); // Clear dynamic status to em dash
+        }
         
         // Note: Settings are NOT locked on connect - only when auto mode starts
         // This allows users to change power after connection if device was unknown
