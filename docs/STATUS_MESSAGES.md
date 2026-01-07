@@ -243,88 +243,51 @@ These messages appear in the Dynamic App Status Bar. They NEVER include connecti
 
 **Phase 4.1 Scope**: Zone checks provide **preflight UI feedback** while disconnected. Real validation happens server-side in Phase 4.2+ via `/auth` (connect) and `/wardrive` (ongoing) endpoints.
 
-**Note**: Zone status appears in **two locations**:
-- **Connection Bar** (`#zoneStatus`): Visible when disconnected, hidden when connected
-- **Settings Panel** (`#locationDisplay`): Always visible with full zone name
+**Note**: Zone status appears in the **Settings Panel** (`#locationDisplay`) only. Errors (outside zone, outdated app) appear as persistent messages in the **Dynamic Status Bar**.
 
-##### Checking zone...
-- **Message (Connection Bar)**: `"Checking zone..."`
+##### Checking...
 - **Message (Settings Panel)**: `"Checking..."`
-- **Color**: Amber (warning)
+- **Color**: Gray (slate-400)
 - **When** (Phase 4.1 - disconnected mode only): 
   - During app launch zone check (before Connect button enabled)
   - After 100m GPS movement while disconnected triggers zone recheck
-- **Display**:
-  - Connection bar: Orange/amber "Checking zone..."
-  - Settings panel: Gray "Checking..."
 - **Source**: `content/wardrive.js:performAppLaunchZoneCheck()`, `handleZoneCheckOnMove()`
 
-##### Zone: [code]
-- **Message (Connection Bar)**: `"Zone: YOW"` (or other zone code)
-- **Message (Settings Panel)**: `"Ottawa, ON"` (full zone name)
-- **Color**: Green (success) in connection bar, white in settings panel
+##### Zone Code (e.g., YOW)
+- **Message (Settings Panel)**: `"YOW"` (or other zone code)
+- **Color**: Green (emerald-300) when available, Amber (amber-300) when at capacity
 - **When**: Successfully validated location within enabled wardriving zone (Phase 4.1 preflight check)
-- **Display**:
-  - Connection bar: Green "Zone: YOW" (when disconnected)
-  - Settings panel: White "Ottawa, ON" (always visible)
 - **Source**: `content/wardrive.js:updateZoneStatusUI()`
 
-##### Outside zone
-- **Message (Connection Bar)**: `"Outside zone"`
-- **Message (Settings Panel)**: `"Outside zone"`
-- **Color**: Red (error)
+##### Outside zone (distance to nearest)
+- **Message (Dynamic Status Bar)**: `"Outside zone (Xkm to CODE)"`
+- **Message (Settings Panel)**: `"—"` (dash)
+- **Color**: Red (error) - persistent message
 - **When**: 
   - **Phase 4.1**: GPS coordinates outside any enabled wardriving zone boundary (preflight check, Connect button disabled)
-  - **Phase 4.2+**: Server-side validation failure from `/auth` or `/wardrive` endpoint (triggers disconnect)
-- **Terminal State**: Yes (Connect button disabled in Phase 4.1, disconnect triggered in Phase 4.2+)
+- **Terminal State**: Yes (Connect button disabled, persistent error blocks other status messages)
 - **Source**: `content/wardrive.js:updateZoneStatusUI()`
 
-##### Zone disabled
-- **Message (Connection Bar)**: `"Zone disabled"`
-- **Message (Settings Panel)**: `"Disabled"`
-- **Color**: Red (error)
-- **When**: 
-  - **Phase 4.1**: Location within zone boundary but zone is not enabled for wardriving (preflight check, Connect button disabled)
-  - **Phase 4.2+**: Server-side validation failure from `/auth` or `/wardrive` endpoint (triggers disconnect)
-- **Terminal State**: Yes (Connect button disabled in Phase 4.1, disconnect triggered in Phase 4.2+)
-- **Source**: `content/wardrive.js:updateZoneStatusUI()`, disconnect reason handling (Phase 4.2+)
-
-##### Zone at capacity
-- **Message (Connection Bar)**: `"At capacity"`
-- **Message (Settings Panel)**: `"At capacity"`
-- **Color**: Red (error)
-- **When**: 
-  - **Phase 4.1**: Zone has reached maximum concurrent wardriver limit during preflight check (Connect button disabled)
-  - **Phase 4.2+**: Server-side capacity limit from `/auth` or `/wardrive` endpoint (triggers disconnect)
-- **Terminal State**: Yes (Connect button disabled in Phase 4.1, disconnect triggered in Phase 4.2+)
-- **Notes**: Different from "MeshMapper at capacity" - this is zone-specific capacity, not global server capacity
-- **Source**: `content/wardrive.js:updateZoneStatusUI()`, disconnect reason handling (Phase 4.2+)
-
-##### GPS unavailable
-- **Message (Connection Bar)**: `"GPS unavailable"`
-- **Message (Settings Panel)**: `"GPS unavailable"`
+##### GPS/Zone Errors
+- **Message (Settings Panel)**: `"GPS: stale"`, `"GPS: inaccurate"`, `"Unknown"`
 - **Color**: Red (error)
 - **When** (Phase 4.1 client-side GPS failure): 
-  - GPS permissions denied
-  - GPS data too stale (>60s)
-  - GPS accuracy too poor (>50m)
-  - Failed to acquire GPS after 3 retries
+  - GPS data too stale (>60s) → "GPS: stale"
+  - GPS accuracy too poor (>50m) → "GPS: inaccurate"
+  - GPS permissions denied or network error → "Unknown"
 - **Terminal State**: Yes (Connect button disabled)
-- **Source**: `content/wardrive.js:getValidGpsForZoneCheck()`, `updateZoneStatusUI()`
+- **Source**: `content/wardrive.js:updateZoneStatusUI()`
 
-##### Zone check failed
-- **Message (Connection Bar)**: `"Zone check failed"`
-- **Message (Settings Panel)**: `"Check failed"`
-- **Color**: Red (error)
-- **When** (Phase 4.1 network error): 
-  - Network error contacting zone check API (`/status` endpoint)
-  - Zone check API returned error
-  - Exception during zone check process
-- **Terminal State**: Yes (Connect button disabled)
-- **Source**: `content/wardrive.js:checkZoneStatus()`, `updateZoneStatusUI()`
+##### App Version Outdated
+- **Message (Dynamic Status Bar)**: API message or `"App version outdated, please update"`
+- **Message (Settings Panel)**: `""` (empty)
+- **Color**: Red (error) - persistent message
+- **When**: Server returns `reason: "outofdate"` during zone check
+- **Terminal State**: Yes (Connect button disabled, persistent error blocks other status messages)
+- **Source**: `content/wardrive.js:updateZoneStatusUI()`
 
 **Slot Availability Display** (Settings Panel only):
-- **Location**: Settings panel "Status Info" section, right side of Location row
+- **Location**: Settings panel "Status Info" section, Slots row
 - **Display Format**:
   - `"N/A"` (gray) - Zone not checked yet or check failed
   - `"X available"` (green) - X slots available in zone

@@ -185,7 +185,7 @@ setConnStatus("Disconnected", STATUS_COLORS.error);
 const intervalSelect = $("intervalSelect"); // 15 / 30 / 60 seconds
 const powerSelect    = $("powerSelect");    // "", "0.3w", "0.6w", "1.0w"
 const deviceModelEl  = $("deviceModel");
-const zoneStatus     = $("zoneStatus");      // Zone status in connection bar
+// Zone status removed from connection bar - only shown in settings panel (locationDisplay)
 const locationDisplay = $("locationDisplay"); // Location (zone code) in settings
 const slotsDisplay   = $("slotsDisplay");    // Slot availability in settings
 
@@ -882,8 +882,6 @@ function updateZoneStatusUI(zoneData) {
   
   if (!zoneData) {
     debugWarn(`[GEO AUTH] [UI] No zone data provided, setting error state`);
-    zoneStatus.textContent = "Zone check failed";
-    zoneStatus.className = "text-xs text-red-400";
     locationDisplay.textContent = "Unknown";
     locationDisplay.className = "font-medium text-red-400";
     updateSlotsDisplay(null);
@@ -894,7 +892,6 @@ function updateZoneStatusUI(zoneData) {
   if (zoneData.success && zoneData.in_zone) {
     const zone = zoneData.zone;
     const atCapacity = zone.at_capacity;
-    const slotsText = `Zone: ${zone.code}`;
     const statusColor = atCapacity ? "text-amber-300" : "text-emerald-300";
     
     // Clear persistent outside zone error if it was set
@@ -904,11 +901,8 @@ function updateZoneStatusUI(zoneData) {
       setDynamicStatus("—", STATUS_COLORS.idle); // Clear the dynamic status bar
     }
     
-    zoneStatus.textContent = slotsText;
-    zoneStatus.className = `text-xs ${statusColor}`;
-    
     locationDisplay.textContent = zone.code;
-    locationDisplay.className = "font-medium text-emerald-300";
+    locationDisplay.className = `font-medium ${statusColor}`;
     
     updateSlotsDisplay(zone);
     
@@ -920,10 +914,6 @@ function updateZoneStatusUI(zoneData) {
   if (zoneData.success && !zoneData.in_zone) {
     const nearest = zoneData.nearest_zone;
     const distText = `Outside zone (${nearest.distance_km}km to ${nearest.code})`;
-    
-    // Clear zone status in connection bar (don't show distance there)
-    zoneStatus.textContent = "";
-    zoneStatus.className = "text-xs text-slate-400";
     
     // Set persistent outside zone error - blocks all other dynamic status messages
     statusMessageState.outsideZoneError = distText;
@@ -956,24 +946,27 @@ function updateZoneStatusUI(zoneData) {
       statusText = "GPS: inaccurate";
     } else if (reason === "outofdate") {
       // App version outdated - show persistent error in dynamic status bar
-      statusText = "";  // Clear zone status in connection bar
+      statusText = "";  // Clear location display
       dynamicStatusText = zoneData.message || "App version outdated, please update";
       
       // Set persistent error - blocks all other dynamic status messages
       statusMessageState.outsideZoneError = dynamicStatusText;
-      debugLog(`[GEO AUTH] [UI] Set persistent outofdate error: "${dynamicStatusText}"`);
+      debugLog(`[GEO AUTH] Set persistent outofdate error: "${dynamicStatusText}"`);
       
       // Show error in dynamic status bar (red)
       setDynamicStatus(dynamicStatusText, STATUS_COLORS.error);
       
-      // Log as error
-      debugError(`[GEO AUTH] [UI] ${dynamicStatusText}`);
+      // Disable Connect button - can't use app with outdated version
+      setConnectButtonDisabled(true);
+      
+      // Clear current zone to stop slot refresh timer from running
+      state.currentZone = null;
+      
+      // Log as error (single consolidated message)
+      debugError(`[GEO AUTH] ${dynamicStatusText}`);
     }
     
-    zoneStatus.textContent = statusText;
-    zoneStatus.className = "text-xs text-red-400";
-    
-    locationDisplay.textContent = "Unknown";
+    locationDisplay.textContent = statusText || "Unknown";
     locationDisplay.className = "font-medium text-red-400";
     
     updateSlotsDisplay(null);
@@ -1027,10 +1020,10 @@ async function performAppLaunchZoneCheck() {
   setConnectButtonDisabled(true);
   debugLog("[GEO AUTH] [INIT] Connect button disabled during zone check");
   
-  // Show "Checking zone..." status
-  zoneStatus.textContent = "Checking zone...";
-  zoneStatus.classList.remove("hidden");
-  debugLog("[GEO AUTH] [INIT] Zone status set to 'Checking zone...'");
+  // Show "Checking zone..." in location display
+  locationDisplay.textContent = "Checking...";
+  locationDisplay.className = "font-medium text-slate-400";
+  debugLog("[GEO AUTH] [INIT] Location display set to 'Checking...'");
   
   try {
     // Get valid GPS coordinates
@@ -1109,6 +1102,10 @@ async function performAppLaunchZoneCheck() {
               state.currentZone = result.zone;
               updateSlotsDisplay(result.zone);
               debugLog(`[GEO AUTH] [SLOT REFRESH] Updated slots: ${result.zone.slots_available}/${result.zone.slots_max}`);
+            } else if (result && !result.success) {
+              // Handle error states (outofdate, etc.) - this will disable button and clear currentZone
+              updateZoneStatusUI(result);
+              debugLog(`[GEO AUTH] [SLOT REFRESH] Zone check failed, updated UI`);
             }
           }
         }
@@ -1893,7 +1890,10 @@ async function checkZoneStatus(coords) {
     } else if (data.success && !data.in_zone) {
       debugLog(`[GEO AUTH] ⚠️ Outside all zones, nearest: ${data.nearest_zone.name} (${data.nearest_zone.code}) at ${data.nearest_zone.distance_km}km`);
     } else if (!data.success) {
-      debugError(`[GEO AUTH] ❌ Zone check failed: reason=${data.reason}, message=${data.message}`);
+      // Only log non-outofdate failures here (outofdate logged in updateZoneStatusUI)
+      if (data.reason !== "outofdate") {
+        debugError(`[GEO AUTH] ❌ Zone check failed: reason=${data.reason}, message=${data.message}`);
+      }
     }
     
     return data;
@@ -5529,6 +5529,10 @@ async function disconnect() {
             state.currentZone = result.zone;
             updateSlotsDisplay(result.zone);
             debugLog(`[GEO AUTH] [SLOT REFRESH] Updated slots: ${result.zone.slots_available}/${result.zone.slots_max}`);
+          } else if (result && !result.success) {
+            // Handle error states (outofdate, etc.) - this will disable button and clear currentZone
+            updateZoneStatusUI(result);
+            debugLog(`[GEO AUTH] [SLOT REFRESH] Zone check failed, updated UI`);
           }
         }
       }
