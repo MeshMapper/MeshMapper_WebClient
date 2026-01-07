@@ -1033,13 +1033,21 @@ async function performAppLaunchZoneCheck() {
     debugLog("[GEO AUTH] [INIT] Calling checkZoneStatus()");
     const result = await checkZoneStatus(coords);
     
-    // Store result in state
-    if (result.success && result.zone) {
+    // Store result in state based on response
+    if (result.success && result.in_zone && result.zone) {
+      // User is inside a valid zone
       state.currentZone = result.zone;
       state.lastZoneCheckCoords = { lat: coords.lat, lon: coords.lon };
       debugLog(`[GEO AUTH] [INIT] ✅ Zone check successful: ${result.zone.name} (${result.zone.code})`);
       debugLog(`[GEO AUTH] [INIT] In zone: ${result.in_zone}, At capacity: ${result.zone.at_capacity}`);
+    } else if (result.success && !result.in_zone) {
+      // User is outside all zones - this is a valid response, not a failure
+      state.currentZone = null;
+      state.lastZoneCheckCoords = { lat: coords.lat, lon: coords.lon };
+      const nearest = result.nearest_zone;
+      debugLog(`[GEO AUTH] [INIT] ⚠️ Outside all zones, nearest: ${nearest.name} (${nearest.code}) at ${nearest.distance_km}km`);
     } else {
+      // Actual failure (API error, network error, etc.)
       state.currentZone = null;
       state.lastZoneCheckCoords = null;
       debugWarn(`[GEO AUTH] [INIT] Zone check failed: ${result.error || "Unknown error"}`);
