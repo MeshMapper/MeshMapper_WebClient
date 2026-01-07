@@ -108,10 +108,8 @@ let DEVICE_MODELS = [];
   }
 })();
 
-// Ottawa Geofence Configuration
-const OTTAWA_CENTER_LAT = 45.4215;  // Parliament Hill latitude
-const OTTAWA_CENTER_LON = -75.6972; // Parliament Hill longitude
-const OTTAWA_GEOFENCE_RADIUS_M = 150000; // 150 km in meters
+// Geo-Auth Zone Configuration
+const ZONE_CHECK_DISTANCE_M = 100;  // Recheck zone status every 100 meters
 
 // Distance-Based Ping Filtering
 const MIN_PING_DISTANCE_M = 25; // Minimum distance (25m) between pings
@@ -129,6 +127,7 @@ const API_TX_FLUSH_DELAY_MS = 3000;         // Flush 3 seconds after TX ping
 // MeshMapper API Configuration
 const MESHMAPPER_API_URL = "https://yow.meshmapper.net/wardriving-api.php";
 const MESHMAPPER_CAPACITY_CHECK_URL = "https://yow.meshmapper.net/capacitycheck.php";
+const GEO_AUTH_STATUS_URL = "https://meshmapper.net/wardrive-api.php/status";  // Geo-auth zone status endpoint
 const MESHMAPPER_API_KEY = "59C7754DABDF5C11CA5F5D8368F89";
 const MESHMAPPER_DEFAULT_WHO = "GOME-WarDriver"; // Default identifier
 const MESHMAPPER_RX_LOG_API_URL = "https://yow.meshmapper.net/wardriving-api.php";
@@ -182,6 +181,9 @@ setConnStatus("Disconnected", STATUS_COLORS.error);
 const intervalSelect = $("intervalSelect"); // 15 / 30 / 60 seconds
 const powerSelect    = $("powerSelect");    // "", "0.3w", "0.6w", "1.0w"
 const deviceModelEl  = $("deviceModel");
+const zoneStatus     = $("zoneStatus");      // Zone status in connection bar
+const locationDisplay = $("locationDisplay"); // Location (zone code) in settings
+const slotsDisplay   = $("slotsDisplay");    // Slot availability in settings
 
 // TX Log selectors
 const txLogSummaryBar = $("txLogSummaryBar");
@@ -276,6 +278,10 @@ const state = {
   channelSetupErrorMessage: null, // Error message from channel setup failure
   bleDisconnectErrorMessage: null, // Error message from BLE disconnect failure
   pendingApiPosts: [], // Array of pending background API post promises
+  currentZone: null, // Current zone object from preflight check: { name, code, enabled, at_capacity, slots_available, slots_max }
+  lastZoneCheckCoords: null, // { lat, lon } of last zone status check (for 100m movement trigger)
+  zoneCheckInProgress: false, // Prevents duplicate concurrent zone checks
+  slotRefreshTimerId: null, // Timer for periodic slot capacity refresh (30s disconnected, 60s connected)
   txTracking: {
     isListening: false,           // Whether we're currently listening for TX echoes
     sentTimestamp: null,          // Timestamp when the ping was sent
@@ -452,12 +458,6 @@ const autoCountdownTimer = createCountdownTimer(
       return { message: "Sending auto ping", color: STATUS_COLORS.info };
     }
     // If there's a skip reason, show it with the countdown in warning color
-    if (state.skipReason === "outside geofence") {
-      return { 
-        message: `Ping skipped, outside of geofenced region, waiting for next ping (${remainingSec}s)`,
-        color: STATUS_COLORS.warning
-      };
-    }
     if (state.skipReason === "too close") {
       return { 
         message: `Ping skipped, too close to last ping, waiting for next ping (${remainingSec}s)`,
@@ -847,6 +847,286 @@ function setDynamicStatus(text, color = STATUS_COLORS.idle, immediate = false) {
   setStatus(text, color, immediate);
 }
 
+/**
+ * Update zone status UI based on zone check response
+ * @param {Object} zoneData - Zone status response from checkZoneStatus()
+ */
+function updateZoneStatusUI(zoneData) {
+  debugLog(`[GEO AUTH] [UI] Updating zone status UI`);
+  
+  if (!zoneData) {
+    debugWarn(`[GEO AUTH] [UI] No zone data provided, setting error state`);
+    zoneStatus.textContent = "Zone check failed";
+    zoneStatus.className = "text-xs text-red-400";
+    locationDisplay.textContent = "Unknown";
+    locationDisplay.className = "font-medium text-red-400";
+    updateSlotsDisplay(null);
+    return;
+  }
+  
+  // Handle success with in_zone
+  if (zoneData.success && zoneData.in_zone) {
+    const zone = zoneData.zone;
+    const atCapacity = zone.at_capacity;
+    const slotsText = `Zone: ${zone.code}`;
+    const statusColor = atCapacity ? "text-amber-300" : "text-emerald-300";
+    
+    zoneStatus.textContent = slotsText;
+    zoneStatus.className = `text-xs ${statusColor}`;
+    
+    locationDisplay.textContent = zone.code;
+    locationDisplay.className = "font-medium text-emerald-300";
+    
+    updateSlotsDisplay(zone);
+    
+    debugLog(`[GEO AUTH] [UI] Zone status: in zone ${zone.code}, slots ${zone.slots_available}/${zone.slots_max}, at_capacity=${atCapacity}`);
+    return;
+  }
+  
+  // Handle success but outside zone
+  if (zoneData.success && !zoneData.in_zone) {
+    const nearest = zoneData.nearest_zone;
+    const distText = `Outside zone (${nearest.distance_km}km to ${nearest.code})`;
+    
+    zoneStatus.textContent = distText;
+    zoneStatus.className = "text-xs text-yellow-400";
+    
+    locationDisplay.textContent = "—";
+    locationDisplay.className = "font-medium text-slate-400";
+    
+    updateSlotsDisplay(null);
+    
+    debugLog(`[GEO AUTH] [UI] Zone status: outside zone, nearest is ${nearest.code} at ${nearest.distance_km}km`);
+    return;
+  }
+  
+  // Handle error states
+  if (!zoneData.success) {
+    const reason = zoneData.reason || "unknown";
+    let statusText = "Zone check failed";
+    let statusColor = "text-red-400";
+    
+    if (reason === "gps_stale") {
+      statusText = "GPS: stale";
+    } else if (reason === "gps_inaccurate") {
+      statusText = "GPS: inaccurate";
+    }
+    
+    zoneStatus.textContent = statusText;
+    zoneStatus.className = `text-xs ${statusColor}`;
+    
+    locationDisplay.textContent = "Unknown";
+    locationDisplay.className = "font-medium text-red-400";
+    
+    updateSlotsDisplay(null);
+    
+    debugError(`[GEO AUTH] [UI] Zone check error: reason=${reason}, message=${zoneData.message}`);
+    return;
+  }
+}
+
+/**
+ * Update slots display in settings panel
+ * @param {Object|null} zone - Zone object with slots_available and slots_max, or null for N/A
+ */
+function updateSlotsDisplay(zone) {
+  if (!zone) {
+    slotsDisplay.textContent = "N/A";
+    slotsDisplay.className = "font-medium text-slate-400";
+    debugLog(`[UI] Slots display: N/A`);
+    return;
+  }
+  
+  const { slots_available, slots_max, at_capacity } = zone;
+  
+  if (at_capacity || slots_available === 0) {
+    slotsDisplay.textContent = `Full (0/${slots_max})`;
+    slotsDisplay.className = "font-medium text-red-400";
+    debugLog(`[UI] Slots display: Full (0/${slots_max})`);
+  } else {
+    slotsDisplay.textContent = `${slots_available} available`;
+    slotsDisplay.className = "font-medium text-emerald-300";
+    debugLog(`[UI] Slots display: ${slots_available} available (${slots_available}/${slots_max})`);
+  }
+}
+
+/**
+ * Perform zone check on app launch
+ * - Disables Connect button initially
+ * - Shows "Checking zone..." status
+ * - Gets GPS and performs zone check
+ * - Updates UI and enables Connect if in valid zone
+ * - Starts 30s slot refresh timer
+ * - Centers map on checked location
+ */
+async function performAppLaunchZoneCheck() {
+  debugLog("[GEO AUTH] [INIT] Performing app launch zone check");
+  
+  // Disable Connect button initially
+  connectBtn.disabled = true;
+  debugLog("[GEO AUTH] [INIT] Connect button disabled during zone check");
+  
+  // Show "Checking zone..." status
+  zoneStatus.textContent = "Checking zone...";
+  zoneStatus.classList.remove("hidden");
+  debugLog("[GEO AUTH] [INIT] Zone status set to 'Checking zone...'");
+  
+  try {
+    // Get valid GPS coordinates
+    debugLog("[GEO AUTH] [INIT] Getting valid GPS coordinates for zone check");
+    const coords = await getValidGpsForZoneCheck();
+    
+    if (!coords) {
+      debugWarn("[GEO AUTH] [INIT] Failed to get valid GPS coordinates after retries");
+      updateZoneStatusUI(null, "gps_unavailable");
+      // Connect button remains disabled
+      return;
+    }
+    
+    debugLog(`[GEO AUTH] [INIT] Valid GPS acquired: ${coords.lat.toFixed(6)}, ${coords.lon.toFixed(6)}`);
+    
+    // Perform zone check
+    debugLog("[GEO AUTH] [INIT] Calling checkZoneStatus()");
+    const result = await checkZoneStatus(coords);
+    
+    // Store result in state
+    if (result.success && result.zone) {
+      state.currentZone = result.zone;
+      state.lastZoneCheckCoords = { lat: coords.lat, lon: coords.lon };
+      debugLog(`[GEO AUTH] [INIT] ✅ Zone check successful: ${result.zone.name} (${result.zone.code})`);
+      debugLog(`[GEO AUTH] [INIT] In zone: ${result.in_zone}, At capacity: ${result.zone.at_capacity}`);
+    } else {
+      state.currentZone = null;
+      state.lastZoneCheckCoords = null;
+      debugWarn(`[GEO AUTH] [INIT] Zone check failed: ${result.error || "Unknown error"}`);
+    }
+    
+    // Update UI with result
+    updateZoneStatusUI(result, null);
+    
+    // Center map on checked location
+    try {
+      const iframe = coverageFrame.querySelector("iframe");
+      if (iframe && iframe.contentWindow) {
+        debugLog(`[GEO AUTH] [INIT] Centering map on checked location: ${coords.lat.toFixed(6)}, ${coords.lon.toFixed(6)}`);
+        iframe.contentWindow.postMessage({
+          type: "centerMap",
+          lat: coords.lat,
+          lon: coords.lon
+        }, "*");
+      } else {
+        debugWarn("[GEO AUTH] [INIT] Cannot center map: iframe not available");
+      }
+    } catch (mapErr) {
+      debugWarn(`[GEO AUTH] [INIT] Failed to center map: ${mapErr.message}`);
+    }
+    
+    // Enable Connect button only if in valid zone
+    if (result.success && result.in_zone) {
+      connectBtn.disabled = false;
+      debugLog("[GEO AUTH] [INIT] ✅ Connect button enabled (in valid zone)");
+      
+      // Start 30s slot refresh timer (disconnected mode)
+      if (state.slotRefreshTimerId) {
+        clearInterval(state.slotRefreshTimerId);
+      }
+      state.slotRefreshTimerId = setInterval(async () => {
+        debugLog("[GEO AUTH] [SLOT REFRESH] 30s timer triggered (disconnected mode)");
+        if (!state.connection && state.currentZone) {
+          // Re-check zone to refresh slots
+          const coords = await getValidGpsForZoneCheck();
+          if (coords) {
+            const result = await checkZoneStatus(coords);
+            if (result.success && result.zone) {
+              state.currentZone = result.zone;
+              updateSlotsDisplay(result.zone);
+              debugLog(`[GEO AUTH] [SLOT REFRESH] Updated slots: ${result.zone.slots_available}/${result.zone.slots_max}`);
+            }
+          }
+        }
+      }, 30000); // 30 seconds
+      debugLog("[GEO AUTH] [INIT] Started 30s slot refresh timer");
+    } else {
+      connectBtn.disabled = true;
+      debugLog("[GEO AUTH] [INIT] ❌ Connect button remains disabled (not in valid zone or check failed)");
+    }
+    
+  } catch (err) {
+    debugError(`[GEO AUTH] [INIT] Exception during app launch zone check: ${err.message}`);
+    updateZoneStatusUI(null, "error");
+    connectBtn.disabled = true;
+  }
+}
+
+/**
+ * Handle zone recheck when GPS moves >= 100m from last zone check
+ * Called from GPS watch callback ONLY when disconnected
+ * Updates zone status display for user awareness
+ * @param {Object} newCoords - Current GPS coordinates {lat, lon}
+ */
+async function handleZoneCheckOnMove(newCoords) {
+  // Skip if no previous zone check or check already in progress
+  if (!state.lastZoneCheckCoords || state.zoneCheckInProgress) {
+    return;
+  }
+  
+  // Calculate distance from last zone check location
+  const distance = calculateHaversineDistance(
+    state.lastZoneCheckCoords.lat,
+    state.lastZoneCheckCoords.lon,
+    newCoords.lat,
+    newCoords.lon
+  );
+  
+  debugLog(`[GEO AUTH] [GPS MOVEMENT] Distance from last zone check: ${distance.toFixed(1)}m (threshold: ${ZONE_CHECK_DISTANCE_M}m)`);
+  
+  // Trigger zone check if moved >= 100m
+  if (distance >= ZONE_CHECK_DISTANCE_M) {
+    debugLog(`[GEO AUTH] [GPS MOVEMENT] ⚠️ Moved ${distance.toFixed(1)}m - triggering zone recheck (disconnected mode)`);
+    
+    state.zoneCheckInProgress = true;
+    
+    try {
+      // Perform zone check with current coordinates
+      const result = await checkZoneStatus(newCoords);
+      
+      // Update state
+      if (result.success && result.zone) {
+        state.currentZone = result.zone;
+        state.lastZoneCheckCoords = { lat: newCoords.lat, lon: newCoords.lon };
+        debugLog(`[GEO AUTH] [GPS MOVEMENT] ✅ Zone recheck successful: ${result.zone.name} (${result.zone.code})`);
+      } else {
+        state.currentZone = null;
+        state.lastZoneCheckCoords = null;
+        debugWarn(`[GEO AUTH] [GPS MOVEMENT] Zone recheck failed: ${result.error || "Unknown error"}`);
+      }
+      
+      // Update UI with new zone status
+      updateZoneStatusUI(result, null);
+      
+      // Center map on new location
+      try {
+        const iframe = coverageFrame.querySelector("iframe");
+        if (iframe && iframe.contentWindow) {
+          debugLog(`[GEO AUTH] [GPS MOVEMENT] Centering map on new location: ${newCoords.lat.toFixed(6)}, ${newCoords.lon.toFixed(6)}`);
+          iframe.contentWindow.postMessage({
+            type: "centerMap",
+            lat: newCoords.lat,
+            lon: newCoords.lon
+          }, "*");
+        }
+      } catch (mapErr) {
+        debugWarn(`[GEO AUTH] [GPS MOVEMENT] Failed to center map: ${mapErr.message}`);
+      }
+      
+    } catch (err) {
+      debugError(`[GEO AUTH] [GPS MOVEMENT] Exception during zone recheck: ${err.message}`);
+    } finally {
+      state.zoneCheckInProgress = false;
+    }
+  }
+}
+
 
 
 // ---- Wake Lock helpers ----
@@ -934,17 +1214,6 @@ function calculateHaversineDistance(lat1, lon1, lat2, lon2) {
  * @param {number} lon - Longitude to check
  * @returns {boolean} True if within geofence, false otherwise
  */
-function validateGeofence(lat, lon) {
-  debugLog(`[GEOFENCE] Validating geofence for coordinates: (${lat.toFixed(5)}, ${lon.toFixed(5)})`);
-  debugLog(`[GEOFENCE] Geofence center: (${OTTAWA_CENTER_LAT}, ${OTTAWA_CENTER_LON}), radius: ${OTTAWA_GEOFENCE_RADIUS_M}m`);
-  
-  const distance = calculateHaversineDistance(lat, lon, OTTAWA_CENTER_LAT, OTTAWA_CENTER_LON);
-  const isWithinGeofence = distance <= OTTAWA_GEOFENCE_RADIUS_M;
-  
-  debugLog(`[GEOFENCE] Geofence validation: distance=${distance.toFixed(2)}m, within_geofence=${isWithinGeofence}`);
-  return isWithinGeofence;
-}
-
 /**
  * Validate that current GPS coordinates are at least 25m from last successful ping
  * @param {number} lat - Current latitude
@@ -1153,6 +1422,12 @@ function startGeoWatch() {
       // NEW: Check RX batches for distance trigger when GPS position updates
       if (state.rxTracking. isWardriving && state.rxBatchBuffer.size > 0) {
         checkAllRxBatchesForDistanceTrigger({ lat: pos.coords. latitude, lon: pos.coords. longitude });
+      }
+      
+      // Check if GPS movement triggers zone recheck (100m threshold)
+      // Only monitor while disconnected - zone validation while connected happens via /wardrive posts
+      if (!state.connection) {
+        handleZoneCheckOnMove({ lat: pos.coords.latitude, lon: pos.coords.longitude });
       }
     },
     (err) => {
@@ -1448,6 +1723,113 @@ function getDeviceIdentifier() {
   const nameText = deviceNameEl?.textContent;
   if (!nameText || nameText === "—") return MESHMAPPER_DEFAULT_WHO;
   return nameText || MESHMAPPER_DEFAULT_WHO;
+}
+
+// ---- Geo-Auth Zone Checking ----
+
+/**
+ * Get valid GPS coordinates for zone checking with retry logic
+ * @param {number} maxRetries - Maximum number of retry attempts (default: 3)
+ * @param {number} retryDelayMs - Delay between retries in milliseconds (default: 5000)
+ * @returns {Promise<Object|null>} GPS object {lat, lng, accuracy_m, timestamp} or null if failed
+ */
+async function getValidGpsForZoneCheck(maxRetries = 3, retryDelayMs = 5000) {
+  debugLog(`[GPS] [GEO AUTH] Getting valid GPS for zone check (max retries: ${maxRetries})`);
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      debugLog(`[GPS] [GEO AUTH] GPS acquisition attempt ${attempt}/${maxRetries}`);
+      
+      const position = await getCurrentPosition();
+      const lat = position.coords.latitude;
+      const lng = position.coords.longitude;
+      const accuracy_m = position.coords.accuracy;
+      const timestamp = Math.floor(position.timestamp / 1000); // Convert to Unix seconds
+      
+      // Validate freshness (< 60 seconds old)
+      const ageMs = Date.now() - position.timestamp;
+      if (ageMs > 60000) {
+        debugWarn(`[GPS] [GEO AUTH] GPS too stale: ${ageMs}ms old (max 60000ms)`);
+        if (attempt < maxRetries) {
+          debugLog(`[GPS] [GEO AUTH] Retrying in ${retryDelayMs}ms...`);
+          await new Promise(resolve => setTimeout(resolve, retryDelayMs));
+          continue;
+        }
+        return null;
+      }
+      
+      // Validate accuracy (< 50 meters)
+      if (accuracy_m > 50) {
+        debugWarn(`[GPS] [GEO AUTH] GPS too inaccurate: ${accuracy_m}m (max 50m)`);
+        if (attempt < maxRetries) {
+          debugLog(`[GPS] [GEO AUTH] Retrying in ${retryDelayMs}ms...`);
+          await new Promise(resolve => setTimeout(resolve, retryDelayMs));
+          continue;
+        }
+        return null;
+      }
+      
+      debugLog(`[GPS] [GEO AUTH] Valid GPS acquired: lat=${lat.toFixed(6)}, lng=${lng.toFixed(6)}, accuracy=${accuracy_m.toFixed(1)}m, age=${ageMs}ms`);
+      return { lat, lng, accuracy_m, timestamp };
+      
+    } catch (error) {
+      debugError(`[GPS] [GEO AUTH] GPS acquisition failed (attempt ${attempt}/${maxRetries}): ${error.message}`);
+      if (attempt < maxRetries) {
+        debugLog(`[GPS] [GEO AUTH] Retrying in ${retryDelayMs}ms...`);
+        await new Promise(resolve => setTimeout(resolve, retryDelayMs));
+      }
+    }
+  }
+  
+  debugError(`[GPS] [GEO AUTH] GPS acquisition failed after ${maxRetries} attempts`);
+  return null;
+}
+
+/**
+ * Check zone status via geo-auth API
+ * @param {number} lat - Latitude
+ * @param {number} lng - Longitude
+ * @param {number} accuracy_m - GPS accuracy in meters
+ * @param {number} timestamp - Unix timestamp in seconds
+ * @returns {Promise<Object|null>} Zone status response or null on error
+ */
+async function checkZoneStatus(lat, lng, accuracy_m, timestamp) {
+  debugLog(`[GEO AUTH] Checking zone status: lat=${lat.toFixed(6)}, lng=${lng.toFixed(6)}, accuracy=${accuracy_m.toFixed(1)}m, timestamp=${timestamp}`);
+  
+  try {
+    const payload = { lat, lng, accuracy_m, timestamp };
+    
+    debugLog(`[GEO AUTH] Sending POST to ${GEO_AUTH_STATUS_URL}`);
+    
+    const response = await fetch(GEO_AUTH_STATUS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    
+    if (!response.ok) {
+      debugError(`[GEO AUTH] Zone status API returned error status ${response.status}`);
+      return null;
+    }
+    
+    const data = await response.json();
+    debugLog(`[GEO AUTH] Zone status response:`, data);
+    
+    // Log detailed response based on result
+    if (data.success && data.in_zone) {
+      debugLog(`[GEO AUTH] ✅ In zone: ${data.zone.name} (${data.zone.code}), slots: ${data.zone.slots_available}/${data.zone.slots_max}, at_capacity: ${data.zone.at_capacity}`);
+    } else if (data.success && !data.in_zone) {
+      debugLog(`[GEO AUTH] ⚠️ Outside all zones, nearest: ${data.nearest_zone.name} (${data.nearest_zone.code}) at ${data.nearest_zone.distance_km}km`);
+    } else if (!data.success) {
+      debugError(`[GEO AUTH] ❌ Zone check failed: reason=${data.reason}, message=${data.message}`);
+    }
+    
+    return data;
+    
+  } catch (error) {
+    debugError(`[GEO AUTH] Network error during zone check: ${error.message}`);
+    return null;
+  }
 }
 
 /**
@@ -4132,29 +4514,8 @@ async function sendPing(manual = false) {
     
     const { lat, lon, accuracy } = coords;
 
-    // VALIDATION 1: Geofence check (FIRST - must be within Ottawa 150km)
-    debugLog("[PING] Starting geofence validation");
-    if (!validateGeofence(lat, lon)) {
-      debugLog("[PING] Ping blocked: outside geofence");
-      
-      // Set skip reason for auto mode countdown display
-      state.skipReason = "outside geofence";
-      
-      if (manual) {
-        // Manual ping: show skip message that persists
-        setDynamicStatus("Ping skipped, outside of geofenced region", STATUS_COLORS.warning);
-        // If auto mode is running, resume the paused countdown
-        handleManualPingBlockedDuringAutoMode();
-      } else if (state.txRxAutoRunning) {
-        // Auto ping: schedule next ping and show countdown with skip message
-        scheduleNextAutoPing();
-      }
-      
-      return;
-    }
-    debugLog("[PING] Geofence validation passed");
-
-    // VALIDATION 2: Distance check (SECOND - must be ≥ 25m from last successful ping)
+    // VALIDATION: Distance check (must be ≥ 25m from last successful ping)
+    // Note: Zone validation happens server-side via /wardrive endpoint (Phase 4.4)
     debugLog("[PING] Starting distance validation");
     if (!validateMinimumDistance(lat, lon)) {
       debugLog("[PING] Ping blocked: too close to last ping");
@@ -4646,6 +5007,10 @@ async function connect() {
   }
   connectBtn.disabled = true;
   
+  // Hide zone status to make room for device name/noise floor
+  zoneStatus.classList.add("hidden");
+  debugLog("[GEO AUTH] [CONNECT] Zone status hidden");
+  
   // CLEAR all logs immediately on connect (new session)
   txLogState.entries = [];
   renderTxLogEntries(true);
@@ -4791,6 +5156,7 @@ async function connect() {
         await primeGpsOnce();
         
         // Connection complete, show Connected status in connection bar
+        // Note: Zone validation will happen server-side via /auth endpoint (Phase 4.2)
         setConnStatus("Connected", STATUS_COLORS.success);
         
         // If device is unknown and power not selected, show warning message
@@ -4852,6 +5218,31 @@ async function connect() {
         addErrorLogEntry("Disconnected: Device public key error - invalid or missing key from companion", "CONNECTION");
         setDynamicStatus("Device key error - reconnect", STATUS_COLORS.error, true);
         debugLog("[BLE] Setting terminal status for public key error");
+      } else if (state.disconnectReason === "zone_disabled") {
+        debugLog("[GEO AUTH] Branch: zone_disabled");
+        addErrorLogEntry("Disconnected: Zone disabled - wardriving not allowed in this area", "CONNECTION");
+        setDynamicStatus("Zone disabled", STATUS_COLORS.error, true);
+        debugLog("[GEO AUTH] Setting terminal status for zone disabled");
+      } else if (state.disconnectReason === "outside_zone") {
+        debugLog("[GEO AUTH] Branch: outside_zone");
+        addErrorLogEntry("Disconnected: Outside zone - moved outside wardriving zone boundary", "CONNECTION");
+        setDynamicStatus("Outside zone", STATUS_COLORS.error, true);
+        debugLog("[GEO AUTH] Setting terminal status for outside zone");
+      } else if (state.disconnectReason === "at_capacity") {
+        debugLog("[GEO AUTH] Branch: at_capacity");
+        addErrorLogEntry("Disconnected: Zone at capacity - too many active wardrivers in this zone", "CONNECTION");
+        setDynamicStatus("Zone at capacity", STATUS_COLORS.error, true);
+        debugLog("[GEO AUTH] Setting terminal status for zone at capacity");
+      } else if (state.disconnectReason === "gps_unavailable") {
+        debugLog("[GEO AUTH] Branch: gps_unavailable");
+        addErrorLogEntry("Disconnected: GPS unavailable - could not acquire valid GPS coordinates for zone check", "CONNECTION");
+        setDynamicStatus("GPS unavailable", STATUS_COLORS.error, true);
+        debugLog("[GEO AUTH] Setting terminal status for GPS unavailable");
+      } else if (state.disconnectReason === "zone_check_failed") {
+        debugLog("[GEO AUTH] Branch: zone_check_failed");
+        addErrorLogEntry("Disconnected: Zone check failed - unable to verify wardriving zone", "CONNECTION");
+        setDynamicStatus("Zone check failed", STATUS_COLORS.error, true);
+        debugLog("[GEO AUTH] Setting terminal status for zone check failed");
       } else if (state.disconnectReason === "channel_setup_error") {
         debugLog("[BLE] Branch: channel_setup_error");
         const errorMsg = state.channelSetupErrorMessage || "Channel setup failed";
@@ -5043,6 +5434,37 @@ async function disconnect() {
     } else {
       debugWarn("[BLE] No known disconnect method on connection object");
     }
+    
+    // Show zone status on disconnect and restart 30s slot refresh timer
+    debugLog("[GEO AUTH] [DISCONNECT] Showing zone status");
+    zoneStatus.classList.remove("hidden");
+    
+    // Clear any existing slot refresh timer (may be 60s connected timer from Phase 4.2+)
+    if (state.slotRefreshTimerId) {
+      clearInterval(state.slotRefreshTimerId);
+      debugLog("[GEO AUTH] [DISCONNECT] Cleared existing slot refresh timer");
+    }
+    
+    // Start 30s slot refresh timer (disconnected mode)
+    // Timer will update zone status if valid zone is stored
+    state.slotRefreshTimerId = setInterval(async () => {
+      debugLog("[GEO AUTH] [SLOT REFRESH] 30s timer triggered (disconnected mode)");
+      if (!state.connection && state.currentZone) {
+        const coords = await getValidGpsForZoneCheck();
+        if (coords) {
+          const result = await checkZoneStatus(coords);
+          if (result.success && result.zone) {
+            state.currentZone = result.zone;
+            updateSlotsDisplay(result.zone);
+            debugLog(`[GEO AUTH] [SLOT REFRESH] Updated slots: ${result.zone.slots_available}/${result.zone.slots_max}`);
+          }
+        }
+      }
+    }, 30000); // 30 seconds
+    debugLog("[GEO AUTH] [DISCONNECT] Started 30s slot refresh timer");
+    
+    // Note: Zone status will refresh via 30s timer or next GPS movement check (100m)
+    
   } catch (e) {
     debugError(`[BLE] BLE disconnect failed: ${e.message}`, e);
     state.disconnectReason = "ble_disconnect_error"; // Mark specific disconnect reason
@@ -5476,5 +5898,9 @@ export async function onLoad() {
   } catch (e) { 
     debugLog(`[GPS] Initial location permission not granted: ${e.message}`);
   }
+  
+  // Perform app launch zone check
+  await performAppLaunchZoneCheck();
+  
   debugLog("[INIT] wardrive.js initialization complete");
 }

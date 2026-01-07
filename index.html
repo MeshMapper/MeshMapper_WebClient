@@ -50,6 +50,7 @@
           <div class="flex items-center gap-2 text-sm">
             <span id="statusIndicator" class="text-base">●</span>
             <span id="connectionStatus" class="font-medium text-red-300">Disconnected</span>
+            <span id="zoneStatus" class="text-xs text-slate-400 hidden"></span>
           </div>
           <div class="flex items-center gap-3">
             <span id="noiseDisplay" class="text-sm text-slate-300"></span>
@@ -151,21 +152,31 @@
           </div>
         </div>
 
-        <!-- Device Info -->
+        <!-- Status Info -->
         <div class="space-y-2">
-          <label class="block text-xs font-medium text-slate-400 uppercase tracking-wide">Device Info</label>
-          <div class="flex items-center gap-2 text-sm">
-            <span class="text-slate-300">Model:</span>
-            <span id="deviceModel" class="font-medium">-</span>
-          </div>
-          <div class="flex flex-wrap gap-4 text-sm">
-            <div class="flex items-center gap-2">
-              <span class="text-slate-300">Location:</span>
-              <span id="permLocation" class="font-medium">-</span>
+          <label class="block text-xs font-medium text-slate-400 uppercase tracking-wide">Status Info</label>
+          
+          <!-- Model and Channel (responsive grid: stack on mobile, side-by-side on tablet+) -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+            <div class="flex items-center gap-2 text-sm">
+              <span class="text-slate-300">Model:</span>
+              <span id="deviceModel" class="font-medium">—</span>
             </div>
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 text-sm">
               <span class="text-slate-300">Channel:</span>
-              <span id="channelInfo" class="font-medium">-</span>
+              <span id="channelInfo" class="font-medium">—</span>
+            </div>
+          </div>
+          
+          <!-- Location and Slots (responsive grid: stack on mobile, side-by-side on tablet+) -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+            <div class="flex items-center gap-2 text-sm">
+              <span class="text-slate-300">Location:</span>
+              <span id="locationDisplay" class="font-medium">—</span>
+            </div>
+            <div class="flex items-center gap-2 text-sm">
+              <span class="text-slate-300">Slots:</span>
+              <span id="slotsDisplay" class="font-medium text-slate-400">N/A</span>
             </div>
           </div>
         </div>

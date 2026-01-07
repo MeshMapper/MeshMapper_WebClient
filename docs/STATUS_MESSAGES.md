@@ -239,7 +239,116 @@ These messages appear in the Dynamic App Status Bar. They NEVER include connecti
 - **When**: GPS data is stale and needs refresh (auto or manual ping modes)
 - **Source**: `content/wardrive.js:getGpsCoordinatesForPing()`
 
-#### 4. Ping Operation Messages
+#### 4. Geo-Auth Zone Check Messages (Phase 4.1 - Preflight UI Only)
+
+**Phase 4.1 Scope**: Zone checks provide **preflight UI feedback** while disconnected. Real validation happens server-side in Phase 4.2+ via `/auth` (connect) and `/wardrive` (ongoing) endpoints.
+
+**Note**: Zone status appears in **two locations**:
+- **Connection Bar** (`#zoneStatus`): Visible when disconnected, hidden when connected
+- **Settings Panel** (`#locationDisplay`): Always visible with full zone name
+
+##### Checking zone...
+- **Message (Connection Bar)**: `"Checking zone..."`
+- **Message (Settings Panel)**: `"Checking..."`
+- **Color**: Amber (warning)
+- **When** (Phase 4.1 - disconnected mode only): 
+  - During app launch zone check (before Connect button enabled)
+  - After 100m GPS movement while disconnected triggers zone recheck
+- **Display**:
+  - Connection bar: Orange/amber "Checking zone..."
+  - Settings panel: Gray "Checking..."
+- **Source**: `content/wardrive.js:performAppLaunchZoneCheck()`, `handleZoneCheckOnMove()`
+
+##### Zone: [code]
+- **Message (Connection Bar)**: `"Zone: YOW"` (or other zone code)
+- **Message (Settings Panel)**: `"Ottawa, ON"` (full zone name)
+- **Color**: Green (success) in connection bar, white in settings panel
+- **When**: Successfully validated location within enabled wardriving zone (Phase 4.1 preflight check)
+- **Display**:
+  - Connection bar: Green "Zone: YOW" (when disconnected)
+  - Settings panel: White "Ottawa, ON" (always visible)
+- **Source**: `content/wardrive.js:updateZoneStatusUI()`
+
+##### Outside zone
+- **Message (Connection Bar)**: `"Outside zone"`
+- **Message (Settings Panel)**: `"Outside zone"`
+- **Color**: Red (error)
+- **When**: 
+  - **Phase 4.1**: GPS coordinates outside any enabled wardriving zone boundary (preflight check, Connect button disabled)
+  - **Phase 4.2+**: Server-side validation failure from `/auth` or `/wardrive` endpoint (triggers disconnect)
+- **Terminal State**: Yes (Connect button disabled in Phase 4.1, disconnect triggered in Phase 4.2+)
+- **Source**: `content/wardrive.js:updateZoneStatusUI()`
+
+##### Zone disabled
+- **Message (Connection Bar)**: `"Zone disabled"`
+- **Message (Settings Panel)**: `"Disabled"`
+- **Color**: Red (error)
+- **When**: 
+  - **Phase 4.1**: Location within zone boundary but zone is not enabled for wardriving (preflight check, Connect button disabled)
+  - **Phase 4.2+**: Server-side validation failure from `/auth` or `/wardrive` endpoint (triggers disconnect)
+- **Terminal State**: Yes (Connect button disabled in Phase 4.1, disconnect triggered in Phase 4.2+)
+- **Source**: `content/wardrive.js:updateZoneStatusUI()`, disconnect reason handling (Phase 4.2+)
+
+##### Zone at capacity
+- **Message (Connection Bar)**: `"At capacity"`
+- **Message (Settings Panel)**: `"At capacity"`
+- **Color**: Red (error)
+- **When**: 
+  - **Phase 4.1**: Zone has reached maximum concurrent wardriver limit during preflight check (Connect button disabled)
+  - **Phase 4.2+**: Server-side capacity limit from `/auth` or `/wardrive` endpoint (triggers disconnect)
+- **Terminal State**: Yes (Connect button disabled in Phase 4.1, disconnect triggered in Phase 4.2+)
+- **Notes**: Different from "MeshMapper at capacity" - this is zone-specific capacity, not global server capacity
+- **Source**: `content/wardrive.js:updateZoneStatusUI()`, disconnect reason handling (Phase 4.2+)
+
+##### GPS unavailable
+- **Message (Connection Bar)**: `"GPS unavailable"`
+- **Message (Settings Panel)**: `"GPS unavailable"`
+- **Color**: Red (error)
+- **When** (Phase 4.1 client-side GPS failure): 
+  - GPS permissions denied
+  - GPS data too stale (>60s)
+  - GPS accuracy too poor (>50m)
+  - Failed to acquire GPS after 3 retries
+- **Terminal State**: Yes (Connect button disabled)
+- **Source**: `content/wardrive.js:getValidGpsForZoneCheck()`, `updateZoneStatusUI()`
+
+##### Zone check failed
+- **Message (Connection Bar)**: `"Zone check failed"`
+- **Message (Settings Panel)**: `"Check failed"`
+- **Color**: Red (error)
+- **When** (Phase 4.1 network error): 
+  - Network error contacting zone check API (`/status` endpoint)
+  - Zone check API returned error
+  - Exception during zone check process
+- **Terminal State**: Yes (Connect button disabled)
+- **Source**: `content/wardrive.js:checkZoneStatus()`, `updateZoneStatusUI()`
+
+**Slot Availability Display** (Settings Panel only):
+- **Location**: Settings panel "Status Info" section, right side of Location row
+- **Display Format**:
+  - `"N/A"` (gray) - Zone not checked yet or check failed
+  - `"X available"` (green) - X slots available in zone
+  - `"Full (0/Y)"` (red) - Zone at capacity, Y total slots
+- **Update Frequency** (Phase 4.1):
+  - 30 seconds while disconnected
+  - Immediate when zone check completes
+- **Source**: `content/wardrive.js:updateSlotsDisplay()`
+
+**Zone Check Triggers** (Phase 4.1 - disconnected mode only):
+1. **App Launch**: Automatic check on page load after GPS permission granted
+2. **100m Movement (Disconnected)**: Continuous monitoring during GPS watch while disconnected, triggers recheck if moved ≥100m from last check
+3. **30s Slot Refresh (Disconnected)**: Periodic timer updates slot availability while disconnected
+
+**Phase 4.2+ Server-Side Triggers** (not yet implemented):
+- `/auth` endpoint validation on connect
+- `/wardrive` endpoint validation on every ping with GPS coordinates
+
+**Connect Button Behavior**:
+- Disabled initially during app launch zone check
+- Enabled only if: `zone.enabled === true` AND `in_zone === true` AND `zone.at_capacity === false`
+- Remains disabled on zone check failure or GPS unavailable
+
+#### 6. Ping Operation Messages
 
 ##### Sending manual ping
 - **Message**: `"Sending manual ping"`
@@ -290,7 +399,7 @@ These messages appear in the Dynamic App Status Bar. They NEVER include connecti
 - **When**: User attempts manual ping during 7-second cooldown
 - **Source**: `content/wardrive.js:sendPing()`
 
-#### 5. Countdown Timer Messages
+#### 7. Countdown Timer Messages
 
 These messages use a hybrid approach: **first display respects 500ms minimum**, then updates occur immediately every second.
 
@@ -338,7 +447,7 @@ These messages use a hybrid approach: **first display respects 500ms minimum**, 
 - **Minimum Visibility**: 500ms for first message, immediate for updates
 - **Source**: `content/wardrive.js:autoCountdownTimer`
 
-#### 6. API and Map Update Messages
+#### 8. API and Map Update Messages
 
 ##### Queued (X/50)
 - **Message**: `"Queued (X/50)"` (X is current queue size)
@@ -388,7 +497,7 @@ These messages use a hybrid approach: **first display respects 500ms minimum**, 
 - **Notes**: With the new ping/repeat listener flow, the em dash appears immediately after the 10-second RX window, not after API posting (which now runs in background)
 - **Source**: Multiple locations - `content/wardrive.js`
 
-#### 7. Auto Mode Messages
+#### 9. Auto Mode Messages
 
 ##### TX/RX Auto stopped
 - **Message**: `"Auto mode stopped"`
@@ -426,7 +535,7 @@ These messages use a hybrid approach: **first display respects 500ms minimum**, 
 - **When**: Browser tab hidden while RX Auto mode running
 - **Source**: `content/wardrive.js:visibilitychange handler`
 
-#### 8. Error Messages
+#### 10. Error Messages
 
 ##### Select radio power to connect
 - **Message**: `"Select radio power to connect"`
@@ -540,10 +649,11 @@ Status messages follow these consistent conventions:
 
 **Connection Status Bar**: 4 fixed messages (Connected, Connecting, Disconnected, Disconnecting)
 
-**Dynamic App Status Bar**: ~30+ unique message patterns covering:
+**Dynamic App Status Bar**: ~40+ unique message patterns covering:
 - Capacity check: 9 messages (including session_id error messages)
 - Channel setup: 4 messages
 - GPS initialization: 3 messages
+- Geo-auth zone check: 7 messages (with dual display in connection bar and settings panel)
 - Ping operations: 6 messages
 - Countdown timers: 6 message patterns
 - API/Map: 2 messages (including em dash placeholder)
@@ -556,3 +666,4 @@ Status messages follow these consistent conventions:
 - Em dash (`—`) placeholder for empty dynamic status
 - Connection words blocked from dynamic bar
 - All error reasons appear WITHOUT "Disconnected:" prefix
+- Zone status has dual display: connection bar (when disconnected) + settings panel (always visible)
