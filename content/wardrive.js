@@ -4523,9 +4523,11 @@ async function autoSetPowerLevel() {
       
       if (powerAutoDisplay) {
         powerAutoDisplay.classList.remove("hidden");
+        powerAutoDisplay.style.display = "flex";
       }
       if (powerManualSelection) {
         powerManualSelection.classList.add("hidden");
+        powerManualSelection.style.display = "none";
       }
       if (powerAutoValue) {
         powerAutoValue.textContent = powerValue;
@@ -4569,9 +4571,11 @@ async function autoSetPowerLevel() {
     
     if (powerAutoDisplay) {
       powerAutoDisplay.classList.add("hidden");
+      powerAutoDisplay.style.display = "none";
     }
     if (powerManualSelection) {
       powerManualSelection.classList.remove("hidden");
+      powerManualSelection.style.display = "flex";
     }
     
     // Update label to show "⚠️ Required"
@@ -4849,9 +4853,11 @@ async function connect() {
       
       if (powerAutoDisplay) {
         powerAutoDisplay.classList.add("hidden");
+        powerAutoDisplay.style.display = "none";
       }
       if (powerManualSelection) {
         powerManualSelection.classList.add("hidden");
+        powerManualSelection.style.display = "none";
       }
       if (powerLabelStatus) {
         powerLabelStatus.textContent = "";
@@ -5251,9 +5257,11 @@ export async function onLoad() {
         
         if (powerAutoDisplay) {
           powerAutoDisplay.classList.add("hidden");
+          powerAutoDisplay.style.display = "none";
         }
         if (powerManualSelection) {
           powerManualSelection.classList.remove("hidden");
+          powerManualSelection.style.display = "flex";
         }
         
         // Update state and label
