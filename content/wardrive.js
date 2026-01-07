@@ -4927,12 +4927,6 @@ async function connect() {
       // Clean up all timers
       cleanupAllTimers();
       
-      // Clear RX log entries on disconnect
-      rxLogState.entries = [];
-      renderRxLogEntries(true); // Full render to show placeholder
-      updateRxLogSummary();
-      debugLog("[BLE] RX log cleared on disconnect");
-      
       state.lastFix = null;
       state.lastSuccessfulPingLocation = null;
       state.gpsState = "idle";
