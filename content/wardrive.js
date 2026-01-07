@@ -1070,28 +1070,36 @@ function startSlotRefreshTimer() {
   
   state.slotRefreshTimerId = setInterval(async () => {
     debugLog("[GEO AUTH] [SLOT REFRESH] 30s timer triggered (disconnected mode)");
-    if (!state.connection && state.currentZone) {
-      // Re-check zone to refresh slots
+    // Continue checking even when outside zone, so we can detect returning to zone
+    if (!state.connection) {
+      // Re-check zone to refresh slots or detect zone re-entry
       const coords = await getValidGpsForZoneCheck();
       if (coords) {
         const result = await checkZoneStatus(coords);
         if (result.success && result.in_zone && result.zone) {
-          // Still in zone - update slots display
+          // In zone (or returned to zone) - update slots display
+          const wasOutside = !state.currentZone;
           state.currentZone = result.zone;
-          updateSlotsDisplay(result.zone);
+          state.lastZoneCheckCoords = { lat: coords.lat, lon: coords.lon };
+          updateZoneStatusUI(result);
           updateMapOnZoneCheck(coords);  // Update map and GPS overlay
-          debugLog(`[GEO AUTH] [SLOT REFRESH] Updated slots: ${result.zone.slots_available}/${result.zone.slots_max}`);
+          if (wasOutside) {
+            debugLog(`[GEO AUTH] [SLOT REFRESH] ✅ Returned to zone: ${result.zone.name}, slots: ${result.zone.slots_available}/${result.zone.slots_max}`);
+          } else {
+            debugLog(`[GEO AUTH] [SLOT REFRESH] Updated slots: ${result.zone.slots_available}/${result.zone.slots_max}`);
+          }
         } else if (result.success && !result.in_zone) {
-          // Moved outside zone - update UI to show outside zone status
+          // Outside zone - update UI to show outside zone status
           state.currentZone = null;
           state.lastZoneCheckCoords = { lat: coords.lat, lon: coords.lon };
           updateZoneStatusUI(result);
           updateMapOnZoneCheck(coords);
-          debugLog(`[GEO AUTH] [SLOT REFRESH] Now outside zone, nearest: ${result.nearest_zone?.name} at ${result.nearest_zone?.distance_km}km`);
+          debugLog(`[GEO AUTH] [SLOT REFRESH] Outside zone, nearest: ${result.nearest_zone?.name} at ${result.nearest_zone?.distance_km}km`);
         } else if (result && !result.success) {
           // Handle error states (outofdate, etc.) - this will disable button and clear currentZone
+          state.currentZone = null;
           updateZoneStatusUI(result);
-          debugLog(`[GEO AUTH] [SLOT REFRESH] Zone check failed, updated UI`);
+          debugLog(`[GEO AUTH] [SLOT REFRESH] Zone check failed: ${result.reason || 'unknown'}`);
         }
       }
     }
