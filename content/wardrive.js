@@ -2269,23 +2269,9 @@ function queueTxEntry(lat, lon, accuracy, heardRepeats, noisefloor, timestamp) {
     // Unlock ping controls now that entry is queued
     unlockPingControls("after TX entry queued");
     
-    // Update status based on current mode
-    if (state.connection) {
-      if (state.txRxAutoRunning) {
-        // Check if we should resume a paused auto countdown (manual ping during auto mode)
-        const resumed = resumeAutoCountdown();
-        if (!resumed) {
-          // No paused timer to resume, schedule new auto ping (this was an auto ping)
-          debugLog("[TX/RX AUTO] Scheduling next auto ping");
-          scheduleNextAutoPing();
-        } else {
-          debugLog("[TX/RX AUTO] Resumed auto countdown after manual ping");
-        }
-      } else {
-        debugLog("[TX/RX AUTO] Setting dynamic status to show queue size");
-        // Status already set by queueWardriveEntry()
-      }
-    }
+    // NOTE: Auto ping scheduling is handled in the RX listening window completion callback (line ~4939)
+    // Do NOT schedule here - that would create duplicate timers causing rapid-fire pings
+    debugLog("[TX/RX AUTO] TX entry queued, map refresh timer complete");
   }, MAP_REFRESH_DELAY_MS);
 }
 
@@ -4758,6 +4744,14 @@ function updateCurrentTxLogEntryWithLiveRepeaters() {
  */
 async function sendPing(manual = false) {
   debugLog(`[PING] sendPing called (manual=${manual})`);
+  
+  // Early guard: prevent concurrent ping execution (critical for preventing BLE GATT errors)
+  if (state.pingInProgress) {
+    debugLog("[PING] Ping already in progress, ignoring duplicate call");
+    return;
+  }
+  state.pingInProgress = true;
+  
   try {
     // Check cooldown only for manual pings
     if (manual && isInCooldown()) {
@@ -5092,6 +5086,13 @@ function scheduleNextAutoPing() {
     return;
   }
   
+  // Clear any existing timer to prevent accumulation (CRITICAL: prevents duplicate timers)
+  if (state.autoTimerId) {
+    debugLog(`[TX/RX AUTO] Clearing existing timer (id=${state.autoTimerId}) before scheduling new one`);
+    clearTimeout(state.autoTimerId);
+    state.autoTimerId = null;
+  }
+  
   const intervalMs = getSelectedIntervalMs();
   debugLog(`[TX/RX AUTO] Scheduling next auto ping in ${intervalMs}ms`);
   
@@ -5100,13 +5101,25 @@ function scheduleNextAutoPing() {
   
   // Schedule the next ping
   state.autoTimerId = setTimeout(() => {
-    if (state.txRxAutoRunning) {
-      // Clear skip reason before next attempt
-      state.skipReason = null;
-      debugLog("[TX/RX AUTO] Auto ping timer fired, sending ping");
-      sendPing(false).catch(console.error);
+    debugLog(`[TX/RX AUTO] Auto ping timer fired (id=${state.autoTimerId})`);
+    
+    // Double-check guards before sending ping
+    if (!state.txRxAutoRunning) {
+      debugLog("[TX/RX AUTO] Auto mode no longer running, ignoring timer");
+      return;
     }
+    if (state.pingInProgress) {
+      debugLog("[TX/RX AUTO] Ping already in progress, ignoring timer");
+      return;
+    }
+    
+    // Clear skip reason before next attempt
+    state.skipReason = null;
+    debugLog("[TX/RX AUTO] Sending auto ping");
+    sendPing(false).catch(console.error);
   }, intervalMs);
+  
+  debugLog(`[TX/RX AUTO] New timer scheduled (id=${state.autoTimerId})`);
 }
 
 function startAutoPing() {
