@@ -4959,15 +4959,12 @@ async function sendPing(manual = false) {
       // This is the key change: we don't wait for API to complete
       if (state.connection) {
         if (state.txRxAutoRunning) {
-          // Check if we should resume a paused auto countdown (manual ping during auto mode)
-          const resumed = resumeAutoCountdown();
-          if (!resumed) {
-            // No paused timer to resume, schedule new auto ping (this was an auto ping)
-            debugLog("[TX/RX AUTO] Scheduling next auto ping immediately after RX window");
-            scheduleNextAutoPing();
-          } else {
-            debugLog("[TX/RX AUTO] Resumed auto countdown after manual ping");
-          }
+          // Always schedule a fresh auto ping from the full interval
+          // (whether this was a manual or auto ping, the timer restarts)
+          debugLog("[TX/RX AUTO] Scheduling next auto ping after ping completion");
+          // Clear any paused timer state since we're restarting fresh
+          state.pausedAutoTimerRemainingMs = null;
+          scheduleNextAutoPing();
         } else {
           debugLog("[UI] Setting dynamic status to Idle (manual mode)");
           setDynamicStatus("Idle");
