@@ -4758,6 +4758,7 @@ async function sendPing(manual = false) {
       const remainingSec = getRemainingCooldownSeconds();
       debugLog(`[PING] Manual ping blocked by cooldown (${remainingSec}s remaining)`);
       setDynamicStatus(`Wait ${remainingSec}s before sending another ping`, STATUS_COLORS.warning);
+      state.pingInProgress = false;
       return;
     }
 
@@ -4809,6 +4810,7 @@ async function sendPing(manual = false) {
       if (manual) {
         handleManualPingBlockedDuringAutoMode();
       }
+      state.pingInProgress = false;
       return;
     }
     
@@ -4833,6 +4835,7 @@ async function sendPing(manual = false) {
         scheduleNextAutoPing();
       }
       
+      state.pingInProgress = false;
       return;
     }
     debugLog("[PING] Distance validation passed");
@@ -4840,8 +4843,7 @@ async function sendPing(manual = false) {
     // Both validations passed - execute ping operation (Mesh + API)
     debugLog("[PING] All validations passed, executing ping operation");
     
-    // Lock ping controls for the entire ping lifecycle (until API post completes)
-    state.pingInProgress = true;
+    // pingInProgress already set at function start - just update UI controls
     updateControlsForCooldown();
     debugLog("[PING] Ping controls locked (pingInProgress=true)");
     
