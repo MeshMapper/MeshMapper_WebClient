@@ -768,8 +768,10 @@ function updateAutoButton() {
   }
 }
 function buildCoverageEmbedUrl(lat, lon) {
+  // Use current zone code from preflight check, fallback to default
+  const zoneCode = (state.currentZone?.code || WARDIVE_IATA_CODE).toLowerCase();
   const base =
-    "https://yow.meshmapper.net/embed.php?cov_grid=1&fail_grid=1&pings=0&repeaters=1&rep_coverage=0&grid_lines=0&dir=1&meters=1500";
+    `https://${zoneCode}.meshmapper.net/embed.php?cov_grid=1&fail_grid=1&pings=0&repeaters=1&rep_coverage=0&grid_lines=0&dir=1&meters=1500`;
   return `${base}&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
 }
 let coverageRefreshTimer = null;
