@@ -145,16 +145,25 @@ const APP_VERSION = "UNKNOWN"; // Placeholder - replaced during build
 // ---- Auth Reason Messages ----
 // Maps API reason codes to user-facing error messages
 const REASON_MESSAGES = {
+  // Auth/connect errors
   outofdate: "App out of date, please update",
   unknown_device: "Unknown device - advertise on mesh first",
-  outside_zone: "Outside zone - cannot connect",
+  outside_zone: "Outside zone",
   zone_disabled: "Zone is disabled",
-  zone_full: "TX slots full - RX only",
+  zone_full: "Zone at capacity",
   bad_key: "Invalid API key",
   gps_stale: "GPS data too old - try again",
   gps_inaccurate: "GPS accuracy too low - try again",
+  // Session errors (wardrive API)
   bad_session: "Invalid session",
-  session_expired: "Session expired - reconnect",
+  session_expired: "Session expired",
+  session_invalid: "Session invalid",
+  session_revoked: "Session revoked",
+  // Authorization errors (wardrive API)
+  invalid_key: "Invalid API key",
+  unauthorized: "Unauthorized",
+  // Rate limiting (wardrive API)
+  rate_limited: "Rate limited - slow down",
 };
 
 // ---- UI helpers ----
@@ -2712,65 +2721,42 @@ function handleWardriveApiError(reason, message) {
     case "session_expired":
     case "session_invalid":
     case "session_revoked":
-      // Session is no longer valid - disconnect
-      debugError(`[WARDRIVE API] Session error (${reason}): triggering disconnect`);
-      setDynamicStatus("Session expired", STATUS_COLORS.error);
-      state.disconnectReason = reason;
-      setTimeout(() => {
-        disconnect().catch(err => debugError(`[BLE] Disconnect after ${reason} failed: ${err.message}`));
-      }, 1500);
-      break;
-    
     case "bad_session":
-      // Session ID is invalid or doesn't match API key - disconnect
-      debugError(`[WARDRIVE API] Bad session: triggering disconnect`);
-      setDynamicStatus("Invalid session", STATUS_COLORS.error);
+      // Session is no longer valid - disconnect immediately
+      // Error message will be shown by BLE disconnect handler using REASON_MESSAGES
+      debugError(`[WARDRIVE API] Session error (${reason}): triggering disconnect`);
       state.disconnectReason = reason;
-      setTimeout(() => {
-        disconnect().catch(err => debugError(`[BLE] Disconnect after ${reason} failed: ${err.message}`));
-      }, 1500);
+      disconnect().catch(err => debugError(`[BLE] Disconnect after ${reason} failed: ${err.message}`));
       break;
       
     case "invalid_key":
     case "unauthorized":
     case "bad_key":
-      // API key issue - disconnect
+      // API key issue - disconnect immediately
       debugError(`[WARDRIVE API] Authorization error (${reason}): triggering disconnect`);
-      setDynamicStatus("Authorization failed", STATUS_COLORS.error);
       state.disconnectReason = reason;
-      setTimeout(() => {
-        disconnect().catch(err => debugError(`[BLE] Disconnect after ${reason} failed: ${err.message}`));
-      }, 1500);
+      disconnect().catch(err => debugError(`[BLE] Disconnect after ${reason} failed: ${err.message}`));
       break;
       
     case "session_id_missing":
-      // Missing session - disconnect
+      // Missing session - disconnect immediately
       debugError(`[WARDRIVE API] Missing session_id: triggering disconnect`);
-      setDynamicStatus("Missing session ID", STATUS_COLORS.error);
       state.disconnectReason = "session_id_error";
-      setTimeout(() => {
-        disconnect().catch(err => debugError(`[BLE] Disconnect after missing session_id failed: ${err.message}`));
-      }, 1500);
+      disconnect().catch(err => debugError(`[BLE] Disconnect after missing session_id failed: ${err.message}`));
       break;
     
     case "outside_zone":
-      // User has moved outside their assigned zone - disconnect
+      // User has moved outside their assigned zone - disconnect immediately
       debugError(`[WARDRIVE API] Outside zone: triggering disconnect`);
-      setDynamicStatus("Outside zone", STATUS_COLORS.error);
       state.disconnectReason = reason;
-      setTimeout(() => {
-        disconnect().catch(err => debugError(`[BLE] Disconnect after ${reason} failed: ${err.message}`));
-      }, 1500);
+      disconnect().catch(err => debugError(`[BLE] Disconnect after ${reason} failed: ${err.message}`));
       break;
     
     case "zone_full":
-      // Zone capacity changed during active session - disconnect
+      // Zone capacity changed during active session - disconnect immediately
       debugError(`[WARDRIVE API] Zone full during wardrive: triggering disconnect`);
-      setDynamicStatus("Zone capacity changed", STATUS_COLORS.error);
       state.disconnectReason = reason;
-      setTimeout(() => {
-        disconnect().catch(err => debugError(`[BLE] Disconnect after ${reason} failed: ${err.message}`));
-      }, 1500);
+      disconnect().catch(err => debugError(`[BLE] Disconnect after ${reason} failed: ${err.message}`));
       break;
       
     case "rate_limited":
