@@ -832,7 +832,7 @@ function scheduleCoverageRefresh(lat, lon, delayMs = 0) {
 /**
  * Update map and GPS overlay after a zone check
  * - Updates GPS coordinates and accuracy on the map overlay
- * - Refreshes the map iframe with new coordinates
+ * - Refreshes the map iframe with new coordinates (unless auto mode is running)
  * @param {Object} coords - Coordinates object with lat, lon, accuracy_m properties
  */
 function updateMapOnZoneCheck(coords) {
@@ -846,6 +846,12 @@ function updateMapOnZoneCheck(coords) {
   }
   if (gpsAccEl && accuracy_m) {
     gpsAccEl.textContent = `±${Math.round(accuracy_m)}m`;
+  }
+  
+  // Skip map refresh if auto mode is running (ping completion handles map refresh)
+  if (state.txRxAutoRunning || state.rxAutoRunning) {
+    debugLog(`[GEO AUTH] Skipping map refresh - auto mode running`);
+    return;
   }
   
   // Refresh map iframe with new coordinates
