@@ -186,8 +186,10 @@ const gpsInfoEl = document.getElementById("gpsInfo");
 const gpsAccEl = document.getElementById("gpsAcc");
 const distanceInfoEl = document.getElementById("distanceInfo"); // Distance from last ping
 const txPingsEl = document.getElementById("txPings"); // TX log container
-const coverageFrameEl = document.getElementById("coverageFrame");
-const coverageFrameBufferEl = document.getElementById("coverageFrameBuffer");
+// Double-buffered iframes for seamless map updates
+const coverageFrameA = document.getElementById("coverageFrameA");
+const coverageFrameB = document.getElementById("coverageFrameB");
+let activeFrame = coverageFrameA; // Track which frame is currently visible
 
 // Track last connection status to avoid logging spam (declared here to avoid TDZ with setConnStatus call below)
 let lastConnStatusText = null;
@@ -775,13 +777,13 @@ let bufferLoadHandler = null; // Track current load handler for cleanup
 
 /**
  * Schedule a coverage map refresh using double-buffered iframe swap
- * Loads new content in hidden buffer iframe, swaps when ready for seamless update
+ * Loads new content in hidden iframe, swaps visibility when ready (no flicker)
  * @param {number} lat - Latitude
  * @param {number} lon - Longitude  
  * @param {number} delayMs - Delay before starting load (default 0)
  */
 function scheduleCoverageRefresh(lat, lon, delayMs = 0) {
-  if (!coverageFrameEl) return;
+  if (!coverageFrameA || !coverageFrameB) return;
 
   if (coverageRefreshTimer) clearTimeout(coverageRefreshTimer);
 
@@ -789,32 +791,35 @@ function scheduleCoverageRefresh(lat, lon, delayMs = 0) {
     const url = buildCoverageEmbedUrl(lat, lon);
     debugLog("[UI] Coverage iframe loading:", url);
     
-    // Use double-buffering if buffer iframe exists
-    if (coverageFrameBufferEl) {
-      // Clean up any previous load handler
-      if (bufferLoadHandler) {
-        coverageFrameBufferEl.removeEventListener('load', bufferLoadHandler);
-        bufferLoadHandler = null;
-      }
-      
-      // Create new load handler
-      bufferLoadHandler = function onBufferLoad() {
-        // Swap: copy loaded src to main frame, then hide buffer
-        coverageFrameEl.src = coverageFrameBufferEl.src;
-        debugLog("[UI] Coverage iframe swapped (double-buffer)");
-        
-        // Clean up
-        coverageFrameBufferEl.removeEventListener('load', bufferLoadHandler);
-        bufferLoadHandler = null;
-      };
-      
-      // Set up load listener and start loading in buffer
-      coverageFrameBufferEl.addEventListener('load', bufferLoadHandler);
-      coverageFrameBufferEl.src = url;
-    } else {
-      // Fallback: direct load if buffer not available
-      coverageFrameEl.src = url;
+    // Determine which frame is hidden (the buffer)
+    const bufferFrame = (activeFrame === coverageFrameA) ? coverageFrameB : coverageFrameA;
+    
+    // Clean up any previous load handler
+    if (bufferLoadHandler) {
+      bufferFrame.removeEventListener('load', bufferLoadHandler);
+      bufferLoadHandler = null;
     }
+    
+    // Create new load handler that swaps visibility
+    bufferLoadHandler = function onBufferLoad() {
+      // Swap visibility: hide current active, show buffer
+      activeFrame.classList.remove('coverage-frame-active');
+      activeFrame.classList.add('coverage-frame-hidden');
+      bufferFrame.classList.remove('coverage-frame-hidden');
+      bufferFrame.classList.add('coverage-frame-active');
+      
+      // Update active frame reference
+      activeFrame = bufferFrame;
+      debugLog("[UI] Coverage iframe swapped (double-buffer)");
+      
+      // Clean up
+      bufferFrame.removeEventListener('load', bufferLoadHandler);
+      bufferLoadHandler = null;
+    };
+    
+    // Set up load listener and start loading in buffer
+    bufferFrame.addEventListener('load', bufferLoadHandler);
+    bufferFrame.src = url;
   }, delayMs);
 }
 
