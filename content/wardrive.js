@@ -187,8 +187,8 @@ const gpsAccEl = document.getElementById("gpsAcc");
 const distanceInfoEl = document.getElementById("distanceInfo"); // Distance from last ping
 const txPingsEl = document.getElementById("txPings"); // TX log container
 // Double-buffered iframes for seamless map updates
-const coverageFrameA = document.getElementById("coverageFrameA");
-const coverageFrameB = document.getElementById("coverageFrameB");
+let coverageFrameA = document.getElementById("coverageFrameA");
+let coverageFrameB = document.getElementById("coverageFrameB");
 let activeFrame = coverageFrameA; // Track which frame is currently visible
 
 // Track last connection status to avoid logging spam (declared here to avoid TDZ with setConnStatus call below)
@@ -6037,6 +6037,13 @@ function unlockWardriveSettings() {
 // ---- Bind UI & init ----
 export async function onLoad() {
   debugLog("[INIT] wardrive.js onLoad() called - initializing");
+  
+  // Initialize double-buffered iframe references (in case module loaded before DOM)
+  if (!coverageFrameA) coverageFrameA = document.getElementById("coverageFrameA");
+  if (!coverageFrameB) coverageFrameB = document.getElementById("coverageFrameB");
+  if (coverageFrameA && !activeFrame) activeFrame = coverageFrameA;
+  debugLog(`[INIT] Coverage iframes: A=${!!coverageFrameA}, B=${!!coverageFrameB}, active=${activeFrame?.id || 'none'}`);
+  
   setConnStatus("Disconnected", STATUS_COLORS.error);
   enableControls(false);
   updateAutoButton();
