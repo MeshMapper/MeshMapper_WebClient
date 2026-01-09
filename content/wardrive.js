@@ -5632,7 +5632,6 @@ async function connect() {
       }
       
       setConnectButton(false);
-      if (deviceNameEl) deviceNameEl.textContent = "—";
       if (deviceModelEl) deviceModelEl.textContent = "-";
       
       // Stop periodic noise floor updates
