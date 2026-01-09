@@ -2720,9 +2720,20 @@ function handleWardriveApiError(reason, message) {
         disconnect().catch(err => debugError(`[BLE] Disconnect after ${reason} failed: ${err.message}`));
       }, 1500);
       break;
+    
+    case "bad_session":
+      // Session ID is invalid or doesn't match API key - disconnect
+      debugError(`[WARDRIVE API] Bad session: triggering disconnect`);
+      setDynamicStatus("Invalid session", STATUS_COLORS.error);
+      state.disconnectReason = reason;
+      setTimeout(() => {
+        disconnect().catch(err => debugError(`[BLE] Disconnect after ${reason} failed: ${err.message}`));
+      }, 1500);
+      break;
       
     case "invalid_key":
     case "unauthorized":
+    case "bad_key":
       // API key issue - disconnect
       debugError(`[WARDRIVE API] Authorization error (${reason}): triggering disconnect`);
       setDynamicStatus("Authorization failed", STATUS_COLORS.error);
@@ -2741,6 +2752,26 @@ function handleWardriveApiError(reason, message) {
         disconnect().catch(err => debugError(`[BLE] Disconnect after missing session_id failed: ${err.message}`));
       }, 1500);
       break;
+    
+    case "outside_zone":
+      // User has moved outside their assigned zone - disconnect
+      debugError(`[WARDRIVE API] Outside zone: triggering disconnect`);
+      setDynamicStatus("Outside zone", STATUS_COLORS.error);
+      state.disconnectReason = reason;
+      setTimeout(() => {
+        disconnect().catch(err => debugError(`[BLE] Disconnect after ${reason} failed: ${err.message}`));
+      }, 1500);
+      break;
+    
+    case "zone_full":
+      // Zone capacity changed during active session - disconnect
+      debugError(`[WARDRIVE API] Zone full during wardrive: triggering disconnect`);
+      setDynamicStatus("Zone capacity changed", STATUS_COLORS.error);
+      state.disconnectReason = reason;
+      setTimeout(() => {
+        disconnect().catch(err => debugError(`[BLE] Disconnect after ${reason} failed: ${err.message}`));
+      }, 1500);
+      break;
       
     case "rate_limited":
       // Rate limited - show warning but don't disconnect
@@ -2749,7 +2780,7 @@ function handleWardriveApiError(reason, message) {
       break;
       
     default:
-      // Unknown error - show message but don't disconnect
+      // Unknown error - log to error log but don't disconnect
       debugError(`[WARDRIVE API] Unknown error: ${reason} - ${message}`);
       setDynamicStatus(`API error: ${message || reason}`, STATUS_COLORS.error);
       break;

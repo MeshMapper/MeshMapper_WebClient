@@ -451,17 +451,41 @@ These messages use a hybrid approach: **first display respects 500ms minimum**, 
 ##### Session expired
 - **Message**: `"Session expired"`
 - **Color**: Red (error)
-- **When**: Wardrive API returns `success=false` with reason `session_expired` or `session_invalid`
+- **When**: Wardrive API returns `success=false` with reason `session_expired`, `session_invalid`, or `session_revoked`
 - **Terminal State**: Yes (triggers disconnect)
 - **Notes**: Session is no longer valid, triggers automatic disconnect after 1.5 seconds.
+- **Source**: `content/wardrive.js:handleWardriveApiError()`
+
+##### Invalid session
+- **Message**: `"Invalid session"`
+- **Color**: Red (error)
+- **When**: Wardrive API returns `success=false` with reason `bad_session`
+- **Terminal State**: Yes (triggers disconnect)
+- **Notes**: Session ID is invalid or doesn't match API key, triggers automatic disconnect after 1.5 seconds.
 - **Source**: `content/wardrive.js:handleWardriveApiError()`
 
 ##### Authorization failed
 - **Message**: `"Authorization failed"`
 - **Color**: Red (error)
-- **When**: Wardrive API returns `success=false` with reason `invalid_key` or `unauthorized`
+- **When**: Wardrive API returns `success=false` with reason `invalid_key`, `unauthorized`, or `bad_key`
 - **Terminal State**: Yes (triggers disconnect)
 - **Notes**: API key issue, triggers automatic disconnect after 1.5 seconds.
+- **Source**: `content/wardrive.js:handleWardriveApiError()`
+
+##### Outside zone
+- **Message**: `"Outside zone"`
+- **Color**: Red (error)
+- **When**: Wardrive API returns `success=false` with reason `outside_zone`
+- **Terminal State**: Yes (triggers disconnect)
+- **Notes**: User has moved outside their assigned zone during active wardrive session, triggers automatic disconnect after 1.5 seconds.
+- **Source**: `content/wardrive.js:handleWardriveApiError()`
+
+##### Zone capacity changed
+- **Message**: `"Zone capacity changed"`
+- **Color**: Red (error)
+- **When**: Wardrive API returns `success=false` with reason `zone_full` during active wardrive session
+- **Terminal State**: Yes (triggers disconnect)
+- **Notes**: Zone TX capacity changed during active session (unexpected mid-session), triggers automatic disconnect after 1.5 seconds. Note: `zone_full` during auth is handled as RX-only mode (partial success), not an error.
 - **Source**: `content/wardrive.js:handleWardriveApiError()`
 
 ##### Rate limited - slow down
@@ -477,7 +501,7 @@ These messages use a hybrid approach: **first display respects 500ms minimum**, 
 - **Color**: Red (error)
 - **When**: Wardrive API returns `success=false` with an unknown reason code
 - **Terminal State**: No (does not trigger disconnect)
-- **Notes**: Fallback message for unknown error codes. Shows raw API message to help with debugging.
+- **Notes**: Fallback message for unknown error codes. Shows raw API message to help with debugging. Logged to Error Log but does not trigger disconnect (allows recovery from transient/unknown errors).
 - **Source**: `content/wardrive.js:handleWardriveApiError()`
 
 ##### Error: API post failed (DEPRECATED)
