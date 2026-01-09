@@ -35,14 +35,17 @@
       position: absolute;
       top: 0;
       left: 0;
+      transition: opacity 0.15s ease-in-out;
     }
     .coverage-frame-active {
-      visibility: visible;
+      opacity: 1;
       z-index: 1;
+      pointer-events: auto;
     }
     .coverage-frame-hidden {
-      visibility: hidden;
+      opacity: 0;
       z-index: 0;
+      pointer-events: none;
     }
   </style>
 </head>

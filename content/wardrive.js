@@ -804,24 +804,23 @@ function scheduleCoverageRefresh(lat, lon, delayMs = 0) {
     
     // Create new load handler that swaps visibility
     bufferLoadHandler = function onBufferLoad() {
-      // Small delay to ensure iframe content is fully painted before swap
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          // Swap visibility: hide current active, show buffer
-          activeFrame.classList.remove('coverage-frame-active');
-          activeFrame.classList.add('coverage-frame-hidden');
-          bufferFrame.classList.remove('coverage-frame-hidden');
-          bufferFrame.classList.add('coverage-frame-active');
-          
-          // Update active frame reference
-          activeFrame = bufferFrame;
-          debugLog("[UI] Coverage iframe swapped (double-buffer)");
-          
-          // Clean up
-          bufferFrame.removeEventListener('load', bufferLoadHandler);
-          bufferLoadHandler = null;
-        });
-      });
+      // Delay after load to ensure iframe content is fully rendered
+      // Cross-origin iframes may fire load before paint is complete
+      setTimeout(() => {
+        // Swap opacity: fade out current active, fade in buffer
+        activeFrame.classList.remove('coverage-frame-active');
+        activeFrame.classList.add('coverage-frame-hidden');
+        bufferFrame.classList.remove('coverage-frame-hidden');
+        bufferFrame.classList.add('coverage-frame-active');
+        
+        // Update active frame reference
+        activeFrame = bufferFrame;
+        debugLog("[UI] Coverage iframe swapped (double-buffer)");
+        
+        // Clean up
+        bufferFrame.removeEventListener('load', bufferLoadHandler);
+        bufferLoadHandler = null;
+      }, 300); // 300ms delay for content to render
     };
     
     // Set up load listener and start loading in buffer
