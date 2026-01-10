@@ -67,8 +67,15 @@ const ADVERT_HEADER = 0x11;                   // Header byte for ADVERT packets 
 
 // RX Packet Filter Configuration
 const MAX_RX_PATH_LENGTH = 9;                 // Maximum path length for RX packets (drop if exceeded to filter corrupted packets)
-const RX_ALLOWED_CHANNELS = ['#wardriving', '#public', '#testing', '#ottawa']; // Allowed channels for RX wardriving
+const RX_ALLOWED_CHANNELS = ['#wardriving', 'Public', '#testing', '#ottawa']; // Allowed channels for RX wardriving (Public uses fixed key, hashtag channels use SHA-256 derivation)
 const RX_PRINTABLE_THRESHOLD = 0.80;          // Minimum printable character ratio for GRP_TXT (80%)
+
+// Fixed key for Public channel (default MeshCore channel without hashtag)
+// This is a well-known key used by all MeshCore devices for the default Public channel
+const PUBLIC_CHANNEL_FIXED_KEY = new Uint8Array([
+  0x8b, 0x33, 0x87, 0xe9, 0xc5, 0xcd, 0xea, 0x6a,
+  0xc9, 0xe5, 0xed, 0xba, 0xa1, 0x15, 0xcd, 0x72
+]);
 
 // Pre-computed channel hash and key for the wardriving channel
 // These will be computed once at startup and used for message correlation and decryption
@@ -94,7 +101,7 @@ let DEVICE_MODELS = [];
     // Initialize all allowed RX channels
     debugLog(`[INIT] Pre-computing hashes/keys for ${RX_ALLOWED_CHANNELS.length} allowed RX channels...`);
     for (const channelName of RX_ALLOWED_CHANNELS) {
-      const key = await deriveChannelKey(channelName);
+      const key = await getChannelKey(channelName);
       const hash = await computeChannelHash(key);
       RX_CHANNEL_MAP.set(hash, { name: channelName, key: key });
       debugLog(`[INIT] ${channelName} -> hash=0x${hash.toString(16).padStart(2, '0')}`);
@@ -1711,6 +1718,9 @@ async function primeGpsOnce() {
  * This allows any hashtag channel to be used (e.g., #wardriving, #wardrive, #test).
  * Channel names must start with # and contain only a-z, 0-9, and dashes.
  * 
+ * NOTE: This function is ONLY for hashtag channels. The "Public" channel (without hashtag)
+ * uses a fixed key defined in PUBLIC_CHANNEL_FIXED_KEY constant.
+ * 
  * Algorithm: sha256(channelName).subarray(0, 16)
  * 
  * @param {string} channelName - The hashtag channel name (e.g., "#wardriving")
@@ -1756,6 +1766,21 @@ async function deriveChannelKey(channelName) {
   debugLog(`[CHANNEL] Channel key derived successfully (${channelKey.length} bytes)`);
   
   return channelKey;
+}
+
+/**
+ * Get channel key for any channel (handles both Public and hashtag channels)
+ * Provides a unified interface for retrieving channel keys regardless of type
+ * @param {string} channelName - Channel name (e.g., "Public", "#wardriving", "#testing")
+ * @returns {Promise<Uint8Array>} The 16-byte channel key
+ */
+async function getChannelKey(channelName) {
+  if (channelName === 'Public') {
+    debugLog(`[CHANNEL] Using fixed key for Public channel`);
+    return PUBLIC_CHANNEL_FIXED_KEY;
+  } else {
+    return await deriveChannelKey(channelName);
+  }
 }
 
 // ---- Channel helpers ----

@@ -120,9 +120,14 @@ Used by `startAutoCountdown()`, `startRxListeningCountdown()`, cooldown logic.
 ### 2. Channel Hash & Decryption
 **Pre-computed at startup**:
 ```javascript
-WARDRIVING_CHANNEL_KEY = await deriveChannelKey("#wardriving");  // PBKDF2 SHA-256
+WARDRIVING_CHANNEL_KEY = await deriveChannelKey("#wardriving");  // SHA-256 for hashtag channels
 WARDRIVING_CHANNEL_HASH = await computeChannelHash(key);        // PSK channel identifier
 ```
+
+**Channel Key Types**:
+- **Hashtag channels** (`#wardriving`, `#testing`, `#ottawa`): Keys derived via SHA-256 of channel name
+- **Public channel** (`Public`, no hashtag): Uses fixed key `8b3387e9c5cdea6ac9e5edbaa115cd72` (default MeshCore channel)
+
 Used for:
 - Repeater echo detection (match `channelHash` in received packets)
 - Message decryption (AES-ECB via aes-js library)
