@@ -23,8 +23,9 @@ let REMOTE_DEBUG_ENABLED = REMOTE_DEBUG_USER && REMOTE_DEBUG_KEY; // Can be disa
 const REMOTE_DEBUG_ENDPOINT = 'https://meshmapper.net/livedebug.php';
 const REMOTE_DEBUG_BATCH_MAX = 100;           // Maximum logs per batch
 const REMOTE_DEBUG_FLUSH_INTERVAL_MS = 15000; // Flush every 15 seconds
-const REMOTE_DEBUG_RATE_LIMIT = 30;           // Max logs per second
+const REMOTE_DEBUG_RATE_LIMIT = 10;           // Max logs per second
 const REMOTE_DEBUG_RATE_RESET_MS = 1000;      // Rate limit reset interval
+const REMOTE_DEBUG_GRACE_PERIOD_MS = 15000;   // Grace period before rate limiting starts (15 seconds)
 
 const debugLogQueue = {
   messages: [],           // Array of {date: <epoch>, message: <string>}
@@ -32,7 +33,8 @@ const debugLogQueue = {
   rateResetTimerId: null, // Timer ID for rate limit reset
   logsThisSecond: 0,      // Current rate counter
   droppedCount: 0,        // Logs dropped due to rate limiting
-  isProcessing: false     // Lock to prevent concurrent flush
+  isProcessing: false,    // Lock to prevent concurrent flush
+  startupTimestamp: Date.now()  // App launch time for grace period tracking
 };
 
 // Store original console methods before overriding
@@ -49,12 +51,19 @@ const originalConsoleError = console.error.bind(console);
 function queueRemoteDebugLog(level, args) {
   if (!REMOTE_DEBUG_ENABLED) return;
   
-  // Rate limiting check
-  if (debugLogQueue.logsThisSecond >= REMOTE_DEBUG_RATE_LIMIT) {
+  // Grace period check - bypass rate limiting for first 15 seconds
+  const gracePeriodActive = (Date.now() - debugLogQueue.startupTimestamp) < REMOTE_DEBUG_GRACE_PERIOD_MS;
+  
+  // Rate limiting check (only after grace period)
+  if (!gracePeriodActive && debugLogQueue.logsThisSecond >= REMOTE_DEBUG_RATE_LIMIT) {
     debugLogQueue.droppedCount++;
     return; // Drop this log
   }
-  debugLogQueue.logsThisSecond++;
+  
+  // Increment counter only after grace period
+  if (!gracePeriodActive) {
+    debugLogQueue.logsThisSecond++;
+  }
   
   // Serialize arguments to string
   const messageParts = args.map(arg => {
@@ -185,6 +194,12 @@ function startRemoteDebugTimers() {
   // 1-second rate limit reset timer
   debugLogQueue.rateResetTimerId = setInterval(() => {
     debugLogQueue.logsThisSecond = 0;
+    
+    // Log when grace period expires (once at 15 seconds)
+    const elapsed = Date.now() - debugLogQueue.startupTimestamp;
+    if (elapsed >= REMOTE_DEBUG_GRACE_PERIOD_MS && elapsed < (REMOTE_DEBUG_GRACE_PERIOD_MS + REMOTE_DEBUG_RATE_RESET_MS)) {
+      originalConsoleLog('[REMOTE DEBUG] Grace period ended - rate limiting now active (30 logs/sec)');
+    }
   }, REMOTE_DEBUG_RATE_RESET_MS);
   
   originalConsoleLog('[REMOTE DEBUG] Remote debug logging enabled - logs will be sent to server every 15s');
@@ -226,19 +241,19 @@ if (REMOTE_DEBUG_ENABLED) {
 
 // Debug logging helper function
 function debugLog(message, ...args) {
-  if (DEBUG_ENABLED) {
+  if (DEBUG_ENABLED || REMOTE_DEBUG_ENABLED) {
     console.log(message, ...args);
   }
 }
 
 function debugWarn(message, ...args) {
-  if (DEBUG_ENABLED) {
+  if (DEBUG_ENABLED || REMOTE_DEBUG_ENABLED) {
     console.warn(message, ...args);
   }
 }
 
 function debugError(message, ...args) {
-  if (DEBUG_ENABLED) {
+  if (DEBUG_ENABLED || REMOTE_DEBUG_ENABLED) {
     console.error(message, ...args);
     
     // Also add to Error Log UI (use try-catch to prevent recursive errors)
