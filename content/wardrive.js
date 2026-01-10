@@ -5573,6 +5573,12 @@ async function connect() {
       debugLog("[BLE] BLE disconnected event fired");
       debugLog(`[BLE] Disconnect reason: ${state.disconnectReason}`);
       
+      // Guard against duplicate disconnect events - if connection is already null, skip
+      if (state.connection === null) {
+        debugLog("[BLE] Ignoring duplicate disconnect event (connection already null)");
+        return;
+      }
+      
       // Always set connection bar to "Disconnected"
       setConnStatus("Disconnected", STATUS_COLORS.error);
       
@@ -5679,7 +5685,8 @@ async function connect() {
       state.sessionExpiresAt = null; // Clear session expiration
       state.debugMode = false; // Clear debug mode
       state.tempTxRepeaterData = null; // Clear temp TX data
-      state.disconnectReason = null; // Reset disconnect reason
+      // NOTE: state.disconnectReason is NOT cleared here - it's cleared in connect() 
+      // so error status persists until user starts a new connection
       state.channelSetupErrorMessage = null; // Clear error message
       state.bleDisconnectErrorMessage = null; // Clear error message
       state.autoPowerSet = false; // Reset auto-power flag
