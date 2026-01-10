@@ -3027,18 +3027,42 @@ function getPrintableRatio(str) {
  */
 function parseAdvertName(payload) {
   try {
-    // ADVERT structure: [32 bytes pubkey][4 bytes timestamp][64 bytes signature][1 byte flags][name...]
+    // ADVERT structure: [32 bytes pubkey][4 bytes timestamp][64 bytes signature][appData...]
+    // appData structure: [1 byte flags][optional 8 bytes lat/lon if flag set][name if flag set]
     const PUBKEY_SIZE = 32;
     const TIMESTAMP_SIZE = 4;
     const SIGNATURE_SIZE = 64;
-    const FLAGS_SIZE = 1;
-    const NAME_OFFSET = PUBKEY_SIZE + TIMESTAMP_SIZE + SIGNATURE_SIZE + FLAGS_SIZE;
+    const APP_DATA_OFFSET = PUBKEY_SIZE + TIMESTAMP_SIZE + SIGNATURE_SIZE; // 100
     
-    if (payload.length <= NAME_OFFSET) {
+    if (payload.length <= APP_DATA_OFFSET) {
+      return { valid: false, name: '', reason: 'payload too short for appData' };
+    }
+    
+    // Read flags byte from appData
+    const flags = payload[APP_DATA_OFFSET];
+    debugLog(`[RX FILTER] ADVERT flags: 0x${flags.toString(16).padStart(2, '0')}`);
+    
+    // Flag masks (from advert.js)
+    const ADV_LATLON_MASK = 0x10;
+    const ADV_NAME_MASK = 0x80;
+    
+    // Check if name is present
+    if (!(flags & ADV_NAME_MASK)) {
+      return { valid: false, name: '', reason: 'no name in advert' };
+    }
+    
+    // Calculate name offset: skip flags byte and optional lat/lon
+    let nameOffset = APP_DATA_OFFSET + 1; // +1 for flags byte (offset 101)
+    if (flags & ADV_LATLON_MASK) {
+      nameOffset += 8; // Skip 4 bytes lat + 4 bytes lon (offset 109)
+      debugLog(`[RX FILTER] ADVERT has lat/lon, skipping 8 bytes`);
+    }
+    
+    if (payload.length <= nameOffset) {
       return { valid: false, name: '', reason: 'payload too short for name' };
     }
     
-    const nameBytes = payload.slice(NAME_OFFSET);
+    const nameBytes = payload.slice(nameOffset);
     const decoder = new TextDecoder('utf-8', { fatal: false });
     const name = decoder.decode(nameBytes).replace(/\0+$/, '').trim();
     
