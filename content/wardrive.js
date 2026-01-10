@@ -8,9 +8,9 @@
 import { WebBleConnection, Constants, Packet, BufferUtils } from "./mc/index.js"; // your BLE client
 
 // ---- Debug Configuration ----
-// Enable debug logging via URL parameter (?debug=true) or set default here
+// Enable debug logging via URL parameter (?debug=1) or set default here
 const urlParams = new URLSearchParams(window.location.search);
-const DEBUG_ENABLED = urlParams.get('debug') === 'true' || false; // Set to true to enable debug logging by default
+const DEBUG_ENABLED = urlParams.get('debug') === '1' || false; // Set to true to enable debug logging by default
 
 // ---- Remote Debug Configuration ----
 // Enable remote debug logging via URL parameters (?debuguser=1&debugkey=<key>)
