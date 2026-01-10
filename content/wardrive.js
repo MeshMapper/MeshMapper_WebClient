@@ -227,19 +227,19 @@ if (REMOTE_DEBUG_ENABLED) {
 // Debug logging helper function
 function debugLog(message, ...args) {
   if (DEBUG_ENABLED) {
-    console.log(`[DEBUG] ${message}`, ...args);
+    console.log(message, ...args);
   }
 }
 
 function debugWarn(message, ...args) {
   if (DEBUG_ENABLED) {
-    console.warn(`[DEBUG] ${message}`, ...args);
+    console.warn(message, ...args);
   }
 }
 
 function debugError(message, ...args) {
   if (DEBUG_ENABLED) {
-    console.error(`[DEBUG] ${message}`, ...args);
+    console.error(message, ...args);
     
     // Also add to Error Log UI (use try-catch to prevent recursive errors)
     try {
