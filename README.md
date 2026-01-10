@@ -14,7 +14,6 @@ A browser-based Progressive Web App for wardriving with MeshCore devices. Connec
 
 ### Before you start
 
-- Make sure you have the **wardriving channel** set on your companion.
 - Take a **backup of your companion** (this webapp is beyond experimental).
 
 ### Android
