@@ -6724,24 +6724,28 @@ export async function onLoad() {
 
   // Carpeater filter checkbox event listener
   const carpeaterCheckbox = document.getElementById('carpeaterFilterEnabled');
-  const carpeaterInputContainer = document.getElementById('carpeaterIdInputContainer');
   const carpeaterInput = document.getElementById('carpeaterIdInput');
   
-  if (carpeaterCheckbox && carpeaterInputContainer && carpeaterInput) {
+  if (carpeaterCheckbox && carpeaterInput) {
     // Load saved settings from localStorage
     const savedEnabled = localStorage.getItem('carpeaterFilterEnabled') === 'true';
     const savedId = localStorage.getItem('carpeaterRepeaterId') || '';
     
     carpeaterCheckbox.checked = savedEnabled;
     carpeaterInput.value = savedId;
-    carpeaterInputContainer.classList.toggle('hidden', !savedEnabled);
+    carpeaterInput.disabled = !savedEnabled; // Enable/disable input based on checkbox
     
     // Checkbox toggle event
     carpeaterCheckbox.addEventListener('change', (e) => {
       const isEnabled = e.target.checked;
-      carpeaterInputContainer.classList.toggle('hidden', !isEnabled);
+      carpeaterInput.disabled = !isEnabled;
       localStorage.setItem('carpeaterFilterEnabled', isEnabled);
       debugLog(`[SETTINGS] Carpeater filter ${isEnabled ? 'enabled' : 'disabled'}`);
+      
+      // Focus input when enabled
+      if (isEnabled) {
+        carpeaterInput.focus();
+      }
     });
     
     // Input validation and save event
