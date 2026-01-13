@@ -328,6 +328,7 @@ const ADVERT_HEADER = 0x11;                   // Header byte for ADVERT packets 
 
 // RX Packet Filter Configuration
 const MAX_RX_PATH_LENGTH = 9;                 // Maximum path length for RX packets (drop if exceeded to filter corrupted packets)
+const MAX_RX_RSSI_THRESHOLD = -30;            // Maximum RSSI (dBm) for RX packets (drop if ≥ -30 to filter "carpeater" - extremely close/interfering repeaters)
 const RX_ALLOWED_CHANNELS = ['#wardriving', 'Public', '#testing', '#ottawa']; // Allowed channels for RX wardriving (Public uses fixed key, hashtag channels use SHA-256 derivation)
 const RX_PRINTABLE_THRESHOLD = 0.80;          // Minimum printable character ratio for GRP_TXT (80%)
 
@@ -516,6 +517,8 @@ const txLogState = {
 const rxLogState = {
   entries: [],  // Array of parsed RX log entries
   dropCount: 0, // Count of dropped/filtered packets
+  carpeaterIgnoreDropCount: 0,  // User-specified repeater drops (silent)
+  carpeaterRssiDropCount: 0,     // RSSI failsafe drops (logged)
   isExpanded: false,
   autoScroll: true,
   maxEntries: 100  // Limit to prevent memory issues
@@ -2246,6 +2249,23 @@ function getExternalAntennaSetting() {
   return checkedAntenna ? checkedAntenna.value : "";
 }
 
+/**
+ * Get carpeater ignore settings from UI
+ * @returns {{enabled: boolean, repeaterId: string|null}} Settings object
+ */
+function getCarpeaterIgnoreSettings() {
+  const enabled = document.getElementById('carpeaterFilterEnabled')?.checked || false;
+  const idInput = document.getElementById('carpeaterIdInput')?.value?.trim()?.toLowerCase() || '';
+  
+  // Validate hex format (2 chars, 00-FF)
+  const isValidHex = /^[0-9a-f]{2}$/.test(idInput);
+  
+  return {
+    enabled: enabled && isValidHex,
+    repeaterId: (enabled && isValidHex) ? idInput : null
+  };
+}
+
 function buildPayload(lat, lon) {
   const coordsStr = `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
   const power = getCurrentPowerSetting();
@@ -3417,7 +3437,15 @@ async function validateRxPacket(metadata) {
     }
     debugLog(`[RX FILTER] ✓ Path length OK (${metadata.pathLength} ≤ ${MAX_RX_PATH_LENGTH})`);
     
-    // VALIDATION 2: Check packet type (only ADVERT and GRP_TXT)
+    // VALIDATION 2: Check RSSI (Carpeater filter - drop extremely strong signals from OTHER repeaters)
+    // Note: User-specified carpeater is already filtered earlier in handleTxLogging/handleRxLogging
+    if (metadata.rssi >= MAX_RX_RSSI_THRESHOLD) {
+      debugLog(`[RX FILTER] ❌ DROPPED: RSSI too strong (${metadata.rssi} ≥ ${MAX_RX_RSSI_THRESHOLD}) - possible carpeater (RSSI failsafe)`);
+      return { valid: false, reason: 'carpeater-rssi' };
+    }
+    debugLog(`[RX FILTER] ✓ RSSI OK (${metadata.rssi} < ${MAX_RX_RSSI_THRESHOLD})`);
+    
+    // VALIDATION 3: Check packet type (only ADVERT and GRP_TXT)
     if (metadata.header === CHANNEL_GROUP_TEXT_HEADER) {
       debugLog(`[RX FILTER] Packet type: GRP_TXT (0x15)`);
       
@@ -3544,6 +3572,17 @@ async function handleTxLogging(metadata, data) {
     
     debugLog(`[TX LOG] Header validation passed: 0x${metadata.header.toString(16).padStart(2, '0')}`);
     
+    // VALIDATION STEP 1.5: Check RSSI (Carpeater RSSI failsafe - drop extremely strong signals)
+    if (metadata.rssi >= MAX_RX_RSSI_THRESHOLD) {
+      debugLog(`[TX LOG] ❌ DROPPED: RSSI too strong (${metadata.rssi} ≥ ${MAX_RX_RSSI_THRESHOLD}) - possible carpeater (RSSI failsafe)`);
+      rxLogState.dropCount++;
+      rxLogState.carpeaterRssiDropCount++;
+      updateCarpeaterErrorLog();
+      updateRxLogSummary();
+      return false; // Mark as handled (dropped)
+    }
+    debugLog(`[TX LOG] ✓ RSSI OK (${metadata.rssi} < ${MAX_RX_RSSI_THRESHOLD})`);
+    
     // VALIDATION STEP 2: Validate this message is for our channel by comparing channel hash
     // Channel message payload structure: [1 byte channel_hash][2 bytes MAC][encrypted message]
     if (metadata.encryptedPayload.length < 3) {
@@ -3613,6 +3652,16 @@ async function handleTxLogging(metadata, data) {
     // Example: path [0x22, 0xd0, 0x5d] becomes "22" (only first hop)
     const firstHopId = metadata.firstHop;
     const pathHex = firstHopId.toString(16).padStart(2, '0');
+    
+    // Check if this repeater is the user-specified carpeater to ignore
+    const carpeaterSettings = getCarpeaterIgnoreSettings();
+    if (carpeaterSettings.enabled && pathHex === carpeaterSettings.repeaterId) {
+      rxLogState.dropCount++;
+      rxLogState.carpeaterIgnoreDropCount++;
+      updateRxLogSummary();
+      debugLog(`[PING] ❌ Dropped: Repeater ${pathHex} is user-specified carpeater (ignore)`);
+      return;
+    }
     
     debugLog(`[PING] Repeater echo accepted: first_hop=${pathHex}, SNR=${metadata.snr}, full_path_length=${metadata.pathLength}`);
     
@@ -3788,6 +3837,13 @@ async function handleRxLogging(metadata, data) {
     const validation = await validateRxPacket(metadata);
     if (!validation.valid) {
       rxLogState.dropCount++;
+      
+      // Special handling for RSSI failsafe carpeater drops (not user-specified drops)
+      if (validation.reason === 'carpeater-rssi') {
+        rxLogState.carpeaterRssiDropCount++;
+        updateCarpeaterErrorLog();
+      }
+      
       updateRxLogSummary();
       const rawHex = Array.from(metadata.raw).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
       debugLog(`[RX LOG] ❌ Packet dropped: ${validation.reason}`);
@@ -3798,6 +3854,16 @@ async function handleRxLogging(metadata, data) {
     // Extract LAST hop from path (the repeater that directly delivered to us)
     const lastHopId = metadata.lastHop;
     const repeaterId = lastHopId.toString(16).padStart(2, '0');
+    
+    // Check if this repeater is the user-specified carpeater to ignore
+    const carpeaterSettings = getCarpeaterIgnoreSettings();
+    if (carpeaterSettings.enabled && repeaterId === carpeaterSettings.repeaterId) {
+      rxLogState.dropCount++;
+      rxLogState.carpeaterIgnoreDropCount++;
+      updateRxLogSummary();
+      debugLog(`[RX LOG] ❌ Dropped: Repeater ${repeaterId} is user-specified carpeater (ignore)`);
+      return;
+    }
     
     debugLog(`[RX LOG] Packet heard via last hop: ${repeaterId}, SNR=${metadata.snr}, path_length=${metadata.pathLength}`);
     debugLog(`[RX LOG] ✅ Packet validated and passed filter`);
@@ -4816,6 +4882,34 @@ function addErrorLogEntry(message, source = null) {
   debugLog(`[ERROR LOG] Added entry: ${message.substring(0, 50)}${message.length > 50 ? '...' : ''}`);
 }
 
+/**
+ * Update or add carpeater error log entry with current drop count
+ * This creates a persistent error entry that updates in place rather than creating multiple entries
+ */
+function updateCarpeaterErrorLog() {
+  const message = `Possible Carpeater Detected, Dropped ${rxLogState.carpeaterRssiDropCount} packet${rxLogState.carpeaterRssiDropCount !== 1 ? 's' : ''}`;
+  const source = 'RX FILTER';
+  
+  // Find existing carpeater entry by checking if message starts with "Possible Carpeater Detected"
+  const existingIndex = errorLogState.entries.findIndex(entry => 
+    entry.source === source && entry.message.startsWith('Possible Carpeater Detected')
+  );
+  
+  if (existingIndex !== -1) {
+    // Update existing entry
+    errorLogState.entries[existingIndex].message = message;
+    errorLogState.entries[existingIndex].timestamp = new Date().toISOString();
+    debugLog(`[ERROR LOG] Updated carpeater entry: ${rxLogState.carpeaterDropCount} drops`);
+    
+    // Full re-render to update the displayed message
+    renderErrorLogEntries(true);
+    updateErrorLogSummary();
+  } else {
+    // Create new entry (first carpeater detection)
+    addErrorLogEntry(message, source);
+  }
+}
+
 // ---- CSV Export Functions ----
 
 /**
@@ -5751,6 +5845,8 @@ async function connect() {
   
   rxLogState.entries = [];
   rxLogState.dropCount = 0;
+  rxLogState.carpeaterIgnoreDropCount = 0;
+  rxLogState.carpeaterRssiDropCount = 0;
   renderRxLogEntries(true);
   updateRxLogSummary();
   
@@ -6520,12 +6616,9 @@ export async function onLoad() {
       
       // Show custom confirmation modal
       const modal = document.getElementById("overrideModal");
-      debugLog(`[UI] Modal element lookup result: ${modal ? 'found' : 'NOT FOUND'}`);
       if (modal) {
-        debugLog(`[UI] Modal current display: ${modal.style.display}, classes: ${modal.className}`);
         modal.classList.remove("hidden");
-        modal.style.display = "flex";
-        debugLog(`[UI] Modal after show - display: ${modal.style.display}, classes: ${modal.className}`);
+        debugLog("[UI] Override modal opened");
       } else {
         debugError("[UI] overrideModal element not found in DOM!");
       }
@@ -6575,7 +6668,6 @@ export async function onLoad() {
     overrideModalCancel.addEventListener("click", () => {
       debugLog("[UI] Override canceled via custom modal");
       overrideModal.classList.add("hidden");
-      overrideModal.style.display = "none";
     });
   }
   
@@ -6585,7 +6677,6 @@ export async function onLoad() {
       if (e.target === overrideModal) {
         debugLog("[UI] Override modal closed via backdrop click");
         overrideModal.classList.add("hidden");
-        overrideModal.style.display = "none";
       }
     });
   }
@@ -6637,6 +6728,60 @@ export async function onLoad() {
     });
   });
 
+  // Carpeater filter checkbox event listener
+  const carpeaterCheckbox = document.getElementById('carpeaterFilterEnabled');
+  const carpeaterInput = document.getElementById('carpeaterIdInput');
+  
+  if (carpeaterCheckbox && carpeaterInput) {
+    // Load saved settings from localStorage
+    const savedEnabled = localStorage.getItem('carpeaterFilterEnabled') === 'true';
+    const savedId = localStorage.getItem('carpeaterRepeaterId') || '';
+    
+    carpeaterCheckbox.checked = savedEnabled;
+    carpeaterInput.value = savedId;
+    carpeaterInput.disabled = !savedEnabled; // Enable/disable input based on checkbox
+    
+    // Update checkmark visibility on load
+    const checkmarkSvg = document.querySelector('.checkmark-svg');
+    if (checkmarkSvg) {
+      checkmarkSvg.style.opacity = savedEnabled ? '1' : '0';
+    }
+    
+    // Checkbox toggle event
+    carpeaterCheckbox.addEventListener('change', (e) => {
+      const isEnabled = e.target.checked;
+      carpeaterInput.disabled = !isEnabled;
+      localStorage.setItem('carpeaterFilterEnabled', isEnabled);
+      debugLog(`[SETTINGS] Carpeater filter ${isEnabled ? 'enabled' : 'disabled'}`);
+      
+      // Update checkmark visibility
+      if (checkmarkSvg) {
+        checkmarkSvg.style.opacity = isEnabled ? '1' : '0';
+      }
+      
+      // Focus input when enabled
+      if (isEnabled) {
+        carpeaterInput.focus();
+      }
+    });
+    
+    // Input validation and save event
+    carpeaterInput.addEventListener('input', (e) => {
+      const value = e.target.value.toLowerCase();
+      const isValid = /^[0-9a-f]{0,2}$/.test(value);
+      
+      if (isValid) {
+        e.target.value = value;
+        if (value.length === 2) {
+          localStorage.setItem('carpeaterRepeaterId', value);
+          debugLog(`[SETTINGS] Carpeater repeater ID set to: ${value}`);
+        }
+      } else {
+        e.target.value = value.slice(0, -1); // Remove invalid character
+      }
+    });
+  }
+
   // Session Log event listener
   if (txLogSummaryBar) {
     txLogSummaryBar.addEventListener("click", () => {
@@ -6683,6 +6828,35 @@ export async function onLoad() {
       e.stopPropagation(); // Prevent triggering the summary bar toggle
       debugLog("[ERROR LOG] Copy button clicked");
       copyLogToCSV('error', errorLogCopyBtn);
+    });
+  }
+
+  // Carpeater Info link event listener
+  const carpeaterInfoLink = document.getElementById('carpeaterInfoLink');
+  const carpeaterModal = document.getElementById('carpeaterModal');
+  
+  if (carpeaterInfoLink && carpeaterModal) {
+    carpeaterInfoLink.addEventListener('click', (e) => {
+      e.preventDefault();
+      debugLog('[UI] Carpeater Info link clicked - opening modal');
+      carpeaterModal.classList.remove('hidden');
+    });
+    
+    // Close modal when clicking close buttons
+    const modalCloseButtons = carpeaterModal.querySelectorAll('[data-modal-close]');
+    modalCloseButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        debugLog('[UI] Carpeater modal close button clicked');
+        carpeaterModal.classList.add('hidden');
+      });
+    });
+    
+    // Close modal when clicking backdrop
+    carpeaterModal.addEventListener('click', (e) => {
+      if (e.target === carpeaterModal) {
+        debugLog('[UI] Carpeater modal closed via backdrop click');
+        carpeaterModal.classList.add('hidden');
+      }
     });
   }
 

@@ -162,6 +162,26 @@
           </div>
         </div>
 
+        <!-- Carpeater Filter -->
+        <div class="space-y-2">
+          <label class="block text-xs font-medium text-slate-400 uppercase tracking-wide">Carpeater Filter</label>
+          <div class="flex items-center gap-2">
+            <!-- Custom styled checkbox -->
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="carpeaterFilterEnabled" class="sr-only peer">
+              <div class="w-5 h-5 bg-slate-700 border border-slate-600 rounded peer-checked:bg-emerald-600 peer-checked:border-emerald-600 peer-focus:ring-2 peer-focus:ring-emerald-500 peer-focus:ring-offset-1 peer-focus:ring-offset-slate-800 transition-all flex items-center justify-center group">
+                <svg class="w-3 h-3 text-white opacity-0 transition-opacity checkmark-svg" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path>
+                </svg>
+              </div>
+            </label>
+            <label for="carpeaterFilterEnabled" class="text-sm text-slate-300 cursor-pointer select-none">Ignore ID:</label>
+            <input type="text" id="carpeaterIdInput" maxlength="2" placeholder="00" disabled
+                   class="w-14 px-2 py-1 text-sm bg-slate-700 text-white border border-slate-600 rounded focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 focus:outline-none uppercase font-mono disabled:opacity-50 disabled:cursor-not-allowed">
+            <a href="#" id="carpeaterInfoLink" class="text-xs text-sky-400 hover:text-sky-300 hover:underline transition-colors ml-1">Info</a>
+          </div>
+        </div>
+
         <!-- Status Info -->
         <div class="space-y-2">
           <label class="block text-xs font-medium text-slate-400 uppercase tracking-wide">Status Info</label>
@@ -375,14 +395,14 @@
   </script>
 
   <!-- Override Confirmation Modal -->
-  <div id="overrideModal" class="hidden" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(0, 0, 0, 0.7); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 1rem;">
-    <div style="background-color: #1e293b; border: 1px solid #475569; border-radius: 0.75rem; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); max-width: 24rem; width: 100%;">
-      <div style="padding: 1.5rem; border-bottom: 1px solid #475569;">
-        <h3 style="font-size: 1.125rem; font-weight: 500; color: #e2e8f0;">Override Auto-Configuration?</h3>
+  <div id="overrideModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div class="bg-slate-800 rounded-lg shadow-xl max-w-sm w-full border border-slate-600">
+      <div class="p-6 border-b border-slate-600">
+        <h3 class="text-lg font-medium text-slate-200">Override Auto-Configuration?</h3>
       </div>
-      <div style="padding: 1.5rem;">
-        <p style="font-size: 0.875rem; color: #cbd5e1; margin-bottom: 0.5rem;">This will allow you to manually select the radio power setting.</p>
-        <p style="font-size: 0.875rem; color: #94a3b8;">The device was automatically configured based on its hardware profile.</p>
+      <div class="p-6">
+        <p class="text-sm text-slate-300 mb-2">This will allow you to manually select the radio power setting.</p>
+        <p class="text-sm text-slate-400">The device was automatically configured based on its hardware profile.</p>
       </div>
       <div style="padding: 1.5rem; display: flex; gap: 0.75rem; border-top: 1px solid #475569;">
         <button id="overrideModalCancel" style="flex: 1; padding: 0.5rem 1rem; font-size: 0.875rem; font-weight: 500; color: #cbd5e1; background-color: #475569; border-radius: 0.5rem; border: none; cursor: pointer; transition: background-color 0.2s;">
@@ -390,6 +410,38 @@
         </button>
         <button id="overrideModalConfirm" style="flex: 1; padding: 0.5rem 1rem; font-size: 0.875rem; font-weight: 500; color: white; background-color: #10b981; border-radius: 0.5rem; border: none; cursor: pointer; transition: background-color 0.2s;">
           Override
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Carpeater Info Modal -->
+  <div id="carpeaterModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div class="bg-slate-800 rounded-lg shadow-xl max-w-md w-full border border-slate-700">
+      <div class="p-6">
+        <div class="flex justify-between items-start mb-4">
+          <h3 class="text-lg font-semibold text-slate-200">What is a Carpeater?</h3>
+          <button data-modal-close class="text-slate-400 hover:text-slate-200">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </button>
+        </div>
+        <div class="space-y-3 text-sm text-slate-300">
+          <p>A <strong class="text-emerald-400">carpeater</strong> is a repeater that's extremely close to you (usually in your vehicle or pocket), causing interference with wardriving data collection.</p>
+          
+          <div class="bg-slate-900 rounded p-3 border border-slate-700">
+            <p class="font-semibold text-slate-200 mb-2">This filter has two modes:</p>
+            <ul class="space-y-2 text-xs">
+              <li><span class="text-emerald-400">•</span> <strong>User-specified ID:</strong> Ignores all packets from a specific repeater you enter (silent drops, no error log)</li>
+              <li><span class="text-amber-400">•</span> <strong>RSSI failsafe:</strong> Automatically drops extremely strong signals (≥ -30 dBm) from other repeaters (shows error log)</li>
+            </ul>
+          </div>
+          
+          <p class="text-xs text-slate-400">Enable the checkbox and enter the 2-character hex ID of your carpeater to exclude it from all wardriving data.</p>
+        </div>
+        <button data-modal-close class="mt-4 w-full px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors">
+          Got it
         </button>
       </div>
     </div>
