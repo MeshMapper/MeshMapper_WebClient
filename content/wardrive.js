@@ -416,7 +416,7 @@ const APP_VERSION = "UNKNOWN"; // Placeholder - replaced during build
 const REASON_MESSAGES = {
   // Auth/connect errors
   outofdate: "App out of date, please update",
-  unknown_device: "Unknown device - advertise on mesh first",
+  unknown_device: "Device not registered - advertise on mesh first",
   outside_zone: "Outside zone",
   zone_disabled: "Zone is disabled",
   zone_full: "Zone at capacity",
@@ -2486,12 +2486,12 @@ async function requestAuth(reason) {
     // Handle HTTP-level errors with known error codes in body
     if (!response.ok) {
       const serverMsg = data?.message || 'No message';
-      addErrorLogEntry(`API returned error status ${response.status}: ${serverMsg}`, "AUTH");
-      debugError(`[AUTH] API returned error status ${response.status}: ${serverMsg}`);
       
       // Check if server returned a known error code
       if (data && data.reason && REASON_MESSAGES[data.reason]) {
         debugLog(`[AUTH] Known error code: ${data.reason} - ${data.message || REASON_MESSAGES[data.reason]}`);
+        // Don't add generic error log entry - the specific error will be shown in disconnect UI
+        debugError(`[AUTH] API returned error status ${response.status}: ${serverMsg}`);
         if (reason === "connect") {
           state.disconnectReason = data.reason;
           return false;
@@ -2499,7 +2499,9 @@ async function requestAuth(reason) {
         return true; // Allow disconnect to proceed
       }
       
-      // Unknown error - fail closed for connect, include server message
+      // Unknown error - log to error log and fail closed for connect
+      addErrorLogEntry(`API returned error status ${response.status}: ${serverMsg}`, "AUTH");
+      debugError(`[AUTH] API returned error status ${response.status}: ${serverMsg}`);
       if (reason === "connect") {
         addErrorLogEntry(`Auth failed: ${data?.reason || 'unknown'} - ${serverMsg}`, "AUTH");
         debugError(`[AUTH] Failing closed (denying connection) due to unknown API error: ${data?.reason || 'unknown'}`);
@@ -5791,7 +5793,7 @@ async function autoSetPowerLevel() {
   } else {
     // Unknown device - log to error log and require manual selection
     debugLog(`[DEVICE MODEL] Unknown device: ${state.deviceModel}`);
-    addErrorLogEntry(`Unknown device: ${state.deviceModel}`, "DEVICE MODEL");
+    addErrorLogEntry(`Unrecognized hardware model: ${state.deviceModel}`, "DEVICE MODEL");
     state.autoPowerSet = false;
     
     // Hide auto-configured power display and placeholder, show manual selection
