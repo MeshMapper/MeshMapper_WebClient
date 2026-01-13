@@ -4887,7 +4887,7 @@ function addErrorLogEntry(message, source = null) {
  * This creates a persistent error entry that updates in place rather than creating multiple entries
  */
 function updateCarpeaterErrorLog() {
-  const message = `Possible Carpeater Detected, Dropped ${rxLogState.carpeaterDropCount} packet${rxLogState.carpeaterDropCount !== 1 ? 's' : ''}`;
+  const message = `Possible Carpeater Detected, Dropped ${rxLogState.carpeaterRssiDropCount} packet${rxLogState.carpeaterRssiDropCount !== 1 ? 's' : ''}`;
   const source = 'RX FILTER';
   
   // Find existing carpeater entry by checking if message starts with "Possible Carpeater Detected"
