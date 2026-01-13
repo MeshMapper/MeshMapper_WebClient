@@ -6062,7 +6062,7 @@ async function connect() {
       if (state.disconnectReason && REASON_MESSAGES[state.disconnectReason]) {
         debugLog(`[BLE] Branch: known reason code (${state.disconnectReason})`);
         const errorMsg = REASON_MESSAGES[state.disconnectReason];
-        addErrorLogEntry(`${errorMsg} (reason: ${state.disconnectReason})`, "CONNECTION");
+        addErrorLogEntry(errorMsg, "CONNECTION");
         setDynamicStatus(errorMsg, STATUS_COLORS.error, true);
         debugLog(`[BLE] Setting terminal status for reason: ${state.disconnectReason}`);
       } else if (state.disconnectReason === "capacity_full") {
@@ -6137,7 +6137,7 @@ async function connect() {
         // For unknown disconnect reasons from API, show a generic message
         debugLog(`[BLE] Showing generic error for unknown reason: ${state.disconnectReason}`);
         const errorMsg = `Connection not allowed: ${state.disconnectReason}`;
-        addErrorLogEntry(`Connection not allowed by server (reason: ${state.disconnectReason})`, "CONNECTION");
+        addErrorLogEntry(`Connection not allowed by server: ${state.disconnectReason}`, "CONNECTION");
         setDynamicStatus(errorMsg, STATUS_COLORS.error, true);
       }
       
