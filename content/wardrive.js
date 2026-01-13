@@ -3572,6 +3572,17 @@ async function handleTxLogging(metadata, data) {
     
     debugLog(`[TX LOG] Header validation passed: 0x${metadata.header.toString(16).padStart(2, '0')}`);
     
+    // VALIDATION STEP 1.5: Check RSSI (Carpeater RSSI failsafe - drop extremely strong signals)
+    if (metadata.rssi >= MAX_RX_RSSI_THRESHOLD) {
+      debugLog(`[TX LOG] ❌ DROPPED: RSSI too strong (${metadata.rssi} ≥ ${MAX_RX_RSSI_THRESHOLD}) - possible carpeater (RSSI failsafe)`);
+      rxLogState.dropCount++;
+      rxLogState.carpeaterRssiDropCount++;
+      updateCarpeaterErrorLog();
+      updateRxLogSummary();
+      return false; // Mark as handled (dropped)
+    }
+    debugLog(`[TX LOG] ✓ RSSI OK (${metadata.rssi} < ${MAX_RX_RSSI_THRESHOLD})`);
+    
     // VALIDATION STEP 2: Validate this message is for our channel by comparing channel hash
     // Channel message payload structure: [1 byte channel_hash][2 bytes MAC][encrypted message]
     if (metadata.encryptedPayload.length < 3) {
