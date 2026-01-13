@@ -59,14 +59,7 @@
       "txPower": 20,
       "notes": "EBYTE E22-900M30S, 1W PA: 20dBm input → 30dBm output"
     },
-    {
-      "manufacturer": "Elecrow ThinkNode-M1",
-      "shortName": "Elecrow ThinkNode M1",
-      "power": 0.3,
-      "platform": "nrf52",
-      "txPower": 22,
-      "notes": "Elecrow ThinkNode M1"
-    },
+
     {
       "manufacturer": "Heltec V2",
       "shortName": "Heltec V2",
