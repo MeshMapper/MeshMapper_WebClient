@@ -561,7 +561,23 @@ These messages use a hybrid approach: **first display respects 500ms minimum**, 
 - **When**: Browser tab hidden while RX Auto mode running
 - **Source**: `content/wardrive.js:visibilitychange handler`
 
-#### 10. Error Messages
+#### 10. Pre-Connection Status Messages
+
+##### Select external antenna to connect
+- **Message**: `"Select external antenna to connect"`
+- **Color**: Amber (warning)
+- **When**: On app load or when disconnected, if external antenna option is not selected (but zone check has passed)
+- **Terminal State**: Yes (persists until external antenna is selected)
+- **Notes**: Displayed in Dynamic Status Bar as a warning message to guide user that Connect button is disabled. Once external antenna is selected and zone check passes, status changes to "Idle" (em dash) and Connect button becomes enabled.
+- **Source**: `content/wardrive.js:updateConnectButtonState()`
+
+##### Waiting for location...
+- **Message**: `"Waiting for location..."`
+- **Color**: Blue (info)
+- **When**: External antenna is selected but zone check is still in progress (location display shows "Checking...")
+- **Terminal State**: Yes (persists until zone check completes)
+- **Notes**: Displayed in Dynamic Status Bar to inform user that the app is waiting for GPS location and zone validation before allowing connection. Once zone check passes, status changes to "Idle" and Connect button becomes enabled.
+- **Source**: `content/wardrive.js:updateConnectButtonState()`
 
 ##### Select radio power to connect
 - **Message**: `"Select radio power to connect"`
@@ -570,6 +586,8 @@ These messages use a hybrid approach: **first display respects 500ms minimum**, 
 - **Terminal State**: Yes (persists until radio power is selected)
 - **Notes**: Displayed in Dynamic Status Bar as a warning message to guide user that Connect button is disabled. Once radio power is selected, status changes to "Idle" (em dash) and Connect button becomes enabled.
 - **Source**: `content/wardrive.js:updateConnectButtonState()`
+
+#### 11. Error Messages
 
 ##### Connection failed
 - **Message**: `"Connection failed"` or specific error message
