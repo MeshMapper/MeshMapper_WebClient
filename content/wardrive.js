@@ -6398,7 +6398,7 @@ function updateConnectButtonState() {
     setConnectButtonDisabled(!canConnect);
     
     // Update dynamic status based on what's blocking connection
-    // Priority: zone error > antenna not selected > ready
+    // Priority: zone error > antenna not selected > zone check pending > ready
     if (hasZoneError) {
       // Zone error already shown as persistent message, don't override
       debugLog("[UI] Connect blocked by zone error (persistent message already shown)");
@@ -6406,8 +6406,8 @@ function updateConnectButtonState() {
       debugLog("[UI] External antenna not selected - showing message in status bar");
       setDynamicStatus("Select external antenna to connect", STATUS_COLORS.warning);
     } else if (!inValidZone) {
-      debugLog("[UI] Not in valid zone - waiting for zone check");
-      // Don't show message here, zone check will update status
+      debugLog("[UI] Not in valid zone - showing waiting for location status");
+      setDynamicStatus("Waiting for location...", STATUS_COLORS.info);
     } else {
       debugLog("[UI] External antenna selected and in valid zone - ready to connect");
       // Only set Idle if not showing a disconnect error
