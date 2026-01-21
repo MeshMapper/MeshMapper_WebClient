@@ -545,6 +545,7 @@ const state = {
   lastFix: null, // { lat, lon, accM, tsMs }
   bluefyLockEnabled: false,
   gpsState: "idle", // "idle", "acquiring", "acquired", "error"
+  lastGpsFailureReason: null, // "inaccurate", "stale", "denied", "unavailable", "timeout", "error", or null
   gpsAgeUpdateTimer: null, // Timer for updating GPS age display
   meshMapperTimer: null, // Timer for delayed MeshMapper API call
   cooldownEndTime: null, // Timestamp when cooldown period ends
@@ -1483,6 +1484,10 @@ function startSlotRefreshTimer() {
         updateZoneStatusUI(result);
         debugLog(`[GEO AUTH] [SLOT REFRESH] Zone check failed: ${result.reason || 'unknown'}`);
       }
+    } else {
+      // GPS failed - update dynamic status to show the reason
+      debugLog(`[GEO AUTH] [SLOT REFRESH] GPS failed, reason: ${state.lastGpsFailureReason}`);
+      updateConnectButtonState();
     }
   }, 30000); // 30 seconds
   debugLog("[GEO AUTH] Started 30s slot refresh timer");
@@ -1517,7 +1522,8 @@ async function performAppLaunchZoneCheck() {
     if (!coords) {
       debugWarn("[GEO AUTH] [INIT] Failed to get valid GPS coordinates after retries");
       updateZoneStatusUI(null, "gps_unavailable");
-      // Connect button remains disabled
+      // Connect button remains disabled, but update status to show GPS failure reason
+      updateConnectButtonState();
       return;
     }
     
@@ -2316,6 +2322,7 @@ async function getValidGpsForZoneCheck(maxRetries = 3, retryDelayMs = 5000) {
           await new Promise(resolve => setTimeout(resolve, retryDelayMs));
           continue;
         }
+        state.lastGpsFailureReason = "stale";
         return null;
       }
       
@@ -2327,14 +2334,29 @@ async function getValidGpsForZoneCheck(maxRetries = 3, retryDelayMs = 5000) {
           await new Promise(resolve => setTimeout(resolve, retryDelayMs));
           continue;
         }
+        state.lastGpsFailureReason = "inaccurate";
         return null;
       }
       
       debugLog(`[GPS] [GEO AUTH] Valid GPS acquired: lat=${lat.toFixed(6)}, lon=${lng.toFixed(6)}, accuracy=${accuracy_m.toFixed(1)}m, age=${ageMs}ms`);
+      state.lastGpsFailureReason = null; // Clear any previous failure reason on success
       return { lat, lon: lng, accuracy_m, timestamp };
       
     } catch (error) {
       debugError(`[GPS] [GEO AUTH] GPS acquisition failed (attempt ${attempt}/${maxRetries}): ${error.message}`);
+      
+      // Check for specific GeolocationPositionError codes
+      // 1 = PERMISSION_DENIED, 2 = POSITION_UNAVAILABLE, 3 = TIMEOUT
+      if (error.code === 1) {
+        debugError(`[GPS] [GEO AUTH] GPS permission denied by user`);
+        state.lastGpsFailureReason = "denied";
+        return null; // Don't retry - user explicitly denied permission
+      } else if (error.code === 2) {
+        state.lastGpsFailureReason = "unavailable";
+      } else if (error.code === 3) {
+        state.lastGpsFailureReason = "timeout";
+      }
+      
       if (attempt < maxRetries) {
         debugLog(`[GPS] [GEO AUTH] Retrying in ${retryDelayMs}ms...`);
         await new Promise(resolve => setTimeout(resolve, retryDelayMs));
@@ -2343,6 +2365,10 @@ async function getValidGpsForZoneCheck(maxRetries = 3, retryDelayMs = 5000) {
   }
   
   debugError(`[GPS] [GEO AUTH] GPS acquisition failed after ${maxRetries} attempts`);
+  // If no specific reason was set, mark as general error
+  if (!state.lastGpsFailureReason) {
+    state.lastGpsFailureReason = "error";
+  }
   return null;
 }
 
@@ -6406,8 +6432,25 @@ function updateConnectButtonState() {
       debugLog("[UI] External antenna not selected - showing message in status bar");
       setDynamicStatus("Select external antenna to connect", STATUS_COLORS.warning);
     } else if (!inValidZone) {
-      debugLog("[UI] Not in valid zone - showing waiting for location status");
-      setDynamicStatus("Waiting for location...", STATUS_COLORS.info);
+      // Show more informative message based on GPS failure reason
+      let gpsStatusMsg = "Waiting for location...";
+      let gpsStatusColor = STATUS_COLORS.info;
+      if (state.lastGpsFailureReason === "inaccurate") {
+        gpsStatusMsg = "GPS too inaccurate (max 50m)";
+      } else if (state.lastGpsFailureReason === "stale") {
+        gpsStatusMsg = "GPS too stale, acquiring...";
+      } else if (state.lastGpsFailureReason === "denied") {
+        gpsStatusMsg = "GPS permission denied";
+        gpsStatusColor = STATUS_COLORS.error;
+      } else if (state.lastGpsFailureReason === "unavailable") {
+        gpsStatusMsg = "GPS unavailable";
+      } else if (state.lastGpsFailureReason === "timeout") {
+        gpsStatusMsg = "GPS timeout, retrying...";
+      } else if (state.lastGpsFailureReason === "error") {
+        gpsStatusMsg = "GPS error";
+      }
+      debugLog(`[UI] Not in valid zone - showing status: ${gpsStatusMsg}`);
+      setDynamicStatus(gpsStatusMsg, gpsStatusColor);
     } else {
       debugLog("[UI] External antenna selected and in valid zone - ready to connect");
       // Only set Idle if not showing a disconnect error

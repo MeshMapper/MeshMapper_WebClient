@@ -574,9 +574,33 @@ These messages use a hybrid approach: **first display respects 500ms minimum**, 
 ##### Waiting for location...
 - **Message**: `"Waiting for location..."`
 - **Color**: Blue (info)
-- **When**: External antenna is selected but zone check is still in progress (location display shows "Checking...")
+- **When**: External antenna is selected but zone check is still in progress with no specific GPS failure
 - **Terminal State**: Yes (persists until zone check completes)
 - **Notes**: Displayed in Dynamic Status Bar to inform user that the app is waiting for GPS location and zone validation before allowing connection. Once zone check passes, status changes to "Idle" and Connect button becomes enabled.
+- **Source**: `content/wardrive.js:updateConnectButtonState()`
+
+##### GPS too inaccurate (max 50m)
+- **Message**: `"GPS too inaccurate (max 50m)"`
+- **Color**: Blue (info)
+- **When**: External antenna is selected but GPS accuracy exceeds 50m threshold after all retries
+- **Terminal State**: Yes (persists until GPS improves or zone check passes)
+- **Notes**: More specific message explaining why zone check failed. User should move to area with better GPS reception (outdoors, away from buildings). 30s slot refresh timer will auto-retry zone check.
+- **Source**: `content/wardrive.js:updateConnectButtonState()`
+
+##### GPS too stale, acquiring...
+- **Message**: `"GPS too stale, acquiring..."`
+- **Color**: Blue (info)
+- **When**: External antenna is selected but GPS data is older than 60 seconds after all retries
+- **Terminal State**: Yes (persists until fresh GPS is acquired or zone check passes)
+- **Notes**: More specific message explaining why zone check failed. User should wait for fresh GPS fix. 30s slot refresh timer will auto-retry zone check.
+- **Source**: `content/wardrive.js:updateConnectButtonState()`
+
+##### GPS unavailable
+- **Message**: `"GPS unavailable"`
+- **Color**: Blue (info)
+- **When**: External antenna is selected but GPS acquisition failed due to error (permissions, hardware, etc.)
+- **Terminal State**: Yes (persists until GPS becomes available or zone check passes)
+- **Notes**: Generic GPS error message when acquisition fails completely. User should check GPS permissions and hardware.
 - **Source**: `content/wardrive.js:updateConnectButtonState()`
 
 ##### Select radio power to connect
