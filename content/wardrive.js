@@ -6910,6 +6910,35 @@ export async function onLoad() {
   setupInfoModal('powerInfoLink', 'powerModal', 'Radio Power');
   setupInfoModal('carpeaterInfoLink', 'carpeaterModal', 'Carpeater');
 
+  // Show deprecation notice modal on first page load
+  const noticeModal = document.getElementById('noticeModal');
+  const noticeModalOk = document.getElementById('noticeModalOk');
+  const NOTICE_STORAGE_KEY = 'meshmapper_notice_seen';
+  
+  if (noticeModal && noticeModalOk) {
+    // Check if user has already seen the notice
+    const noticeSeen = localStorage.getItem(NOTICE_STORAGE_KEY);
+    if (!noticeSeen) {
+      debugLog('[UI] Showing deprecation notice modal (first visit)');
+      noticeModal.classList.remove('hidden');
+    }
+    
+    // Handle OK button click
+    noticeModalOk.addEventListener('click', () => {
+      debugLog('[UI] Notice modal OK clicked');
+      localStorage.setItem(NOTICE_STORAGE_KEY, 'true');
+      noticeModal.classList.add('hidden');
+    });
+    
+    // Close modal when clicking backdrop
+    noticeModal.addEventListener('click', (e) => {
+      if (e.target === noticeModal) {
+        debugLog('[UI] Notice modal closed via backdrop click');
+        localStorage.setItem(NOTICE_STORAGE_KEY, 'true');
+        noticeModal.classList.add('hidden');
+      }
+    });
+  }
 
   // Prompt location permission early (optional)
   debugLog("[GPS] Requesting initial location permission");

@@ -441,6 +441,27 @@
     onLoad();
   </script>
 
+  <!-- Deprecation Notice Modal -->
+  <div id="noticeModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div class="bg-slate-800 rounded-lg shadow-xl max-w-md w-full border border-slate-700">
+      <div class="p-6">
+        <div class="flex justify-between items-start mb-4">
+          <h3 class="text-lg font-semibold text-amber-400">Notice</h3>
+        </div>
+        <div class="space-y-3 text-sm text-slate-300">
+          <p>The MeshMapper web app will be deprecated in the future once the Android and iOS apps are released publicly on the app stores.</p>
+          <p>If you want to take part in the beta testing, please join the MeshMapper Discord for more info and live updates:</p>
+          <a href="https://discord.gg/D26P6c6QmG" target="_blank" rel="noopener noreferrer" class="block text-center py-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors">
+            Join Discord Server
+          </a>
+        </div>
+        <button id="noticeModalOk" class="mt-4 w-full px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors">
+          OK
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Override Confirmation Modal -->
   <div id="overrideModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
     <div class="bg-slate-800 rounded-lg shadow-xl max-w-sm w-full border border-slate-600">
