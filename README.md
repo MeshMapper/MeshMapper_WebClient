@@ -19,7 +19,7 @@ This project is deprecated and no longer supported. Development and support have
 
 If you'd like to participate in beta testing or get live updates, join the MeshMapper Discord server.
 
-Discord: https://discord.gg/D26P6c6QmG
+Discord: https://discord.gg/x8aBDZwyz7
 
 ---
 
