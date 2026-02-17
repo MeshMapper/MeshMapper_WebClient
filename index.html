@@ -442,22 +442,22 @@
   </script>
 
   <!-- Deprecation Notice Modal -->
-  <div id="noticeModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-    <div class="bg-slate-800 rounded-lg shadow-xl max-w-md w-full border border-slate-700">
+  <div id="noticeModal" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+    <div class="bg-slate-800 rounded-lg shadow-xl max-w-lg w-full border border-slate-700">
       <div class="p-6">
-        <div class="flex justify-between items-start mb-4">
-          <h3 class="text-lg font-semibold text-amber-400">Notice</h3>
+        <div class="mb-4">
+          <h3 class="text-xl font-semibold text-amber-400">Project Deprecated — Please Use MeshMapper Mobile</h3>
         </div>
-        <div class="space-y-3 text-sm text-slate-300">
-          <p>The MeshMapper web app will be deprecated in the future once the Android and iOS apps are released publicly on the app stores.</p>
-          <p>If you want to take part in the beta testing, please join the MeshMapper Discord for more info and live updates:</p>
-          <a href="https://discord.gg/D26P6c6QmG" target="_blank" rel="noopener noreferrer" class="block text-center py-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors">
-            Join Discord Server
-          </a>
+        <div class="space-y-4 text-sm text-slate-300">
+          <p>This webapp is deprecated and no longer supported. Please get the official MeshMapper apps or try the new modern web app below.</p>
+          <div class="grid grid-cols-1 gap-2">
+            <a href="https://play.google.com/store/apps/details?id=net.meshmapper.app" target="_blank" rel="noopener noreferrer" class="block text-center py-2 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors">Android: Get it on the Play Store</a>
+            <a href="https://github.com/MeshMapper/MeshMapper_Project/releases/" target="_blank" rel="noopener noreferrer" class="block text-center py-2 px-4 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors">Grab the APK from GitHub</a>
+            <a href="https://apps.apple.com/us/app/meshmapper/id6758073991" target="_blank" rel="noopener noreferrer" class="block text-center py-2 px-4 bg-sky-600 hover:bg-sky-700 text-white rounded-lg transition-colors">iOS: Get it on the App Store</a>
+            <a href="https://wd.meshmapper.net/" target="_blank" rel="noopener noreferrer" class="block text-center py-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors">Modern Web App</a>
+          </div>
+          <p class="text-xs text-slate-400">Join the MeshMapper Discord for beta testing and live updates: <a href="https://discord.gg/x8aBDZwyz7" target="_blank" rel="noopener noreferrer" class="text-indigo-300 underline">https://discord.gg/D26P6c6QmG</a></p>
         </div>
-        <button id="noticeModalOk" class="mt-4 w-full px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors">
-          OK
-        </button>
       </div>
     </div>
   </div>

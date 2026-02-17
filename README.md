@@ -8,6 +8,19 @@ A browser-based Progressive Web App for wardriving with MeshCore devices. Connec
 
 **Live at**: [wardrive.ottawamesh.ca](https://wardrive.ottawamesh.ca)
 
+## ⚠️ Deprecation Notice
+
+This project is deprecated and no longer supported. Development and support have moved to the new MeshMapper Mobile App and the modern web app listed below. Please use the official mobile apps or the new web app for continued updates and support.
+
+- Android (Play Store): https://play.google.com/store/apps/details?id=net.meshmapper.app
+- APK releases (GitHub): https://github.com/MeshMapper/MeshMapper_Project/releases/
+- iOS (App Store): https://apps.apple.com/us/app/meshmapper/id6758073991
+- Modern Web App: https://wd.meshmapper.net/
+
+If you'd like to participate in beta testing or get live updates, join the MeshMapper Discord server.
+
+Discord: https://discord.gg/D26P6c6QmG
+
 ---
 
 ## 🚀 Quick Start

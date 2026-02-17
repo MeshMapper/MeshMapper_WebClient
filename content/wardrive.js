@@ -6910,27 +6910,15 @@ export async function onLoad() {
   setupInfoModal('powerInfoLink', 'powerModal', 'Radio Power');
   setupInfoModal('carpeaterInfoLink', 'carpeaterModal', 'Carpeater');
 
-  // Show deprecation notice modal on every page load
+  // Show deprecation notice modal on every page load (non-dismissable)
   const noticeModal = document.getElementById('noticeModal');
-  const noticeModalOk = document.getElementById('noticeModalOk');
-  
-  if (noticeModal && noticeModalOk) {
-    debugLog('[UI] Showing deprecation notice modal');
+  if (noticeModal) {
+    debugLog('[UI] Showing deprecation notice modal (persistent)');
     noticeModal.classList.remove('hidden');
-    
-    // Handle OK button click
-    noticeModalOk.addEventListener('click', () => {
-      debugLog('[UI] Notice modal OK clicked');
-      noticeModal.classList.add('hidden');
-    });
-    
-    // Close modal when clicking backdrop
-    noticeModal.addEventListener('click', (e) => {
-      if (e.target === noticeModal) {
-        debugLog('[UI] Notice modal closed via backdrop click');
-        noticeModal.classList.add('hidden');
-      }
-    });
+
+    // Intentionally do NOT add any handlers that hide the modal.
+    // Links in the modal open external resources; the modal remains visible
+    // to make this notice unavoidable per project deprecation policy.
   }
 
   // Prompt location permission early (optional)
